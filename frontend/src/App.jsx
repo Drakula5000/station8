@@ -3,7 +3,7 @@ import { Excalidraw, hashElementsVersion } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import Spreadsheet from 'react-spreadsheet'
 import {
-  makeSection, makeSticky, viewportCenter, SECTION_COLORS, STICKY_COLORS,
+  makeSection, makeSticky, SECTION_COLORS, STICKY_COLORS,
   migrateLegacySections, isSectionElement, isSectionLabel
 } from './sections'
 import {
@@ -91,6 +91,7 @@ export default function App() {
   const [newFolderName, setNewFolderName] = useState('')
   const [newFolderParentId, setNewFolderParentId] = useState(ROOT_FOLDER)
   const excalidrawAPIRef = useRef(null)
+  const excaliWrapRef = useRef(null)
   const saveTimer = useRef(null)
   const lastSceneVersionRef = useRef(null)
   const prevElementsRef = useRef([])
@@ -98,6 +99,8 @@ export default function App() {
   const [sectionPickerOpen, setSectionPickerOpen] = useState(false)
   const [stickyPickerOpen, setStickyPickerOpen] = useState(false)
   const [lastStickyColor, setLastStickyColor] = useState('yellow')
+  const [stickyPlacement, setStickyPlacement] = useState(null) // null | { color }
+  const [stickyPreviewPos, setStickyPreviewPos] = useState(null) // { x, y } in px relative to excali-wrap
   const [shapePickerOpen, setShapePickerOpen] = useState(false)
   const [lastShape, setLastShape] = useState('ellipse')
   const [lastSectionColor, setLastSectionColor] = useState('blue')
@@ -367,6 +370,8 @@ export default function App() {
         setSectionPickerOpen(false)
         setStickyPickerOpen(false)
         setShapePickerOpen(false)
+        setStickyPlacement(null)
+        setStickyPreviewPos(null)
       }
     }
     const onClick = (e) => {
@@ -381,6 +386,48 @@ export default function App() {
       window.removeEventListener('click', onClick)
     }
   }, [])
+  // ── Sticky placement mode: preview + click-to-drop on canvas ──
+  useEffect(() => {
+    if (!stickyPlacement) {
+      setStickyPreviewPos(null)
+      return
+    }
+    const wrap = excaliWrapRef.current
+    if (!wrap) return
+
+    const onMove = (e) => {
+      const rect = wrap.getBoundingClientRect()
+      setStickyPreviewPos({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+    }
+
+    const onPointerDown = (e) => {
+      if (e.button !== 0) return
+      // Ignore clicks originating from the toolbar or other UI chrome.
+      if (e.target.closest('.fj-toolbar') || e.target.closest('.fj-section-panel')) return
+      const api = excalidrawAPIRef.current
+      if (!api) return
+      const rect = wrap.getBoundingClientRect()
+      const appState = api.getAppState()
+      const zoom = appState.zoom?.value || 1
+      const px = e.clientX - rect.left
+      const py = e.clientY - rect.top
+      const sceneX = px / zoom - appState.scrollX
+      const sceneY = py / zoom - appState.scrollY
+      e.preventDefault()
+      e.stopPropagation()
+      dropStickyAtScene(sceneX, sceneY, stickyPlacement.color)
+      setStickyPlacement(null)
+      setStickyPreviewPos(null)
+    }
+
+    wrap.addEventListener('mousemove', onMove)
+    wrap.addEventListener('pointerdown', onPointerDown, true)
+    return () => {
+      wrap.removeEventListener('mousemove', onMove)
+      wrap.removeEventListener('pointerdown', onPointerDown, true)
+    }
+  }, [stickyPlacement])
+
 
   useEffect(() => {
     if (!query.trim()) { setResults([]); return }
@@ -667,23 +714,39 @@ export default function App() {
     setSectionPickerOpen(false)
   }
 
-  const addSticky = (color = 'yellow') => {
+  const beginStickyPlacement = (color = 'yellow') => {
     const api = excalidrawAPIRef.current
-    if (!api) return
-    const { x, y } = viewportCenter(api)
-    const size = 180
-    const newEls = makeSticky({ x: x - size / 2, y: y - size / 2, size, color })
-    const sticky = newEls.find(element => element.customData?.isSticky)
-    const elements = [...api.getSceneElements(), ...newEls]
-    api.updateScene({
-      elements,
-      appState: sticky ? { selectedElementIds: { [sticky.id]: true } } : undefined,
-      captureUpdate: 'IMMEDIATELY',
-    })
-    api.setActiveTool({ type: 'selection' })
+    if (api) {
+      api.setActiveTool({ type: 'selection' })
+    }
     setActiveTool('selection')
     setLastStickyColor(color)
     setStickyPickerOpen(false)
+    setStickyPlacement({ color })
+  }
+
+  const dropStickyAtScene = (sceneX, sceneY, color) => {
+    const api = excalidrawAPIRef.current
+    if (!api) return
+    const size = 180
+    const newEls = makeSticky({ x: sceneX - size / 2, y: sceneY - size / 2, size, color })
+    const elements = [...api.getSceneElements(), ...newEls]
+    api.updateScene({
+      elements,
+      // Leave selection empty during placement so the tool stays active for rapid multi-drop.
+      appState: { selectedElementIds: {} },
+      captureUpdate: 'IMMEDIATELY',
+    })
+  }
+
+  const addSticky = (color = 'yellow') => {
+    // Toggle: if already arming this color, cancel; otherwise enter placement mode.
+    if (stickyPlacement && stickyPlacement.color === color) {
+      setStickyPlacement(null)
+      setStickyPreviewPos(null)
+      return
+    }
+    beginStickyPlacement(color)
   }
 
   const applySectionColor = (color) => {
@@ -724,7 +787,7 @@ export default function App() {
     if (!api) return
     const selectedStickyIds = getSelectedStickyIds(api)
     if (selectedStickyIds.size === 0) {
-      addSticky(color)
+      beginStickyPlacement(color)
       return
     }
 
@@ -926,7 +989,11 @@ export default function App() {
         </div>
         <div className="work-area">
           {activeId?.type === 'board' && (
-            <div className="excali-wrap" key={activeId.id}>
+            <div
+              className={`excali-wrap${stickyPlacement ? ' sticky-placing' : ''}`}
+              key={activeId.id}
+              ref={excaliWrapRef}
+            >
               <Excalidraw
                 excalidrawAPI={(api) => { excalidrawAPIRef.current = api }}
                 onChange={(elements, appState) => {
@@ -1009,6 +1076,25 @@ export default function App() {
                 theme="light"
                 viewModeEnabled={readOnly}
               />
+              {stickyPlacement && stickyPreviewPos && (() => {
+                const api = excalidrawAPIRef.current
+                const zoom = api?.getAppState?.().zoom?.value || 1
+                const size = 180 * zoom
+                const c = STICKY_COLORS[stickyPlacement.color] || STICKY_COLORS.yellow
+                return (
+                  <div
+                    className="sticky-ghost"
+                    style={{
+                      left: stickyPreviewPos.x - size / 2,
+                      top: stickyPreviewPos.y - size / 2,
+                      width: size,
+                      height: size,
+                      background: c.bg,
+                      borderColor: c.stroke,
+                    }}
+                  />
+                )
+              })()}
               {!readOnly && (
                 <div className="fj-toolbar">
                   <button className={`fj-tool ${activeTool === 'selection' ? 'active' : ''}`}
@@ -1018,9 +1104,9 @@ export default function App() {
                   <div className="fj-sep"/>
                   <div className="sticky-btn-wrap">
                     <div className={`fj-split ${stickyPickerOpen ? 'open' : ''}`}>
-                      <button className="fj-tool fj-tool-main"
+                      <button className={`fj-tool fj-tool-main ${stickyPlacement ? 'active' : ''}`}
                               onClick={() => addSticky(lastStickyColor)}
-                              title="Sticky note"
+                              title={stickyPlacement ? 'Click canvas to place sticky (Esc to cancel)' : 'Sticky note'}
                               type="button">
                         <FjStickyIcon color={lastStickyColor}/>
                       </button>

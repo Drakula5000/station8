@@ -298,6 +298,28 @@ body {
 /* Hide Excalidraw's built-in shapes toolbar — we render our own. */
 .excali-wrap .excalidraw .App-toolbar { display: none !important; }
 
+/* FigJam-style sticky placement mode */
+.excali-wrap.sticky-placing,
+.excali-wrap.sticky-placing .excalidraw,
+.excali-wrap.sticky-placing .excalidraw canvas {
+  cursor: none !important;
+}
+.sticky-ghost {
+  position: absolute;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0.85;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.08),
+    0 8px 18px rgba(15, 23, 42, 0.18),
+    0 18px 36px rgba(15, 23, 42, 0.12);
+  transform: rotate(-1.5deg);
+  transition: transform 60ms ease;
+  z-index: 6;
+}
+
+
 .fj-toolbar {
   position: absolute;
   bottom: 24px;
