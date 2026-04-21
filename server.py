@@ -23,6 +23,7 @@ SHEETS_FILE = os.path.join(DATA_DIR, 'sheets.json')
 OCR_FILE = os.path.join(DATA_DIR, 'ocr.json')
 WORKSPACE_FILE = os.path.join(DATA_DIR, 'workspace.json')
 SHARES_FILE = os.path.join(DATA_DIR, 'shares.json')
+AUTH_FILE = os.path.join(DATA_DIR, 'auth.json')
 
 PRODUCTION = bool(
     os.getenv('RENDER')
@@ -62,6 +63,9 @@ def _allowed_origins():
 
 @app.after_request
 def add_cors_headers(response):
+    if request.path.startswith('/api/auth/'):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
     origin = request.headers.get('Origin')
     if origin and origin in _allowed_origins():
         response.headers['Access-Control-Allow-Origin'] = origin
@@ -98,8 +102,63 @@ def _sheet_file(item_id):
     return os.path.join(DATA_DIR, f'sheet-{item_id}.json')
 
 
-def _studio_password():
-    return os.getenv('STUDIO_PASSWORD') or os.getenv('RESEARCH_STUDIO_PASSWORD') or 'changeme'
+def _env_studio_password():
+    return os.getenv('STUDIO_PASSWORD') or os.getenv('RESEARCH_STUDIO_PASSWORD')
+
+
+def _env_visitor_password():
+    return os.getenv('VISITOR_PASSWORD') or os.getenv('RESEARCH_VISITOR_PASSWORD')
+
+
+def _load_auth_config():
+    auth = _load(AUTH_FILE, {})
+    if not isinstance(auth, dict):
+        return {}
+    return auth
+
+
+def _save_auth_config(auth):
+    _save(AUTH_FILE, auth)
+
+
+def _stored_studio_password_hash():
+    return _load_auth_config().get('studio_password_hash') or ''
+
+
+def _stored_visitor_password_hash():
+    return _load_auth_config().get('visitor_password_hash') or ''
+
+
+def _owner_password_configured():
+    return bool(_env_studio_password() or _stored_studio_password_hash())
+
+
+def _visitor_password_configured():
+    return bool(_env_visitor_password() or _stored_visitor_password_hash())
+
+
+def _requires_access_setup():
+    return not _owner_password_configured() or not _visitor_password_configured()
+
+
+def _verify_studio_password(password):
+    env_password = _env_studio_password()
+    if env_password is not None:
+        return password == env_password
+    stored_hash = _stored_studio_password_hash()
+    if not stored_hash:
+        return False
+    return check_password_hash(stored_hash, password)
+
+
+def _verify_visitor_password(password):
+    env_password = _env_visitor_password()
+    if env_password is not None:
+        return password == env_password
+    stored_hash = _stored_visitor_password_hash()
+    if not stored_hash:
+        return False
+    return check_password_hash(stored_hash, password)
 
 
 def _normalize_folder_id(folder_id, folders):
@@ -305,28 +364,8 @@ def _is_studio_authed():
     return bool(session.get('studio_authed'))
 
 
-def _unlocked_share_tokens():
-    raw = session.get('unlocked_share_tokens') or []
-    return {token for token in raw if isinstance(token, str)}
-
-
-def _unlock_share_token(token):
-    unlocked = _unlocked_share_tokens()
-    unlocked.add(token)
-    session['unlocked_share_tokens'] = sorted(unlocked)
-    session.modified = True
-
-
-def _lock_share_token(token):
-    unlocked = _unlocked_share_tokens()
-    if token in unlocked:
-        unlocked.remove(token)
-        session['unlocked_share_tokens'] = sorted(unlocked)
-        session.modified = True
-
-
-def _share_is_unlocked(token):
-    return token in _unlocked_share_tokens()
+def _is_visitor_authed():
+    return bool(session.get('visitor_authed'))
 
 
 def _studio_auth_required(fn):
@@ -342,8 +381,8 @@ def _active_share_or_401(token):
     share = _find_share_by_token(token)
     if not share or share.get('revoked'):
         return None, (jsonify({'error': 'Share not found'}), 404)
-    if not _share_is_unlocked(token):
-        return None, (jsonify({'error': 'Share password required', 'requires_password': True}), 401)
+    if not (_is_visitor_authed() or _is_studio_authed()):
+        return None, (jsonify({'error': 'Visitor password required', 'requires_password': True}), 401)
     return share, None
 
 
@@ -492,16 +531,57 @@ def _serialize_share_for_list(share):
 
 @app.route('/api/auth/status', methods=['GET'])
 def auth_status():
-    return jsonify({'authenticated': _is_studio_authed()})
+    return jsonify({
+        'authenticated': _is_studio_authed(),
+        'requires_setup': _requires_access_setup(),
+    })
+
+
+@app.route('/api/auth/setup', methods=['POST'])
+def auth_setup():
+    if not _requires_access_setup():
+        return jsonify({'error': 'Access passwords are already configured'}), 409
+    data = request.json or {}
+    owner_password = data.get('owner_password') or ''
+    visitor_password = data.get('visitor_password') or ''
+    auth = _load_auth_config()
+    if not _owner_password_configured():
+        if len(owner_password) < 6:
+            return jsonify({'error': 'Workspace password must be at least 6 characters'}), 400
+        auth['studio_password_hash'] = generate_password_hash(owner_password)
+    if not _visitor_password_configured():
+        if len(visitor_password) < 6:
+            return jsonify({'error': 'Visitor password must be at least 6 characters'}), 400
+        auth['visitor_password_hash'] = generate_password_hash(visitor_password)
+    auth['configured_at'] = datetime.now().isoformat()
+    _save_auth_config(auth)
+    session['studio_authed'] = True
+    session.modified = True
+    return jsonify({'authenticated': True, 'requires_setup': False})
 
 
 @app.route('/api/auth/login', methods=['POST'])
 def auth_login():
     data = request.json or {}
     password = data.get('password') or ''
-    if password != _studio_password():
+    if _requires_access_setup():
+        return jsonify({'error': 'Access passwords have not been set up yet', 'requires_setup': True}), 409
+    if not _verify_studio_password(password):
         return jsonify({'error': 'Wrong password'}), 401
     session['studio_authed'] = True
+    session.modified = True
+    return jsonify({'authenticated': True})
+
+
+@app.route('/api/visitor/login', methods=['POST'])
+def visitor_login():
+    data = request.json or {}
+    password = data.get('password') or ''
+    if _requires_access_setup():
+        return jsonify({'error': 'Access passwords have not been set up yet', 'requires_setup': True}), 409
+    if not _verify_visitor_password(password):
+        return jsonify({'error': 'Wrong password'}), 401
+    session['visitor_authed'] = True
     session.modified = True
     return jsonify({'authenticated': True})
 
@@ -509,7 +589,7 @@ def auth_login():
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
     session.pop('studio_authed', None)
-    session.pop('unlocked_share_tokens', None)
+    session.pop('visitor_authed', None)
     session.modified = True
     return '', 204
 
@@ -606,7 +686,6 @@ def create_share():
     data = request.json or {}
     scope_type = data.get('scope_type') or ''
     scope_id = data.get('scope_id')
-    password = data.get('password') or ''
     label = (data.get('label') or '').strip()
 
     if scope_type not in {'board', 'sheet', 'folder', 'workspace'}:
@@ -615,15 +694,12 @@ def create_share():
         return jsonify({'error': 'Missing scope id'}), 400
     if not _validate_share_scope(scope_type, scope_id):
         return jsonify({'error': 'Scope not found'}), 404
-    if len(password) < 3:
-        return jsonify({'error': 'Share password must be at least 3 characters'}), 400
 
     share = _normalize_share({
         'id': str(uuid.uuid4())[:8],
         'scope_type': scope_type,
         'scope_id': scope_id,
         'token': secrets.token_urlsafe(18),
-        'password_hash': generate_password_hash(password),
         'revoked': False,
         'created_at': datetime.now().isoformat(),
         'label': label,
@@ -644,30 +720,10 @@ def revoke_share(share_id):
             continue
         share['revoked'] = True
         changed = True
-        _lock_share_token(share.get('token'))
         break
     if not changed:
         return jsonify({'error': 'Share not found'}), 404
     _save_shares(shares)
-    return '', 204
-
-
-@app.route('/api/share/<token>/unlock', methods=['POST'])
-def unlock_share(token):
-    share = _find_share_by_token(token)
-    if not share or share.get('revoked'):
-        return jsonify({'error': 'Share not found'}), 404
-    data = request.json or {}
-    password = data.get('password') or ''
-    if not check_password_hash(share.get('password_hash') or '', password):
-        return jsonify({'error': 'Wrong password'}), 401
-    _unlock_share_token(token)
-    return jsonify({'ok': True})
-
-
-@app.route('/api/share/<token>/lock', methods=['POST'])
-def lock_share(token):
-    _lock_share_token(token)
     return '', 204
 
 
@@ -886,10 +942,10 @@ def upload_image():
 def serve_upload(filename):
     if _is_studio_authed():
         return send_from_directory(UPLOADS_DIR, filename)
-    for token in _unlocked_share_tokens():
-        share = _find_share_by_token(token)
-        if share and not share.get('revoked') and _share_allows_upload(share, filename):
-            return send_from_directory(UPLOADS_DIR, filename)
+    if _is_visitor_authed():
+        for share in _load_shares():
+            if not share.get('revoked') and _share_allows_upload(share, filename):
+                return send_from_directory(UPLOADS_DIR, filename)
     return jsonify({'error': 'Not found'}), 404
 
 

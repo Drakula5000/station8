@@ -120,7 +120,7 @@ export default function CodeBlockDialog({
               padding: '10px 12px',
               fontSize: 13,
               fontFamily:
-                'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                "'Space Mono', monospace",
               outline: 'none',
               resize: 'vertical',
               lineHeight: 1.5,

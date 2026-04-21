@@ -132,6 +132,11 @@ body {
   padding: 10px 16px;
   background: #fff; border-bottom: 1px solid #ebebeb;
 }
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .crumb-col { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
 .crumb-path {
   font-size: 11px;
@@ -282,6 +287,20 @@ body {
   padding: 7px 14px; font-size: 12px; cursor: pointer;
 }
 .share-btn:disabled { background: #ccc; cursor: not-allowed; }
+.topbar-logout {
+  background: transparent;
+  color: #666;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.topbar-logout:hover {
+  border-color: #bbb;
+  color: #111;
+}
 
 .save-indicator {
   font-size: 11px; color: #888;
@@ -295,6 +314,13 @@ body {
 .excali-wrap { width: 100%; height: 100%; }
 .excali-wrap > div:first-child { height: 100%; }
 
+/* Station 8: Research Font Overrides */
+.excalidraw {
+  --excalidraw-font-family-hand-drawn: 'Gaegu', cursive;
+  --excalidraw-font-family-normal: 'Inter', sans-serif;
+  --excalidraw-font-family-code: 'Crimson Pro', serif;
+}
+
 /* Hide Excalidraw's built-in shapes toolbar — we render our own. */
 .excali-wrap .excalidraw .App-toolbar { display: none !important; }
 
@@ -306,16 +332,14 @@ body {
 }
 .sticky-ghost {
   position: absolute;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 4px;
+  border: none;
+  border-radius: 0;
   pointer-events: none;
-  opacity: 0.85;
+  opacity: 0.9;
   box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.08),
-    0 8px 18px rgba(15, 23, 42, 0.18),
-    0 18px 36px rgba(15, 23, 42, 0.12);
-  transform: rotate(-1.5deg);
-  transition: transform 60ms ease;
+    0 2px 4px rgba(15, 23, 42, 0.08),
+    0 12px 24px rgba(15, 23, 42, 0.16),
+    0 24px 48px rgba(15, 23, 42, 0.12);
   z-index: 6;
 }
 
@@ -508,6 +532,70 @@ body {
 .modal-field .folder-select {
   width: 100%;
 }
+.gate-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(216,232,255,0.8), transparent 36%),
+    radial-gradient(circle at bottom right, rgba(255,228,214,0.8), transparent 32%),
+    #f7f7f7;
+}
+.gate-card {
+  width: min(420px, 100%);
+  background: rgba(255,255,255,0.95);
+  border: 1px solid rgba(15,23,42,0.08);
+  border-radius: 18px;
+  padding: 28px;
+  box-shadow: 0 18px 50px rgba(15,23,42,0.14);
+}
+.gate-card h1 {
+  font-size: 26px;
+  margin-bottom: 10px;
+}
+.gate-card p {
+  color: #5b6472;
+  font-size: 14px;
+  line-height: 1.55;
+  margin-bottom: 18px;
+}
+.gate-card input {
+  width: 100%;
+  border: 1px solid #d8dde6;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 15px;
+  outline: none;
+  font-family: inherit;
+}
+.gate-card input:focus {
+  border-color: #1a1a1a;
+}
+.gate-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8b93a1;
+  margin-bottom: 10px;
+}
+.gate-submit {
+  width: 100%;
+  margin-top: 12px;
+  padding: 11px 16px;
+  border-radius: 12px;
+}
+.gate-error,
+.share-error {
+  color: #b42318;
+  font-size: 12px;
+  margin-top: 8px;
+}
+.gate-card-static {
+  text-align: center;
+}
 
 .modal-footer {
   display: flex; justify-content: flex-end; gap: 8px;
@@ -550,3 +638,39 @@ body {
 .result-snippet { font-size: 12px; color: #666; line-height: 1.5; }
 .result-meta { font-size: 10px; color: #aaa; margin-top: 3px; }
 .result-empty { padding: 20px; text-align: center; color: #bbb; font-size: 13px; }
+.share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.share-item {
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fafafa;
+}
+.share-item.is-revoked {
+  opacity: 0.68;
+}
+.share-item-meta {
+  margin-bottom: 8px;
+}
+.share-item-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.share-item-subtitle {
+  font-size: 11px;
+  color: #8b8b8b;
+  text-transform: capitalize;
+  margin-top: 2px;
+}
+.share-empty {
+  padding: 12px;
+  border: 1px dashed #ddd;
+  border-radius: 12px;
+  color: #999;
+  font-size: 12px;
+  text-align: center;
+}

@@ -167,7 +167,8 @@ export function makeSticky({ x, y, size = 180, color = 'yellow' }) {
       strokeWidth: 0,
       strokeStyle: 'solid',
       roughness: 0,
-      roundness: { type: ROUNDNESS.ADAPTIVE_RADIUS },
+      // FigJam-style: sharp, crisp corners — no roundness.
+      roundness: null,
       customData: { stickyColor: color, isSticky: true },
     },
   ])

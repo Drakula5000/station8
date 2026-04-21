@@ -128,11 +128,16 @@ export default function App() {
   const readOnly = Boolean(shareTokenFromPath)
   const [studioChecked, setStudioChecked] = useState(readOnly)
   const [studioAuthenticated, setStudioAuthenticated] = useState(false)
+  const [studioRequiresSetup, setStudioRequiresSetup] = useState(false)
+  const [studioStatusError, setStudioStatusError] = useState('')
   const [studioPassword, setStudioPassword] = useState('')
+  const [studioSetupPassword, setStudioSetupPassword] = useState('')
+  const [visitorSetupPassword, setVisitorSetupPassword] = useState('')
   const [studioAuthBusy, setStudioAuthBusy] = useState(false)
   const [studioAuthError, setStudioAuthError] = useState('')
   const [shareChecked, setShareChecked] = useState(!readOnly)
   const [shareLocked, setShareLocked] = useState(readOnly)
+  const [shareUnavailable, setShareUnavailable] = useState(false)
   const [sharePasswordInput, setSharePasswordInput] = useState('')
   const [shareUnlockBusy, setShareUnlockBusy] = useState(false)
   const [shareUnlockError, setShareUnlockError] = useState('')
@@ -142,7 +147,6 @@ export default function App() {
   const [copied, setCopied] = useState('')
   const [shares, setShares] = useState([])
   const [shareScopeValue, setShareScopeValue] = useState(makeShareScopeValue('workspace', WORKSPACE_SCOPE))
-  const [sharePassword, setSharePassword] = useState('')
   const [shareLabel, setShareLabel] = useState('')
   const [shareCreateBusy, setShareCreateBusy] = useState(false)
   const [shareCreateError, setShareCreateError] = useState('')
@@ -150,6 +154,10 @@ export default function App() {
   const [ownerPromptOpen, setOwnerPromptOpen] = useState(false)
   const [ownerPromptDismissed, setOwnerPromptDismissed] = useState(false)
   const [ownerInput, setOwnerInput] = useState('')
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [errorMessage, setErrorMessage] = useState(null)
+  const [errorVisible, setErrorVisible] = useState(false)
 
   const folderById = buildFolderMap(folders)
   const folderOptions = [{ value: ROOT_FOLDER, label: 'Workspace root' }, ...buildFolderOptions(folders)]
@@ -165,17 +173,27 @@ export default function App() {
   useEffect(() => {
     if (readOnly) return
     let cancelled = false
-    apiFetch('/api/auth/status')
+    const statusPath = `/api/auth/status?_=${Date.now()}`
+    apiFetch(statusPath, { cache: 'no-store' })
       .then(async (res) => {
+        if (res.status === 304) return { authenticated: false, requires_setup: true }
         if (!res.ok) throw new Error('auth status failed')
         const data = await res.json()
-        if (!cancelled) {
-          setStudioAuthenticated(Boolean(data.authenticated))
-          setStudioAuthError('')
-        }
+        return data
+      })
+      .then((data) => {
+        if (!data || cancelled) return
+        setStudioAuthenticated(Boolean(data.authenticated))
+        setStudioRequiresSetup(Boolean(data.requires_setup))
+        setStudioAuthError('')
+        setStudioStatusError('')
       })
       .catch(() => {
-        if (!cancelled) setStudioAuthenticated(false)
+        if (!cancelled) {
+          setStudioAuthenticated(false)
+          setStudioRequiresSetup(true)
+          setStudioStatusError('')
+        }
       })
       .finally(() => {
         if (!cancelled) setStudioChecked(true)
@@ -558,11 +576,52 @@ export default function App() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
+        if (res.status === 409 && data.requires_setup) {
+          setStudioRequiresSetup(true)
+        }
         setStudioAuthError(data.error || 'Wrong password')
         return
       }
       setStudioAuthenticated(true)
+      setStudioRequiresSetup(false)
       setStudioPassword('')
+    } catch {
+      setStudioAuthError('Could not reach the backend. Restart the dev server and try again.')
+    } finally {
+      setStudioChecked(true)
+      setStudioAuthBusy(false)
+    }
+  }
+
+  const setupAccessPasswords = async () => {
+    const ownerPassword = studioSetupPassword.trim()
+    const visitorPassword = visitorSetupPassword.trim()
+    if (!ownerPassword || !visitorPassword) {
+      setStudioAuthError('Add both passwords to continue.')
+      return
+    }
+    setStudioAuthBusy(true)
+    setStudioAuthError('')
+    try {
+      const res = await apiFetch('/api/auth/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          owner_password: ownerPassword,
+          visitor_password: visitorPassword,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setStudioAuthError(data.error || 'Could not save passwords')
+        return
+      }
+      setStudioAuthenticated(true)
+      setStudioRequiresSetup(false)
+      setStudioSetupPassword('')
+      setVisitorSetupPassword('')
+    } catch {
+      setStudioAuthError('Could not save passwords because the backend is unavailable.')
     } finally {
       setStudioChecked(true)
       setStudioAuthBusy(false)
@@ -582,11 +641,11 @@ export default function App() {
 
   const unlockShare = async () => {
     const password = sharePasswordInput.trim()
-    if (!password || !shareTokenFromPath) return
+    if (!password) return
     setShareUnlockBusy(true)
     setShareUnlockError('')
     try {
-      const res = await apiFetch(`/api/share/${shareTokenFromPath}/unlock`, {
+      const res = await apiFetch('/api/visitor/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
@@ -599,6 +658,8 @@ export default function App() {
       setSharePasswordInput('')
       setShareLocked(false)
       await refresh()
+    } catch {
+      setShareUnlockError('Could not reach the backend. Try refreshing the page.')
     } finally {
       setShareChecked(true)
       setShareUnlockBusy(false)
@@ -614,7 +675,6 @@ export default function App() {
           ? makeShareScopeValue('folder', activeDoc.folder_id)
           : makeShareScopeValue('workspace', WORKSPACE_SCOPE)
     setShareScopeValue(defaultScope)
-    setSharePassword('')
     setShareLabel('')
     setShareCreateError('')
     setShareActionError('')
@@ -630,11 +690,6 @@ export default function App() {
 
   const createShareLink = async () => {
     const { scopeType, scopeId } = parseShareScopeValue(shareScopeValue)
-    const password = sharePassword.trim()
-    if (!password) {
-      setShareCreateError('Add a password for this link.')
-      return
-    }
     setShareCreateBusy(true)
     setShareCreateError('')
     setShareActionError('')
@@ -645,7 +700,6 @@ export default function App() {
         body: JSON.stringify({
           scope_type: scopeType,
           scope_id: scopeType === 'workspace' ? null : scopeId,
-          password,
           label: shareLabel.trim(),
         }),
       })
@@ -655,7 +709,6 @@ export default function App() {
         return
       }
       setShares((current) => [data, ...current])
-      setSharePassword('')
       setShareLabel('')
       setCopied('')
     } finally {
@@ -1091,11 +1144,112 @@ export default function App() {
     setOwnerPromptOpen(false)
   }
 
+  const showError = (message) => {
+    setErrorMessage(message)
+    setErrorVisible(true)
+    setTimeout(() => {
+      setErrorVisible(false)
+      setTimeout(() => setErrorMessage(null), 300)
+    }, 3000)
+  }
+
+  const handleDelete = async () => {
+    if (!deleteTarget || readOnly) return
+
+    try {
+      const endpoint = deleteTarget.type === 'folder'
+        ? `/api/folders/${deleteTarget.id}`
+        : deleteTarget.type === 'board'
+          ? `/api/boards/${deleteTarget.id}`
+          : `/api/sheets/${deleteTarget.id}`
+
+      const res = await apiFetch(endpoint, { method: 'DELETE' })
+      if (!res.ok) {
+        showError(res.status === 404 ? 'Item not found' : 'Delete failed')
+        return
+      }
+
+      if (deleteTarget.type === 'folder') {
+        await refresh()
+      } else if (deleteTarget.type === 'board') {
+        setBoards((current) => current.filter((board) => board.id !== deleteTarget.id))
+        if (activeId?.id === deleteTarget.id) setActiveId(null)
+      } else {
+        setSheets((current) => current.filter((sheet) => sheet.id !== deleteTarget.id))
+        if (activeId?.id === deleteTarget.id) setActiveId(null)
+      }
+
+      setDeleteConfirmOpen(false)
+      setDeleteTarget(null)
+    } catch {
+      showError('Delete failed')
+    }
+  }
+
+  if (!readOnly && !studioChecked) {
+    return <GateScreen title="Checking access" subtitle="Loading your studio…" />
+  }
+
+  if (!readOnly && !studioAuthenticated) {
+    if (studioRequiresSetup) {
+      return (
+        <SetupAccessGate
+          workspacePassword={studioSetupPassword}
+          onWorkspacePasswordChange={setStudioSetupPassword}
+          visitorPassword={visitorSetupPassword}
+          onVisitorPasswordChange={setVisitorSetupPassword}
+          onSubmit={setupAccessPasswords}
+          error={studioAuthError || studioStatusError}
+          busy={studioAuthBusy}
+        />
+      )
+    }
+    return (
+      <PasswordGate
+        title="Research Studio"
+        subtitle="Enter the workspace password to open the full workspace."
+        password={studioPassword}
+        onPasswordChange={setStudioPassword}
+        onSubmit={loginToStudio}
+        error={studioAuthError}
+        busy={studioAuthBusy}
+        buttonLabel="Enter studio"
+      />
+    )
+  }
+
+  if (readOnly && !shareChecked) {
+    return <GateScreen title="Checking share link" subtitle="Loading this shared view…" />
+  }
+
+  if (readOnly && shareLocked) {
+    return (
+      <PasswordGate
+        title={shareMeta?.title || 'Shared research'}
+        subtitle="This link is protected. Enter the visitor password to view it."
+        password={sharePasswordInput}
+        onPasswordChange={setSharePasswordInput}
+        onSubmit={unlockShare}
+        error={shareUnlockError}
+        busy={shareUnlockBusy}
+        buttonLabel="Open share"
+      />
+    )
+  }
+
+  if (readOnly && shareUnavailable) {
+    return <GateScreen title="Share unavailable" subtitle="This link no longer exists, or it has been revoked." />
+  }
+
+  if (!workspace) {
+    return <GateScreen title="Loading workspace" subtitle="Pulling in boards, folders, and sheets…" />
+  }
+
   return (
     <div className="app">
       {readOnly && (
         <div className="readonly-banner">
-          <strong>Read-only view.</strong> {workspace?.name || 'Research'} shared by {workspace?.owner || 'the owner'}. You can browse and search; you cannot edit.
+          <strong>Read-only view.</strong> {shareMeta?.title || workspace?.name || 'Research'} shared by {workspace?.owner || 'the owner'}. You can browse and search; you cannot edit.
         </div>
       )}
       <aside className="sidebar">
@@ -1218,7 +1372,7 @@ export default function App() {
             )}
           </div>
           {!readOnly && (
-            <>
+            <div className="topbar-actions">
               {activeDoc && (
                 <button
                   className="delete-doc-btn"
@@ -1244,8 +1398,9 @@ export default function App() {
                   {saveState === 'error' && '! save failed'}
                 </span>
               )}
-              <button className="share-btn" onClick={() => setShareOpen(true)} type="button">Share</button>
-            </>
+              <button className="share-btn" onClick={openShareModal} type="button">Share</button>
+              <button className="topbar-logout" onClick={logoutStudio} type="button">Logout</button>
+            </div>
           )}
         </div>
         <div className="work-area">
@@ -1567,32 +1722,63 @@ export default function App() {
       )}
 
       {shareOpen && workspace && (
-        <Modal onClose={() => setShareOpen(false)} title="Share your research">
+        <Modal onClose={() => setShareOpen(false)} title="Create a share link">
           <div className="share-body">
             <div className="share-desc">
-              Anyone with this link can view and search everything in your workspace. They cannot edit.
+              Create a password-protected read-only link for a board, folder, sheet, or the whole workspace.
             </div>
-            <div className="share-url-row">
+            <label className="modal-field">
+              <span className="modal-field-label">What are you sharing?</span>
+              <select className="folder-select" value={shareScopeValue} onChange={(e) => setShareScopeValue(e.target.value)}>
+                {shareScopeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="modal-field">
+              <span className="modal-field-label">Optional label</span>
               <input
-                readOnly
-                className="share-url"
-                value={`${window.location.origin}${window.location.pathname}?share=${workspace.public_slug}`}
-                onFocus={(e) => e.target.select()}
+                value={shareLabel}
+                onChange={(e) => setShareLabel(e.target.value)}
+                placeholder="Project alpha folder"
               />
-              <button
-                className="btn-primary"
-                onClick={() => {
-                  const url = `${window.location.origin}${window.location.pathname}?share=${workspace.public_slug}`
-                  navigator.clipboard.writeText(url).then(() => {
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 1500)
-                  })
-                }}
-                type="button"
-              >
-                {copied ? 'Copied' : 'Copy'}
+            </label>
+            <div className="share-desc share-note">
+              All share links use the same visitor password.
+            </div>
+            {shareCreateError && <div className="share-error">{shareCreateError}</div>}
+            <div className="modal-footer">
+              <button className="btn-ghost" onClick={() => setShareOpen(false)} type="button">Close</button>
+              <button className="btn-primary" onClick={createShareLink} disabled={shareCreateBusy} type="button">
+                {shareCreateBusy ? 'Creating…' : 'Create link'}
               </button>
             </div>
+            <div className="share-list">
+              {shares.length === 0 && <div className="share-empty">No share links yet.</div>}
+              {shares.map((share) => (
+                <div key={share.id} className={`share-item ${share.revoked ? 'is-revoked' : ''}`}>
+                  <div className="share-item-meta">
+                    <div className="share-item-title">{share.label || share.title}</div>
+                    <div className="share-item-subtitle">{share.scope_type} share</div>
+                  </div>
+                  <div className="share-url-row">
+                    <input
+                      readOnly
+                      className="share-url"
+                      value={new URL(share.url || `/share/${share.token}`, window.location.origin).toString()}
+                      onFocus={(e) => e.target.select()}
+                    />
+                    <button className="btn-primary" disabled={share.revoked} onClick={() => copyShareLink(share)} type="button">
+                      {copied === share.id ? 'Copied' : 'Copy'}
+                    </button>
+                    <button className="btn-ghost" disabled={share.revoked} onClick={() => revokeShareLink(share.id)} type="button">
+                      {share.revoked ? 'Revoked' : 'Revoke'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {shareActionError && <div className="share-error">{shareActionError}</div>}
             <div className="share-owner-row">
               <label>Your display name:</label>
               <input
@@ -1685,6 +1871,93 @@ export default function App() {
           setTimeout(() => setErrorMessage(null), 300)
         }}
       />
+    </div>
+  )
+}
+
+function GateScreen({ title, subtitle }) {
+  return (
+    <div className="gate-shell">
+      <div className="gate-card gate-card-static">
+        <div className="gate-eyebrow">YOUR_DOMAIN</div>
+        <h1>{title}</h1>
+        <p>{subtitle}</p>
+      </div>
+    </div>
+  )
+}
+
+function PasswordGate({ title, subtitle, password, onPasswordChange, onSubmit, error, busy, buttonLabel }) {
+  return (
+    <div className="gate-shell">
+      <div className="gate-card">
+        <div className="gate-eyebrow">YOUR_DOMAIN</div>
+        <h1>{title}</h1>
+        <p>{subtitle}</p>
+        <input
+          autoFocus
+          type="password"
+          value={password}
+          onChange={(e) => onPasswordChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !busy) onSubmit()
+          }}
+          placeholder="Password"
+        />
+        {error && <div className="gate-error">{error}</div>}
+        <button className="btn-primary gate-submit" onClick={onSubmit} disabled={busy || !password.trim()} type="button">
+          {busy ? 'Checking…' : buttonLabel}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function SetupAccessGate({
+  workspacePassword,
+  onWorkspacePasswordChange,
+  visitorPassword,
+  onVisitorPasswordChange,
+  onSubmit,
+  error,
+  busy,
+}) {
+  return (
+    <div className="gate-shell">
+      <div className="gate-card">
+        <div className="gate-eyebrow">YOUR_DOMAIN</div>
+        <h1>Set up access</h1>
+        <p>Create one password for the full workspace and one password for anyone opening shared links.</p>
+        <input
+          autoFocus
+          type="password"
+          value={workspacePassword}
+          onChange={(e) => onWorkspacePasswordChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !busy) onSubmit()
+          }}
+          placeholder="Owner password"
+        />
+        <input
+          type="password"
+          value={visitorPassword}
+          onChange={(e) => onVisitorPasswordChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !busy) onSubmit()
+          }}
+          placeholder="Visitor password"
+          style={{ marginTop: 10 }}
+        />
+        {error && <div className="gate-error">{error}</div>}
+        <button
+          className="btn-primary gate-submit"
+          onClick={onSubmit}
+          disabled={busy || !workspacePassword.trim() || !visitorPassword.trim()}
+          type="button"
+        >
+          {busy ? 'Saving…' : 'Save passwords'}
+        </button>
+      </div>
     </div>
   )
 }
