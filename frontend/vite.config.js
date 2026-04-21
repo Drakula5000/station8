@@ -5,12 +5,18 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:5001',
-      '/uploads': 'http://localhost:5001',
+      '/api': {
+        target: process.env.VITE_API_URL || 'http://localhost:5001',
+        changeOrigin: true,
+      },
+      '/uploads': {
+        target: process.env.VITE_API_URL || 'http://localhost:5001',
+        changeOrigin: true,
+      },
     },
   },
   build: {
-    outDir: '../static_build',
+    outDir: 'dist',
     emptyOutDir: true,
   },
 })
