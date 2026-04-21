@@ -1,0 +1,39 @@
+.confirm-dialog {
+  max-width: 400px;
+}
+
+.confirm-item-name {
+  font-weight: 600;
+  color: #333;
+  margin: 8px 0;
+  font-size: 15px;
+}
+
+.confirm-consequences {
+  font-size: 13px;
+  color: #666;
+  margin: 12px 0;
+  line-height: 1.5;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.btn-danger {
+  background: #e74c3c;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.btn-danger:hover {
+  background: #c0392b;
+}

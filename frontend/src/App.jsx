@@ -8,15 +8,18 @@ import {
 } from './sections'
 import {
   BoardIcon, SheetIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon,
-  EmptyBoardIcon,
+  EmptyBoardIcon, TrashIcon,
   FjCursorIcon, FjHandIcon, FjStickyIcon, FjTextIcon, FjArrowIcon, FjPenIcon, FjSectionIcon,
   FjEllipseIcon, FjDiamondIcon, FjRectIcon, FjLineIcon, FjCleanStyleIcon, FjSketchStyleIcon,
   FjChevronDownIcon,
 } from './icons'
+import ConfirmationDialog from './components/ConfirmationDialog'
+import ErrorToast from './components/ErrorToast'
 import './App.css'
 
 const API = import.meta.env.VITE_API_URL || ''
 const ROOT_FOLDER = '__root__'
+const WORKSPACE_SCOPE = '__workspace__'
 const DEFAULT_SHEET = [
   [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
   [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
@@ -29,6 +32,16 @@ const compareByName = (a, b) => (a.name || '').localeCompare(b.name || '', undef
 const normalizeFolderValue = (value) => value === ROOT_FOLDER ? null : (value || null)
 
 const folderKey = (folderId) => folderId || ROOT_FOLDER
+const parseShareTokenFromPath = () => {
+  const match = window.location.pathname.match(/^\/share\/([^/]+)/)
+  return match ? decodeURIComponent(match[1]) : null
+}
+const apiFetch = (path, options = {}) => fetch(`${API}${path}`, { ...options, credentials: 'include' })
+const makeShareScopeValue = (type, id = '') => `${type}:${id || ''}`
+const parseShareScopeValue = (value) => {
+  const [scopeType, ...rest] = String(value || '').split(':')
+  return { scopeType, scopeId: rest.join(':') || null }
+}
 
 function buildFolderMap(folders) {
   const map = {}
@@ -91,7 +104,6 @@ export default function App() {
   const [newFolderName, setNewFolderName] = useState('')
   const [newFolderParentId, setNewFolderParentId] = useState(ROOT_FOLDER)
   const excalidrawAPIRef = useRef(null)
-  const excaliWrapRef = useRef(null)
   const saveTimer = useRef(null)
   const lastSceneVersionRef = useRef(null)
   const prevElementsRef = useRef([])
@@ -99,8 +111,6 @@ export default function App() {
   const [sectionPickerOpen, setSectionPickerOpen] = useState(false)
   const [stickyPickerOpen, setStickyPickerOpen] = useState(false)
   const [lastStickyColor, setLastStickyColor] = useState('yellow')
-  const [stickyPlacement, setStickyPlacement] = useState(null) // null | { color }
-  const [stickyPreviewPos, setStickyPreviewPos] = useState(null) // { x, y } in px relative to excali-wrap
   const [shapePickerOpen, setShapePickerOpen] = useState(false)
   const [lastShape, setLastShape] = useState('ellipse')
   const [lastSectionColor, setLastSectionColor] = useState('blue')
@@ -110,12 +120,30 @@ export default function App() {
   const [tagFilter, setTagFilter] = useState(null)
   const [tagInput, setTagInput] = useState('')
   const [tagInputOpen, setTagInputOpen] = useState(false)
-  // Share state
-  const shareSlugFromUrl = new URLSearchParams(window.location.search).get('share')
-  const readOnly = Boolean(shareSlugFromUrl)
+  // Auth + share route state
+  const shareTokenFromPath = parseShareTokenFromPath()
+  const readOnly = Boolean(shareTokenFromPath)
+  const [studioChecked, setStudioChecked] = useState(readOnly)
+  const [studioAuthenticated, setStudioAuthenticated] = useState(false)
+  const [studioPassword, setStudioPassword] = useState('')
+  const [studioAuthBusy, setStudioAuthBusy] = useState(false)
+  const [studioAuthError, setStudioAuthError] = useState('')
+  const [shareChecked, setShareChecked] = useState(!readOnly)
+  const [shareLocked, setShareLocked] = useState(readOnly)
+  const [sharePasswordInput, setSharePasswordInput] = useState('')
+  const [shareUnlockBusy, setShareUnlockBusy] = useState(false)
+  const [shareUnlockError, setShareUnlockError] = useState('')
   const [workspace, setWorkspace] = useState(null)
+  const [shareMeta, setShareMeta] = useState(null)
   const [shareOpen, setShareOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState('')
+  const [shares, setShares] = useState([])
+  const [shareScopeValue, setShareScopeValue] = useState(makeShareScopeValue('workspace', WORKSPACE_SCOPE))
+  const [sharePassword, setSharePassword] = useState('')
+  const [shareLabel, setShareLabel] = useState('')
+  const [shareCreateBusy, setShareCreateBusy] = useState(false)
+  const [shareCreateError, setShareCreateError] = useState('')
+  const [shareActionError, setShareActionError] = useState('')
   const [ownerPromptOpen, setOwnerPromptOpen] = useState(false)
   const [ownerPromptDismissed, setOwnerPromptDismissed] = useState(false)
   const [ownerInput, setOwnerInput] = useState('')
@@ -130,6 +158,29 @@ export default function App() {
   useEffect(() => {
     activeIdRef.current = activeId
   }, [activeId])
+
+  useEffect(() => {
+    if (readOnly) return
+    let cancelled = false
+    apiFetch('/api/auth/status')
+      .then(async (res) => {
+        if (!res.ok) throw new Error('auth status failed')
+        const data = await res.json()
+        if (!cancelled) {
+          setStudioAuthenticated(Boolean(data.authenticated))
+          setStudioAuthError('')
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStudioAuthenticated(false)
+      })
+      .finally(() => {
+        if (!cancelled) setStudioChecked(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [readOnly])
 
   const expandFolderPath = useCallback((folderId, folderList = folders) => {
     if (!folderId) return
@@ -153,9 +204,21 @@ export default function App() {
   const refresh = useCallback(async () => {
     const currentActiveId = activeIdRef.current
     if (readOnly) {
-      const res = await fetch(`${API}/api/share/${shareSlugFromUrl}`)
-      if (!res.ok) return
+      const res = await apiFetch(`/api/share/${shareTokenFromPath}`)
+      setShareChecked(true)
+      setShareUnavailable(false)
+      if (res.status === 401) {
+        setShareLocked(true)
+        setShareMeta(null)
+        return
+      }
+      if (!res.ok) {
+        setShareUnavailable(true)
+        return
+      }
       const data = await res.json()
+      setShareLocked(false)
+      setShareMeta(data.share || null)
       setBoards(data.boards || [])
       setSheets(data.sheets || [])
       const nextFolders = data.workspace?.folders || []
@@ -177,13 +240,26 @@ export default function App() {
       }
       return
     }
-    const [bs, ss, ws] = await Promise.all([
-      fetch(`${API}/api/boards`).then(r => r.json()).catch(() => []),
-      fetch(`${API}/api/sheets`).then(r => r.json()).catch(() => []),
-      fetch(`${API}/api/workspace`).then(r => r.json()).catch(() => null),
+    if (!studioAuthenticated) return
+    const [boardsRes, sheetsRes, workspaceRes, sharesRes] = await Promise.all([
+      apiFetch('/api/boards').catch(() => null),
+      apiFetch('/api/sheets').catch(() => null),
+      apiFetch('/api/workspace').catch(() => null),
+      apiFetch('/api/shares').catch(() => null),
+    ])
+    if ([boardsRes, sheetsRes, workspaceRes].some((res) => !res || res.status === 401)) {
+      setStudioAuthenticated(false)
+      return
+    }
+    const [bs, ss, ws, shareList] = await Promise.all([
+      boardsRes?.ok ? boardsRes.json() : [],
+      sheetsRes?.ok ? sheetsRes.json() : [],
+      workspaceRes?.ok ? workspaceRes.json() : null,
+      sharesRes?.ok ? sharesRes.json() : [],
     ])
     setBoards(bs)
     setSheets(ss)
+    setShares(Array.isArray(shareList) ? shareList : [])
     const nextFolders = ws?.folders || []
     setFolders(nextFolders)
     setExpandedFolders((current) => {
@@ -202,7 +278,7 @@ export default function App() {
       setActiveId((current) => current || { type: 'sheet', id: ss[0].id })
       if (!currentActiveId && ss[0].folder_id) expandFolderPath(ss[0].folder_id, nextFolders)
     }
-  }, [expandFolderPath, readOnly, shareSlugFromUrl, ownerPromptDismissed])
+  }, [expandFolderPath, readOnly, shareTokenFromPath, ownerPromptDismissed, studioAuthenticated])
 
   useEffect(() => {
     refresh()
@@ -211,9 +287,9 @@ export default function App() {
   // ── board load/save ──
   const loadBoard = async (id) => {
     const url = readOnly
-      ? `${API}/api/share/${shareSlugFromUrl}/board/${id}`
-      : `${API}/api/boards/${id}`
-    const res = await fetch(url)
+      ? `/api/share/${shareTokenFromPath}/board/${id}`
+      : `/api/boards/${id}`
+    const res = await apiFetch(url)
     if (!res.ok) return
     const data = await res.json()
     const snapshot = data.snapshot || { elements: [], appState: {}, files: {} }
@@ -257,7 +333,7 @@ export default function App() {
       const form = new FormData()
       form.append('file', new File([blob], `img.${ext}`, { type: mime }))
       try {
-        const res = await fetch(`${API}/api/upload`, { method: 'POST', body: form })
+        const res = await apiFetch('/api/upload', { method: 'POST', body: form })
         if (!res.ok) return null
         const data = await res.json()
         return { id, url: data.url, mime }
@@ -295,7 +371,7 @@ export default function App() {
         },
         files: uploadedFiles,
       }
-      const res = await fetch(`${API}/api/boards/${activeId.id}`, {
+      const res = await apiFetch(`/api/boards/${activeId.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ snapshot }),
@@ -318,9 +394,9 @@ export default function App() {
   // ── sheet load/save ──
   const loadSheet = async (id) => {
     const url = readOnly
-      ? `${API}/api/share/${shareSlugFromUrl}/sheet/${id}`
-      : `${API}/api/sheets/${id}`
-    const res = await fetch(url)
+      ? `/api/share/${shareTokenFromPath}/sheet/${id}`
+      : `/api/sheets/${id}`
+    const res = await apiFetch(url)
     if (!res.ok) return
     const data = await res.json()
     setSheetData(data.data && data.data.length ? data.data : DEFAULT_SHEET)
@@ -329,7 +405,7 @@ export default function App() {
   const saveSheet = useCallback(async (data) => {
     if (readOnly) return
     if (!activeId || activeId.type !== 'sheet') return
-    await fetch(`${API}/api/sheets/${activeId.id}`, {
+    await apiFetch(`/api/sheets/${activeId.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ data }),
@@ -370,8 +446,6 @@ export default function App() {
         setSectionPickerOpen(false)
         setStickyPickerOpen(false)
         setShapePickerOpen(false)
-        setStickyPlacement(null)
-        setStickyPreviewPos(null)
       }
     }
     const onClick = (e) => {
@@ -386,56 +460,14 @@ export default function App() {
       window.removeEventListener('click', onClick)
     }
   }, [])
-  // ── Sticky placement mode: preview + click-to-drop on canvas ──
-  useEffect(() => {
-    if (!stickyPlacement) {
-      setStickyPreviewPos(null)
-      return
-    }
-    const wrap = excaliWrapRef.current
-    if (!wrap) return
-
-    const onMove = (e) => {
-      const rect = wrap.getBoundingClientRect()
-      setStickyPreviewPos({ x: e.clientX - rect.left, y: e.clientY - rect.top })
-    }
-
-    const onPointerDown = (e) => {
-      if (e.button !== 0) return
-      // Ignore clicks originating from the toolbar or other UI chrome.
-      if (e.target.closest('.fj-toolbar') || e.target.closest('.fj-section-panel')) return
-      const api = excalidrawAPIRef.current
-      if (!api) return
-      const rect = wrap.getBoundingClientRect()
-      const appState = api.getAppState()
-      const zoom = appState.zoom?.value || 1
-      const px = e.clientX - rect.left
-      const py = e.clientY - rect.top
-      const sceneX = px / zoom - appState.scrollX
-      const sceneY = py / zoom - appState.scrollY
-      e.preventDefault()
-      e.stopPropagation()
-      dropStickyAtScene(sceneX, sceneY, stickyPlacement.color)
-      setStickyPlacement(null)
-      setStickyPreviewPos(null)
-    }
-
-    wrap.addEventListener('mousemove', onMove)
-    wrap.addEventListener('pointerdown', onPointerDown, true)
-    return () => {
-      wrap.removeEventListener('mousemove', onMove)
-      wrap.removeEventListener('pointerdown', onPointerDown, true)
-    }
-  }, [stickyPlacement])
-
 
   useEffect(() => {
     if (!query.trim()) { setResults([]); return }
     const t = setTimeout(async () => {
       const url = readOnly
-        ? `${API}/api/share/${shareSlugFromUrl}/search`
-        : `${API}/api/search`
-      const res = await fetch(url, {
+        ? `/api/share/${shareTokenFromPath}/search`
+        : '/api/search'
+      const res = await apiFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query }),
@@ -466,10 +498,140 @@ export default function App() {
     setNewFolderOpen(true)
   }
 
+  const loginToStudio = async () => {
+    const password = studioPassword.trim()
+    if (!password) return
+    setStudioAuthBusy(true)
+    setStudioAuthError('')
+    try {
+      const res = await apiFetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setStudioAuthError(data.error || 'Wrong password')
+        return
+      }
+      setStudioAuthenticated(true)
+      setStudioPassword('')
+    } finally {
+      setStudioChecked(true)
+      setStudioAuthBusy(false)
+    }
+  }
+
+  const logoutStudio = async () => {
+    await apiFetch('/api/auth/logout', { method: 'POST' })
+    setStudioAuthenticated(false)
+    setBoards([])
+    setSheets([])
+    setFolders([])
+    setWorkspace(null)
+    setShares([])
+    setActiveId(null)
+  }
+
+  const unlockShare = async () => {
+    const password = sharePasswordInput.trim()
+    if (!password || !shareTokenFromPath) return
+    setShareUnlockBusy(true)
+    setShareUnlockError('')
+    try {
+      const res = await apiFetch(`/api/share/${shareTokenFromPath}/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setShareUnlockError(data.error || 'Wrong password')
+        return
+      }
+      setSharePasswordInput('')
+      setShareLocked(false)
+      await refresh()
+    } finally {
+      setShareChecked(true)
+      setShareUnlockBusy(false)
+    }
+  }
+
+  const openShareModal = () => {
+    const defaultScope = activeBoard
+      ? makeShareScopeValue('board', activeBoard.id)
+      : activeSheet
+        ? makeShareScopeValue('sheet', activeSheet.id)
+        : activeDoc?.folder_id
+          ? makeShareScopeValue('folder', activeDoc.folder_id)
+          : makeShareScopeValue('workspace', WORKSPACE_SCOPE)
+    setShareScopeValue(defaultScope)
+    setSharePassword('')
+    setShareLabel('')
+    setShareCreateError('')
+    setShareActionError('')
+    setShareOpen(true)
+  }
+
+  const copyShareLink = async (share) => {
+    const url = new URL(share.url || `/share/${share.token}`, window.location.origin).toString()
+    await navigator.clipboard.writeText(url)
+    setCopied(share.id)
+    setTimeout(() => setCopied((current) => current === share.id ? '' : current), 1500)
+  }
+
+  const createShareLink = async () => {
+    const { scopeType, scopeId } = parseShareScopeValue(shareScopeValue)
+    const password = sharePassword.trim()
+    if (!password) {
+      setShareCreateError('Add a password for this link.')
+      return
+    }
+    setShareCreateBusy(true)
+    setShareCreateError('')
+    setShareActionError('')
+    try {
+      const res = await apiFetch('/api/shares', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope_type: scopeType,
+          scope_id: scopeType === 'workspace' ? null : scopeId,
+          password,
+          label: shareLabel.trim(),
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setShareCreateError(data.error || 'Could not create share link')
+        return
+      }
+      setShares((current) => [data, ...current])
+      setSharePassword('')
+      setShareLabel('')
+      setCopied('')
+    } finally {
+      setShareCreateBusy(false)
+    }
+  }
+
+  const revokeShareLink = async (shareId) => {
+    setShareActionError('')
+    const res = await apiFetch(`/api/shares/${shareId}`, { method: 'DELETE' })
+    if (!res.ok) {
+      setShareActionError('Could not revoke that share link.')
+      return
+    }
+    setShares((current) => current.map((share) => (
+      share.id === shareId ? { ...share, revoked: true } : share
+    )))
+  }
+
   const createBoard = async () => {
     const name = newBoardName.trim()
     if (!name) return
-    const res = await fetch(`${API}/api/boards`, {
+    const res = await apiFetch('/api/boards', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, folder_id: normalizeFolderValue(newBoardFolderId) }),
@@ -484,7 +646,7 @@ export default function App() {
   const createSheet = async () => {
     const name = newSheetName.trim()
     if (!name) return
-    const res = await fetch(`${API}/api/sheets`, {
+    const res = await apiFetch('/api/sheets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, folder_id: normalizeFolderValue(newSheetFolderId) }),
@@ -500,7 +662,7 @@ export default function App() {
     const name = newFolderName.trim()
     if (!name) return
     const parentId = normalizeFolderValue(newFolderParentId)
-    const res = await fetch(`${API}/api/folders`, {
+    const res = await apiFetch('/api/folders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, parent_id: parentId }),
@@ -520,7 +682,7 @@ export default function App() {
   const moveActiveDoc = async (nextFolderValue) => {
     if (!activeId || readOnly) return
     const endpoint = activeId.type === 'board' ? 'boards' : 'sheets'
-    const res = await fetch(`${API}/api/${endpoint}/${activeId.id}`, {
+    const res = await apiFetch(`/api/${endpoint}/${activeId.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ folder_id: normalizeFolderValue(nextFolderValue) }),
@@ -551,7 +713,7 @@ export default function App() {
   const saveTags = async (tagsStr) => {
     if (!activeId) return
     const endpoint = activeId.type === 'board' ? 'boards' : 'sheets'
-    const res = await fetch(`${API}/api/${endpoint}/${activeId.id}`, {
+    const res = await apiFetch(`/api/${endpoint}/${activeId.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tags: tagsStr }),
@@ -648,6 +810,20 @@ export default function App() {
           <span className={`tree-chevron ${expanded ? 'open' : ''}`}><ChevronRightIcon/></span>
           {expanded ? <FolderOpenIcon/> : <FolderIcon/>}
           <span className="sb-item-label">{folder.name}</span>
+          {!readOnly && (
+            <button
+              className="folder-delete-btn"
+              onClick={(e) => {
+                e.stopPropagation()
+                setDeleteTarget({ type: 'folder', id: folder.id, name: folder.name })
+                setDeleteConfirmOpen(true)
+              }}
+              title="Delete folder"
+              type="button"
+            >
+              <TrashIcon />
+            </button>
+          )}
         </button>
         {expanded && (
           <>
@@ -667,6 +843,27 @@ export default function App() {
   const rootFolders = foldersByParent[ROOT_FOLDER] || []
   const rootDocs = docsByFolder[ROOT_FOLDER] || []
   const hasWorkspaceItems = rootFolders.some(folder => !tagFilter || folderHasVisibleContent(folder.id)) || rootDocs.length > 0
+  const shareScopeOptions = [
+    { value: makeShareScopeValue('workspace', WORKSPACE_SCOPE), label: 'Whole workspace' },
+    ...[...folders]
+      .sort(compareByName)
+      .map((folder) => ({
+        value: makeShareScopeValue('folder', folder.id),
+        label: `Folder · ${buildFolderPath(folder.id, folderById) || folder.name}`,
+      })),
+    ...[...boards]
+      .sort(compareByName)
+      .map((board) => ({
+        value: makeShareScopeValue('board', board.id),
+        label: `Board · ${board.name}`,
+      })),
+    ...[...sheets]
+      .sort(compareByName)
+      .map((sheet) => ({
+        value: makeShareScopeValue('sheet', sheet.id),
+        label: `Sheet · ${sheet.name}`,
+      })),
+  ]
 
   const getSelectedIds = (api) => {
     const appState = api.getAppState()
@@ -714,39 +911,23 @@ export default function App() {
     setSectionPickerOpen(false)
   }
 
-  const beginStickyPlacement = (color = 'yellow') => {
-    const api = excalidrawAPIRef.current
-    if (api) {
-      api.setActiveTool({ type: 'selection' })
-    }
-    setActiveTool('selection')
-    setLastStickyColor(color)
-    setStickyPickerOpen(false)
-    setStickyPlacement({ color })
-  }
-
-  const dropStickyAtScene = (sceneX, sceneY, color) => {
+  const addSticky = (color = 'yellow') => {
     const api = excalidrawAPIRef.current
     if (!api) return
+    const { x, y } = viewportCenter(api)
     const size = 180
-    const newEls = makeSticky({ x: sceneX - size / 2, y: sceneY - size / 2, size, color })
+    const newEls = makeSticky({ x: x - size / 2, y: y - size / 2, size, color })
+    const sticky = newEls.find(element => element.customData?.isSticky)
     const elements = [...api.getSceneElements(), ...newEls]
     api.updateScene({
       elements,
-      // Leave selection empty during placement so the tool stays active for rapid multi-drop.
-      appState: { selectedElementIds: {} },
+      appState: sticky ? { selectedElementIds: { [sticky.id]: true } } : undefined,
       captureUpdate: 'IMMEDIATELY',
     })
-  }
-
-  const addSticky = (color = 'yellow') => {
-    // Toggle: if already arming this color, cancel; otherwise enter placement mode.
-    if (stickyPlacement && stickyPlacement.color === color) {
-      setStickyPlacement(null)
-      setStickyPreviewPos(null)
-      return
-    }
-    beginStickyPlacement(color)
+    api.setActiveTool({ type: 'selection' })
+    setActiveTool('selection')
+    setLastStickyColor(color)
+    setStickyPickerOpen(false)
   }
 
   const applySectionColor = (color) => {
@@ -787,7 +968,7 @@ export default function App() {
     if (!api) return
     const selectedStickyIds = getSelectedStickyIds(api)
     if (selectedStickyIds.size === 0) {
-      beginStickyPlacement(color)
+      addSticky(color)
       return
     }
 
@@ -832,7 +1013,7 @@ export default function App() {
   const saveOwner = async () => {
     const name = ownerInput.trim()
     if (!name) return
-    await fetch(`${API}/api/workspace`, {
+    await apiFetch('/api/workspace', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ owner: name }),
@@ -975,6 +1156,23 @@ export default function App() {
           </div>
           {!readOnly && (
             <>
+              {activeDoc && (
+                <button
+                  className="delete-doc-btn"
+                  onClick={() => {
+                    setDeleteTarget({
+                      type: activeId.type,
+                      id: activeId.id,
+                      name: activeDoc.name
+                    })
+                    setDeleteConfirmOpen(true)
+                  }}
+                  title={`Delete ${activeId.type}`}
+                  type="button"
+                >
+                  <TrashIcon />
+                </button>
+              )}
               {saveState !== 'idle' && (
                 <span className={`save-indicator save-${saveState}`}>
                   {saveState === 'saving' && '· saving…'}
@@ -989,11 +1187,7 @@ export default function App() {
         </div>
         <div className="work-area">
           {activeId?.type === 'board' && (
-            <div
-              className={`excali-wrap${stickyPlacement ? ' sticky-placing' : ''}`}
-              key={activeId.id}
-              ref={excaliWrapRef}
-            >
+            <div className="excali-wrap" key={activeId.id}>
               <Excalidraw
                 excalidrawAPI={(api) => { excalidrawAPIRef.current = api }}
                 onChange={(elements, appState) => {
@@ -1076,25 +1270,6 @@ export default function App() {
                 theme="light"
                 viewModeEnabled={readOnly}
               />
-              {stickyPlacement && stickyPreviewPos && (() => {
-                const api = excalidrawAPIRef.current
-                const zoom = api?.getAppState?.().zoom?.value || 1
-                const size = 180 * zoom
-                const c = STICKY_COLORS[stickyPlacement.color] || STICKY_COLORS.yellow
-                return (
-                  <div
-                    className="sticky-ghost"
-                    style={{
-                      left: stickyPreviewPos.x - size / 2,
-                      top: stickyPreviewPos.y - size / 2,
-                      width: size,
-                      height: size,
-                      background: c.bg,
-                      borderColor: c.stroke,
-                    }}
-                  />
-                )
-              })()}
               {!readOnly && (
                 <div className="fj-toolbar">
                   <button className={`fj-tool ${activeTool === 'selection' ? 'active' : ''}`}
@@ -1104,9 +1279,9 @@ export default function App() {
                   <div className="fj-sep"/>
                   <div className="sticky-btn-wrap">
                     <div className={`fj-split ${stickyPickerOpen ? 'open' : ''}`}>
-                      <button className={`fj-tool fj-tool-main ${stickyPlacement ? 'active' : ''}`}
+                      <button className="fj-tool fj-tool-main"
                               onClick={() => addSticky(lastStickyColor)}
-                              title={stickyPlacement ? 'Click canvas to place sticky (Esc to cancel)' : 'Sticky note'}
+                              title="Sticky note"
                               type="button">
                         <FjStickyIcon color={lastStickyColor}/>
                       </button>
@@ -1339,7 +1514,7 @@ export default function App() {
                 value={workspace.owner || ''}
                 onChange={(e) => setWorkspace(w => ({ ...w, owner: e.target.value }))}
                 onBlur={async (e) => {
-                  await fetch(`${API}/api/workspace`, {
+                  await apiFetch('/api/workspace', {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ owner: e.target.value }),
@@ -1397,6 +1572,33 @@ export default function App() {
           </div>
         </Modal>
       )}
+
+      <ConfirmationDialog
+        open={deleteConfirmOpen}
+        onClose={() => {
+          setDeleteConfirmOpen(false)
+          setDeleteTarget(null)
+        }}
+        onConfirm={handleDelete}
+        itemType={deleteTarget?.type || ''}
+        itemName={deleteTarget?.name || ''}
+        consequences={
+          deleteTarget?.type === 'folder'
+            ? 'All items in this folder will be moved to its parent folder. Child folders will also be moved.'
+            : deleteTarget?.type === 'board'
+            ? 'This board and all its content will be permanently deleted.'
+            : 'This sheet and all its data will be permanently deleted.'
+        }
+      />
+
+      <ErrorToast
+        message={errorMessage}
+        visible={errorVisible}
+        onDismiss={() => {
+          setErrorVisible(false)
+          setTimeout(() => setErrorMessage(null), 300)
+        }}
+      />
     </div>
   )
 }

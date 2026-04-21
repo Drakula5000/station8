@@ -1,23 +1,17 @@
-"""Research Hub backend.
+"""Research Hub backend with studio auth and password-protected share links."""
 
-- /api/boards              list/create boards (Excalidraw canvases)
-- /api/boards/<id>         get/update a board (scene snapshot)
-- /api/sheets              list/create sheets
-- /api/sheets/<id>         get/update a sheet (2D cell array)
-- /api/upload              upload an image, OCR it, store text
-- /uploads/<filename>      serve uploaded image
-- /api/search              hybrid keyword + semantic search across everything
-"""
 import json
 import os
 import re
+import secrets
 import uuid
 from datetime import datetime
-from flask import Flask, jsonify, request, send_from_directory, send_file
-from flask_cors import CORS
+from functools import wraps
+
+from flask import Flask, jsonify, request, send_file, send_from_directory, session
+from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
-CORS(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -28,9 +22,60 @@ BOARDS_FILE = os.path.join(DATA_DIR, 'boards.json')
 SHEETS_FILE = os.path.join(DATA_DIR, 'sheets.json')
 OCR_FILE = os.path.join(DATA_DIR, 'ocr.json')
 WORKSPACE_FILE = os.path.join(DATA_DIR, 'workspace.json')
+SHARES_FILE = os.path.join(DATA_DIR, 'shares.json')
+
+PRODUCTION = bool(
+    os.getenv('RENDER')
+    or os.getenv('RENDER_EXTERNAL_URL')
+    or os.getenv('RAILWAY_ENVIRONMENT')
+    or os.getenv('COOKIE_SECURE', '').lower() in {'1', 'true', 'yes'}
+)
+
+app.secret_key = (
+    os.getenv('FLASK_SECRET_KEY')
+    or os.getenv('SECRET_KEY')
+    or 'research-hub-dev-secret-change-me'
+)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='None' if PRODUCTION else 'Lax',
+    SESSION_COOKIE_SECURE=PRODUCTION,
+)
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
+
+
+def _allowed_origins():
+    defaults = {
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'http://localhost:4173',
+        'http://127.0.0.1:4173',
+        'https://YOUR_DOMAIN',
+        'https://YOUR_DOMAIN',
+    }
+    raw = os.getenv('CORS_ALLOWED_ORIGINS', '')
+    extra = {origin.strip() for origin in raw.split(',') if origin.strip()}
+    return defaults | extra
+
+
+@app.after_request
+def add_cors_headers(response):
+    origin = request.headers.get('Origin')
+    if origin and origin in _allowed_origins():
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PATCH,PUT,DELETE,OPTIONS'
+        response.headers['Vary'] = 'Origin'
+    return response
+
+
+@app.before_request
+def handle_options():
+    if request.method == 'OPTIONS':
+        return ('', 204)
 
 
 def _load(path, default):
@@ -45,8 +90,16 @@ def _save(path, data):
         json.dump(data, f, indent=2)
 
 
-def _board_file(id): return os.path.join(DATA_DIR, f'board-{id}.json')
-def _sheet_file(id): return os.path.join(DATA_DIR, f'sheet-{id}.json')
+def _board_file(item_id):
+    return os.path.join(DATA_DIR, f'board-{item_id}.json')
+
+
+def _sheet_file(item_id):
+    return os.path.join(DATA_DIR, f'sheet-{item_id}.json')
+
+
+def _studio_password():
+    return os.getenv('STUDIO_PASSWORD') or os.getenv('RESEARCH_STUDIO_PASSWORD') or 'changeme'
 
 
 def _normalize_folder_id(folder_id, folders):
@@ -113,6 +166,14 @@ def _get_workspace():
     return normalized
 
 
+def _parse_tags(raw):
+    if isinstance(raw, list):
+        return [str(t).strip().lstrip('#') for t in raw if str(t).strip()]
+    if isinstance(raw, str):
+        return [t.strip().lstrip('#') for t in raw.split(',') if t.strip()]
+    return []
+
+
 def _normalize_doc(item, folders):
     doc = dict(item or {})
     doc['folder_id'] = _normalize_folder_id(doc.get('folder_id'), folders)
@@ -123,8 +184,7 @@ def _normalize_doc(item, folders):
 
 def _load_boards():
     folders = _get_workspace().get('folders', [])
-    boards = [_normalize_doc(board, folders) for board in _load(BOARDS_FILE, [])]
-    return boards
+    return [_normalize_doc(board, folders) for board in _load(BOARDS_FILE, [])]
 
 
 def _save_boards(boards):
@@ -134,8 +194,7 @@ def _save_boards(boards):
 
 def _load_sheets():
     folders = _get_workspace().get('folders', [])
-    sheets = [_normalize_doc(sheet, folders) for sheet in _load(SHEETS_FILE, [])]
-    return sheets
+    return [_normalize_doc(sheet, folders) for sheet in _load(SHEETS_FILE, [])]
 
 
 def _save_sheets(sheets):
@@ -194,14 +253,6 @@ def _is_descendant(candidate_parent_id, folder_id, folders):
     return False
 
 
-def _parse_tags(raw):
-    if isinstance(raw, list):
-        return [str(t).strip().lstrip('#') for t in raw if str(t).strip()]
-    if isinstance(raw, str):
-        return [t.strip().lstrip('#') for t in raw.split(',') if t.strip()]
-    return []
-
-
 def _sanitize_parent_id(parent_id, folders, folder_id=None):
     parent_id = _normalize_folder_id(parent_id, folders)
     if folder_id and parent_id == folder_id:
@@ -211,7 +262,260 @@ def _sanitize_parent_id(parent_id, folders, folder_id=None):
     return parent_id
 
 
+def _normalize_share(item):
+    share = dict(item or {})
+    share['id'] = str(share.get('id') or str(uuid.uuid4())[:8])
+    share['scope_type'] = share.get('scope_type') or 'workspace'
+    share['scope_id'] = share.get('scope_id')
+    share['token'] = str(share.get('token') or secrets.token_urlsafe(18))
+    share['password_hash'] = share.get('password_hash') or ''
+    share['revoked'] = bool(share.get('revoked'))
+    share['created_at'] = share.get('created_at') or datetime.now().isoformat()
+    share['label'] = (share.get('label') or '').strip()
+    return share
+
+
+def _load_shares():
+    shares = _load(SHARES_FILE, [])
+    normalized = [_normalize_share(share) for share in shares if isinstance(share, dict)]
+    if normalized != shares:
+        _save(SHARES_FILE, normalized)
+    return normalized
+
+
+def _save_shares(shares):
+    _save(SHARES_FILE, [_normalize_share(share) for share in shares])
+
+
+def _find_share_by_token(token):
+    for share in _load_shares():
+        if share.get('token') == token:
+            return share
+    return None
+
+
+def _find_share_by_id(share_id):
+    for share in _load_shares():
+        if share.get('id') == share_id:
+            return share
+    return None
+
+
+def _is_studio_authed():
+    return bool(session.get('studio_authed'))
+
+
+def _unlocked_share_tokens():
+    raw = session.get('unlocked_share_tokens') or []
+    return {token for token in raw if isinstance(token, str)}
+
+
+def _unlock_share_token(token):
+    unlocked = _unlocked_share_tokens()
+    unlocked.add(token)
+    session['unlocked_share_tokens'] = sorted(unlocked)
+    session.modified = True
+
+
+def _lock_share_token(token):
+    unlocked = _unlocked_share_tokens()
+    if token in unlocked:
+        unlocked.remove(token)
+        session['unlocked_share_tokens'] = sorted(unlocked)
+        session.modified = True
+
+
+def _share_is_unlocked(token):
+    return token in _unlocked_share_tokens()
+
+
+def _studio_auth_required(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        if not _is_studio_authed():
+            return jsonify({'error': 'Studio password required'}), 401
+        return fn(*args, **kwargs)
+    return wrapped
+
+
+def _active_share_or_401(token):
+    share = _find_share_by_token(token)
+    if not share or share.get('revoked'):
+        return None, (jsonify({'error': 'Share not found'}), 404)
+    if not _share_is_unlocked(token):
+        return None, (jsonify({'error': 'Share password required', 'requires_password': True}), 401)
+    return share, None
+
+
+def _scope_label(share, boards=None, sheets=None, folders=None):
+    boards = boards if boards is not None else _load_boards()
+    sheets = sheets if sheets is not None else _load_sheets()
+    folders = folders if folders is not None else _get_workspace().get('folders', [])
+    scope_type = share.get('scope_type')
+    scope_id = share.get('scope_id')
+    if scope_type == 'board':
+        board = next((item for item in boards if item.get('id') == scope_id), None)
+        return board.get('name') if board else 'Board'
+    if scope_type == 'sheet':
+        sheet = next((item for item in sheets if item.get('id') == scope_id), None)
+        return sheet.get('name') if sheet else 'Sheet'
+    if scope_type == 'folder':
+        folder = next((item for item in folders if item.get('id') == scope_id), None)
+        return folder.get('name') if folder else 'Folder'
+    return _get_workspace().get('name', 'Workspace')
+
+
+def _scoped_share_payload(share):
+    ws = _get_workspace()
+    folders = ws.get('folders', [])
+    boards = _load_boards()
+    sheets = _load_sheets()
+    scope_type = share.get('scope_type')
+    scope_id = share.get('scope_id')
+
+    scoped_folders = []
+    scoped_boards = []
+    scoped_sheets = []
+
+    if scope_type == 'workspace':
+        scoped_folders = [dict(folder) for folder in folders]
+        scoped_boards = [dict(board) for board in boards]
+        scoped_sheets = [dict(sheet) for sheet in sheets]
+    elif scope_type == 'folder':
+        folder_ids = _folder_with_descendants(scope_id, folders) if any(folder.get('id') == scope_id for folder in folders) else set()
+        scoped_folders = []
+        for folder in folders:
+            if folder.get('id') not in folder_ids:
+                continue
+            parent_id = folder.get('parent_id')
+            scoped_folders.append({
+                **folder,
+                'parent_id': parent_id if parent_id in folder_ids else None,
+            })
+        scoped_boards = [dict(board) for board in boards if board.get('folder_id') in folder_ids]
+        scoped_sheets = [dict(sheet) for sheet in sheets if sheet.get('folder_id') in folder_ids]
+    elif scope_type == 'board':
+        board = next((item for item in boards if item.get('id') == scope_id), None)
+        if board:
+            scoped_boards = [{**board, 'folder_id': None}]
+    elif scope_type == 'sheet':
+        sheet = next((item for item in sheets if item.get('id') == scope_id), None)
+        if sheet:
+            scoped_sheets = [{**sheet, 'folder_id': None}]
+
+    return {
+        'share': {
+            'id': share.get('id'),
+            'label': share.get('label'),
+            'scope_type': scope_type,
+            'scope_id': scope_id,
+            'title': share.get('label') or _scope_label(share, boards=boards, sheets=sheets, folders=folders),
+        },
+        'workspace': {
+            'name': ws.get('name'),
+            'owner': ws.get('owner'),
+            'folders': scoped_folders,
+        },
+        'boards': scoped_boards,
+        'sheets': scoped_sheets,
+    }
+
+
+def _share_allowed_doc_ids(share):
+    payload = _scoped_share_payload(share)
+    board_ids = {board.get('id') for board in payload['boards']}
+    sheet_ids = {sheet.get('id') for sheet in payload['sheets']}
+    return board_ids, sheet_ids
+
+
+def _share_allows_board(share, board_id):
+    board_ids, _ = _share_allowed_doc_ids(share)
+    return board_id in board_ids
+
+
+def _share_allows_sheet(share, sheet_id):
+    _, sheet_ids = _share_allowed_doc_ids(share)
+    return sheet_id in sheet_ids
+
+
+def _snapshot_upload_filenames(snapshot):
+    files = (snapshot or {}).get('files') or {}
+    names = set()
+    for file_data in files.values():
+        data_url = file_data.get('dataURL') or ''
+        match = re.search(r'/uploads/([a-z0-9-]+\.[a-z0-9]+)', data_url, flags=re.IGNORECASE)
+        if match:
+            names.add(match.group(1))
+    return names
+
+
+def _share_allows_upload(share, filename):
+    payload = _scoped_share_payload(share)
+    for board in payload['boards']:
+        data = _load(_board_file(board['id']), {'snapshot': None})
+        if filename in _snapshot_upload_filenames(data.get('snapshot')):
+            return True
+    return False
+
+
+def _validate_share_scope(scope_type, scope_id):
+    ws = _get_workspace()
+    boards = _load_boards()
+    sheets = _load_sheets()
+    folders = ws.get('folders', [])
+
+    if scope_type == 'workspace':
+        return True
+    if scope_type == 'board':
+        return any(board.get('id') == scope_id for board in boards)
+    if scope_type == 'sheet':
+        return any(sheet.get('id') == scope_id for sheet in sheets)
+    if scope_type == 'folder':
+        return any(folder.get('id') == scope_id for folder in folders)
+    return False
+
+
+def _serialize_share_for_list(share):
+    payload = _scoped_share_payload(share)
+    return {
+        'id': share.get('id'),
+        'label': share.get('label'),
+        'scope_type': share.get('scope_type'),
+        'scope_id': share.get('scope_id'),
+        'token': share.get('token'),
+        'revoked': bool(share.get('revoked')),
+        'created_at': share.get('created_at'),
+        'title': payload['share']['title'],
+        'url': f'/share/{share.get("token")}',
+    }
+
+
+@app.route('/api/auth/status', methods=['GET'])
+def auth_status():
+    return jsonify({'authenticated': _is_studio_authed()})
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    data = request.json or {}
+    password = data.get('password') or ''
+    if password != _studio_password():
+        return jsonify({'error': 'Wrong password'}), 401
+    session['studio_authed'] = True
+    session.modified = True
+    return jsonify({'authenticated': True})
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    session.pop('studio_authed', None)
+    session.pop('unlocked_share_tokens', None)
+    session.modified = True
+    return '', 204
+
+
 @app.route('/api/folders', methods=['POST'])
+@_studio_auth_required
 def create_folder():
     ws = _get_workspace()
     folders = list(ws.get('folders', []))
@@ -229,6 +533,7 @@ def create_folder():
 
 
 @app.route('/api/folders/<folder_id>', methods=['PATCH'])
+@_studio_auth_required
 def patch_folder(folder_id):
     ws = _get_workspace()
     folders = list(ws.get('folders', []))
@@ -247,6 +552,7 @@ def patch_folder(folder_id):
 
 
 @app.route('/api/folders/<folder_id>', methods=['DELETE'])
+@_studio_auth_required
 def delete_folder(folder_id):
     ws = _get_workspace()
     folders = list(ws.get('folders', []))
@@ -265,70 +571,146 @@ def delete_folder(folder_id):
 
 
 @app.route('/api/workspace', methods=['GET'])
+@_studio_auth_required
 def get_workspace():
-    return jsonify(_get_workspace())
-
-
-@app.route('/api/workspace', methods=['PATCH'])
-def patch_workspace():
     ws = _get_workspace()
-    data = request.json or {}
-    if 'name' in data: ws['name'] = (data['name'] or '').strip() or ws['name']
-    if 'owner' in data: ws['owner'] = (data['owner'] or '').strip()
-    _save(WORKSPACE_FILE, ws)
+    ws.pop('public_slug', None)
     return jsonify(ws)
 
 
-@app.route('/api/share/<slug>', methods=['GET'])
-def share_by_slug(slug):
+@app.route('/api/workspace', methods=['PATCH'])
+@_studio_auth_required
+def patch_workspace():
     ws = _get_workspace()
-    if slug != ws.get('public_slug'):
-        return jsonify({'error': 'Invalid slug'}), 404
-    return jsonify({
-        'workspace': {
-            'name': ws.get('name'),
-            'owner': ws.get('owner'),
-            'folders': ws.get('folders', []),
-        },
-        'boards': _load_boards(),
-        'sheets': _load_sheets(),
+    data = request.json or {}
+    if 'name' in data:
+        ws['name'] = (data['name'] or '').strip() or ws['name']
+    if 'owner' in data:
+        ws['owner'] = (data['owner'] or '').strip()
+    _save(WORKSPACE_FILE, ws)
+    ws.pop('public_slug', None)
+    return jsonify(ws)
+
+
+@app.route('/api/shares', methods=['GET'])
+@_studio_auth_required
+def list_shares():
+    shares = [_serialize_share_for_list(share) for share in _load_shares()]
+    shares.sort(key=lambda share: share.get('created_at', ''), reverse=True)
+    return jsonify(shares)
+
+
+@app.route('/api/shares', methods=['POST'])
+@_studio_auth_required
+def create_share():
+    data = request.json or {}
+    scope_type = data.get('scope_type') or ''
+    scope_id = data.get('scope_id')
+    password = data.get('password') or ''
+    label = (data.get('label') or '').strip()
+
+    if scope_type not in {'board', 'sheet', 'folder', 'workspace'}:
+        return jsonify({'error': 'Invalid share scope'}), 400
+    if scope_type != 'workspace' and not scope_id:
+        return jsonify({'error': 'Missing scope id'}), 400
+    if not _validate_share_scope(scope_type, scope_id):
+        return jsonify({'error': 'Scope not found'}), 404
+    if len(password) < 3:
+        return jsonify({'error': 'Share password must be at least 3 characters'}), 400
+
+    share = _normalize_share({
+        'id': str(uuid.uuid4())[:8],
+        'scope_type': scope_type,
+        'scope_id': scope_id,
+        'token': secrets.token_urlsafe(18),
+        'password_hash': generate_password_hash(password),
+        'revoked': False,
+        'created_at': datetime.now().isoformat(),
+        'label': label,
     })
+    shares = _load_shares()
+    shares.append(share)
+    _save_shares(shares)
+    return jsonify(_serialize_share_for_list(share)), 201
 
 
-@app.route('/api/share/<slug>/board/<board_id>', methods=['GET'])
-def share_board(slug, board_id):
-    ws = _get_workspace()
-    if slug != ws.get('public_slug'):
-        return jsonify({'error': 'Invalid slug'}), 404
+@app.route('/api/shares/<share_id>', methods=['DELETE'])
+@_studio_auth_required
+def revoke_share(share_id):
+    shares = _load_shares()
+    changed = False
+    for share in shares:
+        if share.get('id') != share_id:
+            continue
+        share['revoked'] = True
+        changed = True
+        _lock_share_token(share.get('token'))
+        break
+    if not changed:
+        return jsonify({'error': 'Share not found'}), 404
+    _save_shares(shares)
+    return '', 204
+
+
+@app.route('/api/share/<token>/unlock', methods=['POST'])
+def unlock_share(token):
+    share = _find_share_by_token(token)
+    if not share or share.get('revoked'):
+        return jsonify({'error': 'Share not found'}), 404
+    data = request.json or {}
+    password = data.get('password') or ''
+    if not check_password_hash(share.get('password_hash') or '', password):
+        return jsonify({'error': 'Wrong password'}), 401
+    _unlock_share_token(token)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/share/<token>/lock', methods=['POST'])
+def lock_share(token):
+    _lock_share_token(token)
+    return '', 204
+
+
+@app.route('/api/share/<token>', methods=['GET'])
+def share_by_token(token):
+    share, error = _active_share_or_401(token)
+    if error:
+        return error
+    return jsonify(_scoped_share_payload(share))
+
+
+@app.route('/api/share/<token>/board/<board_id>', methods=['GET'])
+def share_board(token, board_id):
+    share, error = _active_share_or_401(token)
+    if error:
+        return error
+    if not _share_allows_board(share, board_id):
+        return jsonify({'error': 'Not found'}), 404
     return jsonify(_load(_board_file(board_id), {'snapshot': None}))
 
 
-@app.route('/api/share/<slug>/sheet/<sheet_id>', methods=['GET'])
-def share_sheet(slug, sheet_id):
-    ws = _get_workspace()
-    if slug != ws.get('public_slug'):
-        return jsonify({'error': 'Invalid slug'}), 404
+@app.route('/api/share/<token>/sheet/<sheet_id>', methods=['GET'])
+def share_sheet(token, sheet_id):
+    share, error = _active_share_or_401(token)
+    if error:
+        return error
+    if not _share_allows_sheet(share, sheet_id):
+        return jsonify({'error': 'Not found'}), 404
     return jsonify(_load(_sheet_file(sheet_id), {'data': []}))
-
-
-@app.route('/api/share/<slug>/search', methods=['POST'])
-def share_search(slug):
-    ws = _get_workspace()
-    if slug != ws.get('public_slug'):
-        return jsonify({'error': 'Invalid slug'}), 404
-    return search()
 
 
 # ── Boards ───────────────────────────────────────────────────────────────────
 
 @app.route('/api/boards', methods=['GET'])
+@_studio_auth_required
 def list_boards():
     boards = _load_boards()
-    boards.sort(key=lambda b: b.get('created_at', ''), reverse=True)
+    boards.sort(key=lambda item: item.get('created_at', ''), reverse=True)
     return jsonify(boards)
 
 
 @app.route('/api/boards', methods=['POST'])
+@_studio_auth_required
 def create_board():
     data = request.json or {}
     name = (data.get('name') or 'Untitled').strip() or 'Untitled'
@@ -348,26 +730,29 @@ def create_board():
 
 
 @app.route('/api/boards/<board_id>', methods=['PATCH'])
+@_studio_auth_required
 def patch_board(board_id):
     data = request.json or {}
     boards = _load_boards()
     folders = _get_workspace().get('folders', [])
-    for b in boards:
-        if b['id'] == board_id:
-            if 'name' in data:
-                b['name'] = (data['name'] or '').strip() or b.get('name', 'Untitled')
-            if 'tags' in data:
-                b['tags'] = _parse_tags(data['tags'])
-            if 'folder_id' in data:
-                b['folder_id'] = _normalize_folder_id(data.get('folder_id'), folders)
-            _save_boards(boards)
-            return jsonify(b)
+    for board in boards:
+        if board['id'] != board_id:
+            continue
+        if 'name' in data:
+            board['name'] = (data['name'] or '').strip() or board.get('name', 'Untitled')
+        if 'tags' in data:
+            board['tags'] = _parse_tags(data['tags'])
+        if 'folder_id' in data:
+            board['folder_id'] = _normalize_folder_id(data.get('folder_id'), folders)
+        _save_boards(boards)
+        return jsonify(board)
     return jsonify({'error': 'Not found'}), 404
 
 
 @app.route('/api/boards/<board_id>', methods=['DELETE'])
+@_studio_auth_required
 def delete_board(board_id):
-    boards = [b for b in _load_boards() if b['id'] != board_id]
+    boards = [board for board in _load_boards() if board['id'] != board_id]
     _save_boards(boards)
     fp = _board_file(board_id)
     if os.path.exists(fp):
@@ -376,11 +761,13 @@ def delete_board(board_id):
 
 
 @app.route('/api/boards/<board_id>', methods=['GET'])
+@_studio_auth_required
 def get_board(board_id):
     return jsonify(_load(_board_file(board_id), {'snapshot': None}))
 
 
 @app.route('/api/boards/<board_id>', methods=['PUT'])
+@_studio_auth_required
 def update_board(board_id):
     data = request.json or {}
     _save(_board_file(board_id), {'snapshot': data.get('snapshot')})
@@ -390,13 +777,15 @@ def update_board(board_id):
 # ── Sheets ───────────────────────────────────────────────────────────────────
 
 @app.route('/api/sheets', methods=['GET'])
+@_studio_auth_required
 def list_sheets():
     sheets = _load_sheets()
-    sheets.sort(key=lambda s: s.get('created_at', ''), reverse=True)
+    sheets.sort(key=lambda item: item.get('created_at', ''), reverse=True)
     return jsonify(sheets)
 
 
 @app.route('/api/sheets', methods=['POST'])
+@_studio_auth_required
 def create_sheet():
     data = request.json or {}
     name = (data.get('name') or 'Untitled').strip() or 'Untitled'
@@ -416,26 +805,29 @@ def create_sheet():
 
 
 @app.route('/api/sheets/<sheet_id>', methods=['PATCH'])
+@_studio_auth_required
 def patch_sheet(sheet_id):
     data = request.json or {}
     sheets = _load_sheets()
     folders = _get_workspace().get('folders', [])
-    for s in sheets:
-        if s['id'] == sheet_id:
-            if 'name' in data:
-                s['name'] = (data['name'] or '').strip() or s.get('name', 'Untitled')
-            if 'tags' in data:
-                s['tags'] = _parse_tags(data['tags'])
-            if 'folder_id' in data:
-                s['folder_id'] = _normalize_folder_id(data.get('folder_id'), folders)
-            _save_sheets(sheets)
-            return jsonify(s)
+    for sheet in sheets:
+        if sheet['id'] != sheet_id:
+            continue
+        if 'name' in data:
+            sheet['name'] = (data['name'] or '').strip() or sheet.get('name', 'Untitled')
+        if 'tags' in data:
+            sheet['tags'] = _parse_tags(data['tags'])
+        if 'folder_id' in data:
+            sheet['folder_id'] = _normalize_folder_id(data.get('folder_id'), folders)
+        _save_sheets(sheets)
+        return jsonify(sheet)
     return jsonify({'error': 'Not found'}), 404
 
 
 @app.route('/api/sheets/<sheet_id>', methods=['DELETE'])
+@_studio_auth_required
 def delete_sheet(sheet_id):
-    sheets = [s for s in _load_sheets() if s['id'] != sheet_id]
+    sheets = [sheet for sheet in _load_sheets() if sheet['id'] != sheet_id]
     _save_sheets(sheets)
     fp = _sheet_file(sheet_id)
     if os.path.exists(fp):
@@ -444,11 +836,13 @@ def delete_sheet(sheet_id):
 
 
 @app.route('/api/sheets/<sheet_id>', methods=['GET'])
+@_studio_auth_required
 def get_sheet(sheet_id):
     return jsonify(_load(_sheet_file(sheet_id), {'data': []}))
 
 
 @app.route('/api/sheets/<sheet_id>', methods=['PUT'])
+@_studio_auth_required
 def update_sheet(sheet_id):
     data = request.json or {}
     _save(_sheet_file(sheet_id), {'data': data.get('data') or []})
@@ -461,78 +855,79 @@ def _run_ocr(path):
     try:
         import pytesseract
         from PIL import Image
-        t = pytesseract.image_to_string(Image.open(path))
-        return re.sub(r'\s+', ' ', t).strip()
-    except Exception as e:
-        print(f'OCR failed: {e}', flush=True)
+        text = pytesseract.image_to_string(Image.open(path))
+        return re.sub(r'\s+', ' ', text).strip()
+    except Exception as exc:
+        print(f'OCR failed: {exc}', flush=True)
         return ''
 
 
 @app.route('/api/upload', methods=['POST'])
+@_studio_auth_required
 def upload_image():
     if 'file' not in request.files:
         return jsonify({'error': 'No file'}), 400
-    f = request.files['file']
-    if not f.filename:
+    uploaded = request.files['file']
+    if not uploaded.filename:
         return jsonify({'error': 'Empty filename'}), 400
-    ext = os.path.splitext(f.filename)[1].lower()
+    ext = os.path.splitext(uploaded.filename)[1].lower()
     if ext not in ('.jpg', '.jpeg', '.png', '.gif', '.webp'):
         return jsonify({'error': 'Invalid file type'}), 400
     filename = str(uuid.uuid4()) + ext
-    p = os.path.join(UPLOADS_DIR, filename)
-    f.save(p)
+    path = os.path.join(UPLOADS_DIR, filename)
+    uploaded.save(path)
     ocr = _load(OCR_FILE, {})
-    ocr[filename] = _run_ocr(p)
+    ocr[filename] = _run_ocr(path)
     _save(OCR_FILE, ocr)
     return jsonify({'filename': filename, 'url': f'/uploads/{filename}'}), 201
 
 
 @app.route('/uploads/<filename>')
 def serve_upload(filename):
-    return send_from_directory(UPLOADS_DIR, filename)
+    if _is_studio_authed():
+        return send_from_directory(UPLOADS_DIR, filename)
+    for token in _unlocked_share_tokens():
+        share = _find_share_by_token(token)
+        if share and not share.get('revoked') and _share_allows_upload(share, filename):
+            return send_from_directory(UPLOADS_DIR, filename)
+    return jsonify({'error': 'Not found'}), 404
 
 
 # ── Search ───────────────────────────────────────────────────────────────────
 
 def _text_from_excalidraw(snapshot):
-    """Extract searchable text from an Excalidraw snapshot.
-
-    Elements have `type` and optionally `text`. Image elements ref files by `fileId`.
-    """
     out = []
     if not snapshot:
         return out
     elements = snapshot.get('elements') or []
     files = snapshot.get('files') or {}
     ocr = _load(OCR_FILE, {})
-    for el in elements:
-        if not isinstance(el, dict):
+    for element in elements:
+        if not isinstance(element, dict):
             continue
-        t = el.get('type')
-        if t == 'text':
-            text = el.get('text') or ''
+        element_type = element.get('type')
+        if element_type == 'text':
+            text = element.get('text') or ''
             if text.strip():
                 out.append({'kind': 'text', 'text': text.strip()})
-        elif t == 'frame':
-            name = el.get('name') or ''
+        elif element_type == 'frame':
+            name = element.get('name') or ''
             if name.strip():
                 out.append({'kind': 'frame', 'text': name.strip()})
-        elif t == 'image':
-            file_id = el.get('fileId')
+        elif element_type == 'image':
+            file_id = element.get('fileId')
             if file_id and file_id in files:
                 data_url = files[file_id].get('dataURL') or ''
-                # If backed by our uploads, find filename
-                m = re.search(r'/uploads/([a-z0-9-]+\.[a-z]+)', data_url)
-                if m:
-                    fn = m.group(1)
-                    ocr_text = ocr.get(fn, '')
+                match = re.search(r'/uploads/([a-z0-9-]+\.[a-z]+)', data_url)
+                if match:
+                    filename = match.group(1)
+                    ocr_text = ocr.get(filename, '')
                     if ocr_text:
                         out.append({'kind': 'ocr', 'text': ocr_text})
     return out
 
 
 def _text_from_sheet(data):
-    """Sheet data is [[{value}, ...], ...]."""
     out = []
     if not data:
         return out
@@ -544,28 +939,34 @@ def _text_from_sheet(data):
     return out
 
 
-def _all_items():
-    """Yield searchable entries: {doc_type, doc_id, doc_name, kind, text}."""
-    boards = _load_boards()
-    sheets = _load_sheets()
-    for b in boards:
-        data = _load(_board_file(b['id']), {'snapshot': None})
+def _all_items(boards=None, sheets=None):
+    board_items = boards if boards is not None else _load_boards()
+    sheet_items = sheets if sheets is not None else _load_sheets()
+    for board in board_items:
+        data = _load(_board_file(board['id']), {'snapshot': None})
         for entry in _text_from_excalidraw(data.get('snapshot')):
             yield {
-                'doc_type': 'board', 'doc_id': b['id'], 'doc_name': b['name'],
-                'kind': entry['kind'], 'text': entry['text'],
+                'doc_type': 'board',
+                'doc_id': board['id'],
+                'doc_name': board['name'],
+                'kind': entry['kind'],
+                'text': entry['text'],
             }
-    for s in sheets:
-        data = _load(_sheet_file(s['id']), {'data': []})
+    for sheet in sheet_items:
+        data = _load(_sheet_file(sheet['id']), {'data': []})
         for text in _text_from_sheet(data.get('data') or []):
             yield {
-                'doc_type': 'sheet', 'doc_id': s['id'], 'doc_name': s['name'],
-                'kind': 'sheet', 'text': text,
+                'doc_type': 'sheet',
+                'doc_id': sheet['id'],
+                'doc_name': sheet['name'],
+                'kind': 'sheet',
+                'text': text,
             }
 
 
-# Lazy semantic model
 _model = None
+
+
 def _embed(text):
     global _model
     try:
@@ -574,84 +975,104 @@ def _embed(text):
             print('Loading embedding model…', flush=True)
             _model = SentenceTransformer('all-MiniLM-L6-v2')
         return _model.encode(text, convert_to_numpy=True, normalize_embeddings=True)
-    except Exception as e:
-        print(f'Embedding failed: {e}', flush=True)
+    except Exception as exc:
+        print(f'Embedding failed: {exc}', flush=True)
         return None
 
 
-def _keyword(text, q):
-    t = text.lower(); q = q.lower().strip()
+def _keyword(text, query):
+    haystack = text.lower()
+    needle = query.lower().strip()
     score = 0.0
-    if q in t: score += 1.0
-    for w in q.split():
-        if len(w) >= 2 and w in t: score += 0.2
+    if needle in haystack:
+        score += 1.0
+    for word in needle.split():
+        if len(word) >= 2 and word in haystack:
+            score += 0.2
     return score
 
 
-@app.route('/api/search', methods=['POST'])
-def search():
+def _search_payload(boards=None, sheets=None):
     body = request.json or {}
-    q = (body.get('query') or '').strip()
-    if not q:
-        return jsonify({'hits': []})
+    query = (body.get('query') or '').strip()
+    if not query:
+        return {'hits': []}
 
-    items = list(_all_items())
+    items = list(_all_items(boards=boards, sheets=sheets))
     if not items:
-        return jsonify({'hits': []})
+        return {'hits': []}
 
     try:
         import numpy as np
-        q_vec = _embed(q)
+        query_vector = _embed(query)
     except Exception:
-        q_vec = None
+        query_vector = None
 
     hits = []
-    for it in items:
-        kw = _keyword(it['text'], q)
-        sem = 0.0
-        if q_vec is not None:
+    for item in items:
+        keyword_score = _keyword(item['text'], query)
+        semantic_score = 0.0
+        if query_vector is not None:
             try:
                 import numpy as np
-                v = _embed(it['text'])
-                if v is not None:
-                    sem = float(np.dot(q_vec, v))
+                item_vector = _embed(item['text'])
+                if item_vector is not None:
+                    semantic_score = float(np.dot(query_vector, item_vector))
             except Exception:
                 pass
-        combined = kw * 2.0 + sem
-        if kw > 0 or sem > 0.35:
+        combined = keyword_score * 2.0 + semantic_score
+        if keyword_score > 0 or semantic_score > 0.35:
             hits.append({
-                'doc_type': it['doc_type'],
-                'doc_id': it['doc_id'],
-                'doc_name': it['doc_name'],
-                'kind': it['kind'],
-                'snippet': it['text'][:220],
+                'doc_type': item['doc_type'],
+                'doc_id': item['doc_id'],
+                'doc_name': item['doc_name'],
+                'kind': item['kind'],
+                'snippet': item['text'][:220],
                 'source': {
-                    'text': 'text', 'frame': 'section', 'ocr': 'OCR from image',
+                    'text': 'text',
+                    'frame': 'section',
+                    'ocr': 'OCR from image',
                     'sheet': 'spreadsheet cell',
-                }.get(it['kind'], it['kind']),
+                }.get(item['kind'], item['kind']),
                 'score': combined,
             })
-    hits.sort(key=lambda h: h['score'], reverse=True)
-    return jsonify({'hits': hits[:50]})
+    hits.sort(key=lambda hit: hit['score'], reverse=True)
+    return {'hits': hits[:50]}
+
+
+@app.route('/api/search', methods=['POST'])
+@_studio_auth_required
+def search():
+    return jsonify(_search_payload())
+
+
+@app.route('/api/share/<token>/search', methods=['POST'])
+def share_search(token):
+    share, error = _active_share_or_401(token)
+    if error:
+        return error
+    payload = _scoped_share_payload(share)
+    return jsonify(_search_payload(boards=payload['boards'], sheets=payload['sheets']))
 
 
 @app.route('/')
 def root():
-    i = os.path.join(STATIC_BUILD, 'index.html')
-    if os.path.exists(i): return send_file(i)
+    index_file = os.path.join(STATIC_BUILD, 'index.html')
+    if os.path.exists(index_file):
+        return send_file(index_file)
     return 'Frontend not built yet. Run the Vite dev server.', 404
 
 
 @app.route('/<path:path>')
 def static_files(path):
-    full = os.path.join(STATIC_BUILD, path)
-    if os.path.exists(full):
+    full_path = os.path.join(STATIC_BUILD, path)
+    if os.path.exists(full_path):
         return send_from_directory(STATIC_BUILD, path)
-    i = os.path.join(STATIC_BUILD, 'index.html')
-    if os.path.exists(i): return send_file(i)
+    index_file = os.path.join(STATIC_BUILD, 'index.html')
+    if os.path.exists(index_file):
+        return send_file(index_file)
     return 'Not found', 404
 
 
 if __name__ == '__main__':
-    # Production-ish: debug off so unhandled exceptions don't kill the process mid-request
     app.run(debug=False, port=5001, host='0.0.0.0', threaded=True)
