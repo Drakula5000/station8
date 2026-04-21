@@ -4,7 +4,7 @@ import '@excalidraw/excalidraw/index.css'
 import Spreadsheet from 'react-spreadsheet'
 import {
   makeSection, makeSticky, viewportCenter, SECTION_COLORS, STICKY_COLORS,
-  migrateLegacySections, isSectionElement, isSectionLabel, isInside
+  migrateLegacySections, isSectionElement, isSectionLabel
 } from './sections'
 import {
   BoardIcon, SheetIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon,
