@@ -293,9 +293,13 @@ def _move_docs_from_folder(folder_ids, target_parent_id):
         _save_sheets(sheets)
 
 
-def _update_descendant_parent_ids(folder_ids, folders, target_parent_id):
+def _move_direct_docs_from_folder(folder_id, target_parent_id):
+    _move_docs_from_folder({folder_id}, target_parent_id)
+
+
+def _reparent_child_folders(folder_id, folders, target_parent_id):
     for folder in folders:
-        if folder.get('parent_id') in folder_ids:
+        if folder.get('parent_id') == folder_id:
             folder['parent_id'] = target_parent_id
 
 
@@ -640,13 +644,38 @@ def delete_folder(folder_id):
     if not target:
         return jsonify({'error': 'Not found'}), 404
 
-    folder_ids = _folder_with_descendants(folder_id, folders)
     target_parent_id = target.get('parent_id')
+    mode = (request.args.get('mode') or 'move').strip().lower()
+    if mode not in {'move', 'delete'}:
+        return jsonify({'error': 'Invalid delete mode'}), 400
+
+    if mode == 'move':
+        remaining = [folder for folder in folders if folder['id'] != folder_id]
+        _move_direct_docs_from_folder(folder_id, target_parent_id)
+        _reparent_child_folders(folder_id, remaining, target_parent_id)
+        ws['folders'] = remaining
+        _save(WORKSPACE_FILE, ws)
+        return '', 204
+
+    folder_ids = _folder_with_descendants(folder_id, folders)
+    boards_to_delete = [board for board in _load_boards() if board.get('folder_id') in folder_ids]
+    sheets_to_delete = [sheet for sheet in _load_sheets() if sheet.get('folder_id') in folder_ids]
+    board_ids = [board.get('id') for board in boards_to_delete if board.get('id')]
+    sheet_ids = [sheet.get('id') for sheet in sheets_to_delete if sheet.get('id')]
+    upload_filenames = set()
+    for board_id in board_ids:
+        upload_filenames.update(_board_upload_filenames(board_id))
+
     remaining = [folder for folder in folders if folder['id'] not in folder_ids]
-    _move_docs_from_folder(folder_ids, target_parent_id)
-    _update_descendant_parent_ids(folder_ids, remaining, target_parent_id)
+    if board_ids:
+        _save_boards([board for board in _load_boards() if board.get('id') not in set(board_ids)])
+        _delete_board_files(board_ids)
+    if sheet_ids:
+        _save_sheets([sheet for sheet in _load_sheets() if sheet.get('id') not in set(sheet_ids)])
+        _delete_sheet_files(sheet_ids)
     ws['folders'] = remaining
     _save(WORKSPACE_FILE, ws)
+    _cleanup_unreferenced_uploads(upload_filenames)
     return '', 204
 
 
@@ -808,11 +837,11 @@ def patch_board(board_id):
 @app.route('/api/boards/<board_id>', methods=['DELETE'])
 @_studio_auth_required
 def delete_board(board_id):
+    upload_filenames = _board_upload_filenames(board_id)
     boards = [board for board in _load_boards() if board['id'] != board_id]
     _save_boards(boards)
-    fp = _board_file(board_id)
-    if os.path.exists(fp):
-        os.remove(fp)
+    _delete_board_files([board_id])
+    _cleanup_unreferenced_uploads(upload_filenames)
     return '', 204
 
 
@@ -885,9 +914,7 @@ def patch_sheet(sheet_id):
 def delete_sheet(sheet_id):
     sheets = [sheet for sheet in _load_sheets() if sheet['id'] != sheet_id]
     _save_sheets(sheets)
-    fp = _sheet_file(sheet_id)
-    if os.path.exists(fp):
-        os.remove(fp)
+    _delete_sheet_files([sheet_id])
     return '', 204
 
 

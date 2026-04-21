@@ -3,7 +3,7 @@ import Spreadsheet from 'react-spreadsheet'
 import TldrawCanvas from './TldrawCanvas'
 import {
   BoardIcon, SheetIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon,
-  SidebarCollapseIcon, SidebarExpandIcon, MoreHorizontalIcon, TrashIcon,
+  SidebarCollapseIcon, SidebarExpandIcon, TrashIcon,
 } from './icons'
 import './App.css'
 
@@ -148,7 +148,6 @@ export default function App() {
   const [ownerPromptOpen, setOwnerPromptOpen] = useState(false)
   const [ownerPromptDismissed, setOwnerPromptDismissed] = useState(false)
   const [ownerInput, setOwnerInput] = useState('')
-  const [actionMenuKey, setActionMenuKey] = useState(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleteMode, setDeleteMode] = useState('move')
@@ -168,6 +167,7 @@ export default function App() {
   const activeBoard = boards.find(b => b.id === activeId?.id)
   const activeSheet = sheets.find(s => s.id === activeId?.id)
   const activeDoc = activeBoard || activeSheet || null
+  const activeDocType = activeBoard ? 'board' : activeSheet ? 'sheet' : null
   const activeFolderPath = buildFolderPath(activeDoc?.folder_id, folderById)
   const deleteImpact = deleteTarget?.type === 'folder'
     ? summarizeFolderDelete(deleteTarget, folders, boards, sheets)
@@ -188,13 +188,6 @@ export default function App() {
       // Ignore storage failures; collapse state can fall back to per-session.
     }
   }, [sidebarCollapsed])
-
-  useEffect(() => {
-    if (!actionMenuKey) return
-    const onPointerDown = () => setActionMenuKey(null)
-    window.addEventListener('pointerdown', onPointerDown)
-    return () => window.removeEventListener('pointerdown', onPointerDown)
-  }, [actionMenuKey])
 
   const expandFolderPath = useCallback((folderId, folderList) => {
     if (!folderId) return
@@ -323,7 +316,7 @@ export default function App() {
         setNewFolderOpen(false)
         setDeleteConfirmOpen(false)
         setDeleteTarget(null)
-        setActionMenuKey(null)
+        setDeleteMode('move')
       }
     }
     window.addEventListener('keydown', onKey)
@@ -441,7 +434,6 @@ export default function App() {
   }
 
   const openDeleteDialog = (target) => {
-    setActionMenuKey(null)
     setDeleteTarget(target)
     if (target.type === 'folder') {
       const impact = summarizeFolderDelete(target, folders, boards, sheets)
@@ -533,7 +525,6 @@ export default function App() {
   }
 
   const renderDocItem = (doc, depth = 0) => {
-    const menuKey = `tree-${doc.type}-${doc.id}`
     const active = activeId?.type === doc.type && activeId.id === doc.id
     return (
       <div key={`${doc.type}-${doc.id}`} className={`tree-item-shell ${active ? 'active' : ''}`}>
@@ -547,20 +538,19 @@ export default function App() {
           <span className="sb-item-label">{doc.name}</span>
         </button>
         {!readOnly && (
-          <div className="item-actions" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+          <div className="item-actions">
             <button
-              className={`tree-action-btn ${actionMenuKey === menuKey ? 'open' : ''}`}
-              aria-label={`Open actions for ${doc.name}`}
-              onClick={() => setActionMenuKey(current => current === menuKey ? null : menuKey)}
+              className="tree-delete-btn"
+              aria-label={`Delete ${doc.name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                openDeleteDialog({ ...doc })
+              }}
+              title={`Delete ${doc.name}`}
               type="button"
             >
-              <MoreHorizontalIcon />
+              <TrashIcon />
             </button>
-            {actionMenuKey === menuKey && (
-              <ItemMenu
-                onDelete={() => openDeleteDialog({ ...doc })}
-              />
-            )}
           </div>
         )}
       </div>
@@ -572,7 +562,6 @@ export default function App() {
     const expanded = expandedFolders[folder.id] !== false
     const childFolders = foldersByParent[folderKey(folder.id)] || []
     const childDocs = docsByFolder[folderKey(folder.id)] || []
-    const menuKey = `tree-folder-${folder.id}`
     return (
       <div key={folder.id}>
         <div className="tree-item-shell">
@@ -587,20 +576,19 @@ export default function App() {
             <span className="sb-item-label">{folder.name}</span>
           </button>
           {!readOnly && (
-            <div className="item-actions" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+            <div className="item-actions">
               <button
-                className={`tree-action-btn ${actionMenuKey === menuKey ? 'open' : ''}`}
-                aria-label={`Open actions for ${folder.name}`}
-                onClick={() => setActionMenuKey(current => current === menuKey ? null : menuKey)}
+                className="tree-delete-btn"
+                aria-label={`Delete ${folder.name}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  openDeleteDialog({ ...folder, type: 'folder' })
+                }}
+                title={`Delete ${folder.name}`}
                 type="button"
               >
-                <MoreHorizontalIcon />
+                <TrashIcon />
               </button>
-              {actionMenuKey === menuKey && (
-                <ItemMenu
-                  onDelete={() => openDeleteDialog({ ...folder, type: 'folder' })}
-                />
-              )}
             </div>
           )}
         </div>
@@ -846,23 +834,15 @@ export default function App() {
                 {saveState === 'saved' && '✓ saved'}
                 {saveState === 'error' && '! save failed'}
               </span>
-              {activeDoc && (
-                <div className="topbar-item-actions" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-                  <button
-                    className={`topbar-action-btn ${actionMenuKey === `active-${activeDoc.type}-${activeDoc.id}` ? 'open' : ''}`}
-                    aria-label={`Open actions for ${activeDoc.name}`}
-                    onClick={() => setActionMenuKey(current => current === `active-${activeDoc.type}-${activeDoc.id}` ? null : `active-${activeDoc.type}-${activeDoc.id}`)}
-                    type="button"
-                  >
-                    <MoreHorizontalIcon />
-                  </button>
-                  {actionMenuKey === `active-${activeDoc.type}-${activeDoc.id}` && (
-                    <ItemMenu
-                      align="right"
-                      onDelete={() => openDeleteDialog({ ...activeDoc, type: activeDoc.type || activeId?.type })}
-                    />
-                  )}
-                </div>
+              {activeDoc && activeDocType && (
+                <button
+                  className="topbar-delete-btn"
+                  onClick={() => openDeleteDialog({ ...activeDoc, type: activeDocType })}
+                  type="button"
+                >
+                  <TrashIcon />
+                  Delete...
+                </button>
               )}
               <button className="share-btn" onClick={() => setShareOpen(true)} type="button">Share</button>
             </>
@@ -1130,17 +1110,6 @@ function FolderField({ label, value, onChange, options }) {
         ))}
       </select>
     </label>
-  )
-}
-
-function ItemMenu({ onDelete, align = 'left' }) {
-  return (
-    <div className={`item-menu item-menu-${align}`}>
-      <button className="item-menu-option item-menu-danger" onClick={onDelete} type="button">
-        <TrashIcon />
-        <span>Delete…</span>
-      </button>
-    </div>
   )
 }
 
