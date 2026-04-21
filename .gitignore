@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Build outputs
+frontend/dist/
+static_build/
+
+# Data & uploads (user content, not in repo)
+data/
+uploads/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Playwright logs
+.playwright-mcp/
+
+# Superpowers cache
+.superpowers/
+
+# Local app bundle
+ResearchHub.app/
+
+# Private folder
+private/
+
+# Internal docs and mockups (not for public repo)
+docs/
+mockups/
+MIGRATION.md
+AGENTS.md
+CLAUDE.MD
+
+# Unused deployment configs
+api/
+start.sh
+railway.json
+railway.toml
+Procfile
