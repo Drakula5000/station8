@@ -114,6 +114,7 @@ export default function App() {
   const [shareOpen, setShareOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [ownerPromptOpen, setOwnerPromptOpen] = useState(false)
+  const [ownerPromptDismissed, setOwnerPromptDismissed] = useState(false)
   const [ownerInput, setOwnerInput] = useState('')
 
   const folderById = buildFolderMap(folders)
@@ -190,7 +191,7 @@ export default function App() {
       return next
     })
     setWorkspace(ws)
-    if (!readOnly && ws && !ws.owner) setOwnerPromptOpen(true)
+    if (!readOnly && ws && !ws.owner && !ownerPromptDismissed) setOwnerPromptOpen(true)
     if (bs.length > 0) {
       setActiveId((current) => current || { type: 'board', id: bs[0].id })
       if (!currentActiveId && bs[0].folder_id) expandFolderPath(bs[0].folder_id, nextFolders)
@@ -198,7 +199,7 @@ export default function App() {
       setActiveId((current) => current || { type: 'sheet', id: ss[0].id })
       if (!currentActiveId && ss[0].folder_id) expandFolderPath(ss[0].folder_id, nextFolders)
     }
-  }, [expandFolderPath, readOnly, shareSlugFromUrl])
+  }, [expandFolderPath, readOnly, shareSlugFromUrl, ownerPromptDismissed])
 
   useEffect(() => {
     refresh()
@@ -774,6 +775,12 @@ export default function App() {
       body: JSON.stringify({ owner: name }),
     })
     setWorkspace(w => ({ ...w, owner: name }))
+    setOwnerPromptDismissed(true)
+    setOwnerPromptOpen(false)
+  }
+
+  const skipOwner = () => {
+    setOwnerPromptDismissed(true)
     setOwnerPromptOpen(false)
   }
 
@@ -1259,7 +1266,7 @@ export default function App() {
       )}
 
       {ownerPromptOpen && (
-        <Modal onClose={() => {}} title="What's your name?">
+        <Modal onClose={skipOwner} title="What's your name?">
           <p style={{ fontSize: 13, color: '#666', marginBottom: 12 }}>
             This shows on shared links so viewers know who shared the workspace.
           </p>
@@ -1271,7 +1278,7 @@ export default function App() {
             onKeyDown={e => { if (e.key === 'Enter' && ownerInput.trim()) saveOwner() }}
           />
           <div className="modal-footer">
-            <button className="btn-ghost" onClick={() => setOwnerPromptOpen(false)} type="button">Skip</button>
+            <button className="btn-ghost" onClick={skipOwner} type="button">Skip</button>
             <button className="btn-primary" onClick={saveOwner} disabled={!ownerInput.trim()} type="button">Save</button>
           </div>
         </Modal>
