@@ -115,6 +115,24 @@ export function TrashIcon(props) {
   )
 }
 
+export function LockIcon(props) {
+  return (
+    <svg {...common} {...props}>
+      <rect x="4" y="9" width="12" height="9" rx="2"/>
+      <path d="M7 9V6.5a3 3 0 0 1 6 0V9"/>
+    </svg>
+  )
+}
+
+export function UnlockIcon(props) {
+  return (
+    <svg {...common} {...props}>
+      <rect x="4" y="9" width="12" height="9" rx="2"/>
+      <path d="M7 9V6.5a3 3 0 0 1 5.5-1.8"/>
+    </svg>
+  )
+}
+
 /* ─── FigJam-style canvas-toolbar icons (colored, 22px) ─── */
 
 export function FjCursorIcon() {

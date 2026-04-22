@@ -193,6 +193,7 @@ def _normalize_workspace(ws):
             'name': (folder.get('name') or 'Untitled folder').strip() or 'Untitled folder',
             'parent_id': folder.get('parent_id'),
             'created_at': folder.get('created_at') or datetime.now().isoformat(),
+            'private': folder.get('private'),
         })
 
     valid_ids = {f['id'] for f in normalized}
@@ -256,6 +257,42 @@ def _load_sheets():
 def _save_sheets(sheets):
     folders = _get_workspace().get('folders', [])
     _save(SHEETS_FILE, [_normalize_doc(sheet, folders) for sheet in sheets])
+
+
+def _any_ancestor_private(folder_id, folders):
+    folder_map = {f['id']: f for f in folders}
+    fid = folder_id
+    visited = set()
+    while fid and fid not in visited:
+        visited.add(fid)
+        f = folder_map.get(fid)
+        if not f:
+            return False
+        fp = f.get('private')
+        if fp is True:
+            return True
+        if fp is False:
+            return False
+        fid = f.get('parent_id')
+    return False
+
+
+def _folder_is_visitor_visible(folder, folders):
+    fp = folder.get('private')
+    if fp is True:
+        return False
+    if fp is False:
+        return True
+    return not _any_ancestor_private(folder.get('parent_id'), folders)
+
+
+def _doc_is_visitor_visible(doc, folders):
+    dp = doc.get('private')
+    if dp is True:
+        return False
+    if dp is False:
+        return True
+    return not _any_ancestor_private(doc.get('folder_id'), folders)
 
 
 def _folder_with_descendants(folder_id, folders):
@@ -687,6 +724,8 @@ def patch_folder(folder_id):
             folder['name'] = (data['name'] or '').strip() or folder.get('name', 'Untitled folder')
         if 'parent_id' in data:
             folder['parent_id'] = _sanitize_parent_id(data.get('parent_id'), folders, folder_id=folder_id)
+        if 'private' in data:
+            folder['private'] = True if data['private'] is True else (False if data['private'] is False else None)
         ws['folders'] = folders
         _save(WORKSPACE_FILE, ws)
         return jsonify(folder)
@@ -748,6 +787,10 @@ def get_workspace():
 @_viewer_auth_required
 def get_visitor_workspace():
     ws = _get_workspace()
+    folders = ws.get('folders', [])
+    visible = [f for f in folders if _folder_is_visitor_visible(f, folders)]
+    ws = dict(ws)
+    ws['folders'] = visible
     return jsonify(ws)
 
 
@@ -860,7 +903,8 @@ def list_boards():
 @app.route('/api/visitor/boards', methods=['GET'])
 @_viewer_auth_required
 def list_visitor_boards():
-    boards = _load_boards()
+    folders = _get_workspace().get('folders', [])
+    boards = [b for b in _load_boards() if _doc_is_visitor_visible(b, folders)]
     boards.sort(key=lambda item: item.get('created_at', ''), reverse=True)
     return jsonify(boards)
 
@@ -900,6 +944,8 @@ def patch_board(board_id):
             board['tags'] = _parse_tags(data['tags'])
         if 'folder_id' in data:
             board['folder_id'] = _normalize_folder_id(data.get('folder_id'), folders)
+        if 'private' in data:
+            board['private'] = True if data['private'] is True else (False if data['private'] is False else None)
         _save_boards(boards)
         return jsonify(board)
     return jsonify({'error': 'Not found'}), 404
@@ -925,6 +971,10 @@ def get_board(board_id):
 @app.route('/api/visitor/boards/<board_id>', methods=['GET'])
 @_viewer_auth_required
 def get_visitor_board(board_id):
+    folders = _get_workspace().get('folders', [])
+    board = next((b for b in _load_boards() if b['id'] == board_id), None)
+    if not board or not _doc_is_visitor_visible(board, folders):
+        return jsonify({'error': 'Not found'}), 404
     return jsonify(_load(_board_file(board_id), {'snapshot': None}))
 
 
@@ -949,7 +999,8 @@ def list_sheets():
 @app.route('/api/visitor/sheets', methods=['GET'])
 @_viewer_auth_required
 def list_visitor_sheets():
-    sheets = _load_sheets()
+    folders = _get_workspace().get('folders', [])
+    sheets = [s for s in _load_sheets() if _doc_is_visitor_visible(s, folders)]
     sheets.sort(key=lambda item: item.get('created_at', ''), reverse=True)
     return jsonify(sheets)
 
@@ -989,6 +1040,8 @@ def patch_sheet(sheet_id):
             sheet['tags'] = _parse_tags(data['tags'])
         if 'folder_id' in data:
             sheet['folder_id'] = _normalize_folder_id(data.get('folder_id'), folders)
+        if 'private' in data:
+            sheet['private'] = True if data['private'] is True else (False if data['private'] is False else None)
         _save_sheets(sheets)
         return jsonify(sheet)
     return jsonify({'error': 'Not found'}), 404
@@ -1012,6 +1065,10 @@ def get_sheet(sheet_id):
 @app.route('/api/visitor/sheets/<sheet_id>', methods=['GET'])
 @_viewer_auth_required
 def get_visitor_sheet(sheet_id):
+    folders = _get_workspace().get('folders', [])
+    sheet = next((s for s in _load_sheets() if s['id'] == sheet_id), None)
+    if not sheet or not _doc_is_visitor_visible(sheet, folders):
+        return jsonify({'error': 'Not found'}), 404
     return jsonify(_load(_sheet_file(sheet_id), {'data': []}))
 
 
@@ -1275,7 +1332,10 @@ def search():
 @app.route('/api/visitor/search', methods=['POST'])
 @_viewer_auth_required
 def visitor_search():
-    return jsonify(_search_payload())
+    folders = _get_workspace().get('folders', [])
+    boards = [b for b in _load_boards() if _doc_is_visitor_visible(b, folders)]
+    sheets = [s for s in _load_sheets() if _doc_is_visitor_visible(s, folders)]
+    return jsonify(_search_payload(boards=boards, sheets=sheets))
 
 
 @app.route('/api/share/<token>/search', methods=['POST'])
