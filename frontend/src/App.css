@@ -1815,8 +1815,8 @@ html[data-mode="light"] {
   background-color: #8898b0 !important;
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='black'] .tl-note__container {
-  background-color: #1e2438 !important;
+  background-color: #000000 !important;
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='white'] .tl-note__container {
-  background-color: #dce8f8 !important;
+  background-color: #FFFFFF !important;
 }

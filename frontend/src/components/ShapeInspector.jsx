@@ -5,6 +5,8 @@ import { FjDraftIcon, FjDataIcon, FjAnalysisIcon, FjInsightIcon } from '../icons
 // Aurora palette — must stay in sync with STICKY_SWATCHES in TldrawCanvas.jsx.
 // bg = what the swatch shows = what you'll see on the canvas.
 const COLOR_SWATCHES = [
+  { id: 'black',    bg: '#000000', tl: 'black' },
+  { id: 'white',    bg: '#FFFFFF', tl: 'white' },
   { id: 'lavender', bg: '#C8B0F5', tl: 'light-violet' },
   { id: 'pink',     bg: '#F0A8C0', tl: 'light-red' },
   { id: 'blue',     bg: '#90BCE8', tl: 'light-blue' },
