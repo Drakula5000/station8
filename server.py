@@ -1266,9 +1266,11 @@ def serve_upload(filename):
         return jsonify({'error': 'Not authorized'}), 401
 
     if supabase:
-        # Redirect to Supabase public URL
-        public_url = supabase.storage.from_('uploads').get_public_url(filename)
-        return redirect(public_url)
+        try:
+            signed_url = supabase.storage.from_('uploads').create_signed_url(filename, 3600)
+            return redirect(signed_url['signedURL'])
+        except Exception as exc:
+            print(f"Supabase signed URL failed for {filename}: {exc}", flush=True)
 
     return send_from_directory(UPLOADS_DIR, filename)
 
