@@ -18,7 +18,16 @@ app = Flask(__name__)
 # Supabase Configuration
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+supabase: Client = None
+
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print("Supabase connected successfully!", flush=True)
+    except Exception as e:
+        print(f"Supabase connection failed: {e}", flush=True)
+else:
+    print("Supabase credentials missing from environment variables!", flush=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STORAGE_ROOT = os.path.abspath(os.getenv('S8_STORAGE_DIR') or BASE_DIR)
@@ -143,8 +152,7 @@ def _save(path, data):
             file_id = os.path.basename(path)
             supabase.table('json_storage').upsert({
                 'id': file_id,
-                'data': data,
-                'updated_at': datetime.now().isoformat()
+                'data': data
             }).execute()
         except Exception as exc:
             print(f"Supabase save failed for {path}: {exc}", flush=True)
