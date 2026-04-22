@@ -4,19 +4,29 @@ import json
 import os
 import re
 import secrets
+import shutil
 import uuid
 from datetime import datetime
 from functools import wraps
 
-from flask import Flask, jsonify, request, send_file, send_from_directory, session
+from flask import Flask, jsonify, request, send_file, send_from_directory, session, redirect
 from werkzeug.security import check_password_hash, generate_password_hash
+from supabase import create_client, Client
 
 app = Flask(__name__)
 
+# Supabase Configuration
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_KEY = os.getenv('SUPABASE_KEY')
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
-UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
+STORAGE_ROOT = os.path.abspath(os.getenv('S8_STORAGE_DIR') or BASE_DIR)
+DATA_DIR = os.path.abspath(os.getenv('S8_DATA_DIR') or os.path.join(STORAGE_ROOT, 'data'))
+UPLOADS_DIR = os.path.abspath(os.getenv('S8_UPLOADS_DIR') or os.path.join(STORAGE_ROOT, 'uploads'))
 STATIC_BUILD = os.path.join(BASE_DIR, 'static_build')
+LEGACY_DATA_DIR = os.path.join(BASE_DIR, 'data')
+LEGACY_UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
 
 BOARDS_FILE = os.path.join(DATA_DIR, 'boards.json')
 SHEETS_FILE = os.path.join(DATA_DIR, 'sheets.json')
@@ -43,8 +53,33 @@ app.config.update(
     SESSION_COOKIE_SECURE=PRODUCTION,
 )
 
+def _dir_has_files(path):
+    return os.path.isdir(path) and any(os.scandir(path))
+
+
+def _copy_tree_contents(src, dst):
+    if not os.path.isdir(src):
+        return
+    os.makedirs(dst, exist_ok=True)
+    for entry in os.scandir(src):
+        src_path = entry.path
+        dst_path = os.path.join(dst, entry.name)
+        if entry.is_dir():
+            shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src_path, dst_path)
+
+
+def _migrate_legacy_storage():
+    if os.path.abspath(DATA_DIR) != os.path.abspath(LEGACY_DATA_DIR) and not _dir_has_files(DATA_DIR):
+        _copy_tree_contents(LEGACY_DATA_DIR, DATA_DIR)
+    if os.path.abspath(UPLOADS_DIR) != os.path.abspath(LEGACY_UPLOADS_DIR) and not _dir_has_files(UPLOADS_DIR):
+        _copy_tree_contents(LEGACY_UPLOADS_DIR, UPLOADS_DIR)
+
+
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
+_migrate_legacy_storage()
 
 
 def _allowed_origins():
@@ -83,6 +118,18 @@ def handle_options():
 
 
 def _load(path, default):
+    # Try Supabase first if configured
+    if supabase:
+        try:
+            # Use the filename (relative to DATA_DIR) as the ID
+            file_id = os.path.basename(path)
+            response = supabase.table('json_storage').select('data').eq('id', file_id).execute()
+            if response.data:
+                return response.data[0]['data']
+        except Exception as exc:
+            print(f"Supabase load failed for {path}: {exc}", flush=True)
+
+    # Fallback to local file
     if not os.path.exists(path):
         return default
     with open(path, 'r') as f:
@@ -90,6 +137,19 @@ def _load(path, default):
 
 
 def _save(path, data):
+    # Save to Supabase first if configured
+    if supabase:
+        try:
+            file_id = os.path.basename(path)
+            supabase.table('json_storage').upsert({
+                'id': file_id,
+                'data': data,
+                'updated_at': datetime.now().isoformat()
+            }).execute()
+        except Exception as exc:
+            print(f"Supabase save failed for {path}: {exc}", flush=True)
+
+    # Always save to local file as well (as a cache/backup)
     with open(path, 'w') as f:
         json.dump(data, f, indent=2)
 
@@ -1107,6 +1167,19 @@ def upload_image():
     filename = str(uuid.uuid4()) + ext
     path = os.path.join(UPLOADS_DIR, filename)
     uploaded.save(path)
+
+    # Upload to Supabase Storage
+    if supabase:
+        try:
+            with open(path, 'rb') as f:
+                supabase.storage.from_('uploads').upload(
+                    path=filename,
+                    file=f,
+                    file_options={"content-type": f"image/{ext.lstrip('.')}"}
+                )
+        except Exception as exc:
+            print(f"Supabase storage upload failed: {exc}", flush=True)
+
     ocr = _load(OCR_FILE, {})
     ocr[filename] = _run_ocr(path)
     _save(OCR_FILE, ocr)
@@ -1115,11 +1188,15 @@ def upload_image():
 
 @app.route('/uploads/<filename>')
 def serve_upload(filename):
-    if _is_studio_authed():
-        return send_from_directory(UPLOADS_DIR, filename)
-    if _is_visitor_authed():
-        return send_from_directory(UPLOADS_DIR, filename)
-    return jsonify({'error': 'Not found'}), 404
+    if not (_is_studio_authed() or _is_visitor_authed()):
+        return jsonify({'error': 'Not authorized'}), 401
+
+    if supabase:
+        # Redirect to Supabase public URL
+        public_url = supabase.storage.from_('uploads').get_public_url(filename)
+        return redirect(public_url)
+
+    return send_from_directory(UPLOADS_DIR, filename)
 
 
 # ── Search ───────────────────────────────────────────────────────────────────

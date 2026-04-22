@@ -4,3 +4,4 @@ numpy==2.2.0
 pytesseract==0.3.13
 Pillow==11.0.0
 flask-cors==5.0.1
+supabase==2.3.0
