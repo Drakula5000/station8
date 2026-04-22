@@ -1,12 +1,81 @@
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-html, body, #root, .app { height: 100%; }
+/* ── Resets ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: #f7f7f7;
-  color: #1a1a1a;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Aurora dark (default) ── */
+html[data-mode="dark"], html:not([data-mode]) {
+  --bg:             #080c18;
+  --canvas-dot:     rgba(140, 100, 240, 0.055);
+  --canvas-glow:    rgba(140, 100, 240, 0.10);
+  --accent:         #9d7df2;
+  --accent2:        #15c4b0;
+  --accent-dim:     rgba(140, 100, 240, 0.12);
+  --accent-border:  rgba(140, 100, 240, 0.28);
+  --sidebar-bg:     #0a0e1c;
+  --sidebar-border: #182038;
+  --hover:          rgba(140, 100, 240, 0.07);
+  --active:         rgba(140, 100, 240, 0.14);
+  --text:           #dce8f8;
+  --text-mid:       #4a5e80;
+  --text-dim:       #1a2540;
+  --pill-bg:        rgba(8, 12, 24, 0.85);
+  --pill-border:    rgba(140, 100, 240, 0.32);
+  --tag-bg:         rgba(21, 196, 176, 0.10);
+  --tag:            #3dd8c8;
+  --card-bg:        #0a0e1c;
+  --card-border:    #182038;
+  --folder-bg:      #0c1124;
+  --folder-border:  #1e2d50;
+  --modal-bg:       #0b0f20;
+  --input-bg:       #0f1428;
+  --input-border:   #1e2d4a;
+  --danger:         #f87171;
+  --danger-dim:     rgba(248, 113, 113, 0.08);
+  --shadow-pill:    0 2px 20px rgba(0, 0, 0, 0.55);
+  --shadow-menu:    0 12px 40px rgba(0, 0, 0, 0.65);
+  --shadow-modal:   0 20px 60px rgba(0, 0, 0, 0.70);
+}
+
+/* ── Aurora light ── */
+html[data-mode="light"] {
+  --bg:             #f5f3ff;
+  --canvas-dot:     rgba(109, 68, 204, 0.045);
+  --canvas-glow:    rgba(109, 68, 204, 0.06);
+  --accent:         #6d44cc;
+  --accent2:        #0b8f8a;
+  --accent-dim:     rgba(109, 68, 204, 0.09);
+  --accent-border:  rgba(109, 68, 204, 0.22);
+  --sidebar-bg:     #eceaff;
+  --sidebar-border: #d8d0f2;
+  --hover:          rgba(109, 68, 204, 0.07);
+  --active:         rgba(109, 68, 204, 0.13);
+  --text:           #1a1530;
+  --text-mid:       #7060a8;
+  --text-dim:       #c8c0e8;
+  --pill-bg:        rgba(255, 255, 255, 0.92);
+  --pill-border:    rgba(109, 68, 204, 0.24);
+  --tag-bg:         rgba(11, 143, 138, 0.10);
+  --tag:            #0b8f8a;
+  --card-bg:        #ffffff;
+  --card-border:    #ddd6f5;
+  --folder-bg:      #ece8ff;
+  --folder-border:  #d2c8f0;
+  --modal-bg:       #f0ecff;
+  --input-bg:       #ffffff;
+  --input-border:   #d5cdf0;
+  --danger:         #c0392b;
+  --danger-dim:     rgba(192, 57, 43, 0.07);
+  --shadow-pill:    0 2px 16px rgba(60, 40, 120, 0.12);
+  --shadow-menu:    0 12px 36px rgba(60, 40, 120, 0.15);
+  --shadow-modal:   0 20px 50px rgba(60, 40, 120, 0.18);
 }
 
 .app {
