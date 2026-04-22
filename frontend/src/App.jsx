@@ -244,7 +244,6 @@ export default function App() {
   const activeSheet = sheets.find(s => s.id === activeId?.id)
   const activeDoc = activeBoard || activeSheet || null
   const activeDocType = activeBoard ? 'board' : activeSheet ? 'sheet' : null
-  const activeFolderPath = buildFolderPath(activeDoc?.folder_id, folderById)
   const deleteImpact = deleteTarget?.type === 'folder'
     ? summarizeFolderDelete(deleteTarget, folders, boards, sheets)
     : null
@@ -579,22 +578,6 @@ export default function App() {
     setNewFolderOpen(false)
   }
 
-  const moveActiveDoc = async (nextFolderValue) => {
-    if (!activeId || readOnly) return
-    const endpoint = activeId.type === 'board' ? 'boards' : 'sheets'
-    const updated = await fetchJson(`${API}/api/${endpoint}/${activeId.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folder_id: normalizeFolderValue(nextFolderValue) }),
-    }, null)
-    if (!updated) return
-    if (activeId.type === 'board') {
-      setBoards(bs => bs.map(b => b.id === updated.id ? updated : b))
-    } else {
-      setSheets(ss => ss.map(s => s.id === updated.id ? updated : s))
-    }
-    if (updated.folder_id) expandFolderPath(updated.folder_id)
-  }
 
   const isEffectivelyPrivate = (item, isFolder) => {
     if (item.private === true) return true
