@@ -205,6 +205,9 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState(null)
   const [errorVisible, setErrorVisible] = useState(false)
   const [saveState, setSaveState] = useState('idle')
+  const [dragItem, setDragItem] = useState(null)
+  const dragItemRef = useRef(null)
+  const [dropTargetFolderId, setDropTargetFolderId] = useState(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'
@@ -761,11 +764,15 @@ export default function App() {
   const renderDocItem = (doc, depth = 0) => {
     const active = activeId?.type === doc.type && activeId.id === doc.id
     const priv = isEffectivelyPrivate(doc, false)
+    const isDragging = dragItem?.type === doc.type && dragItem.id === doc.id
     return (
-      <div key={`${doc.type}-${doc.id}`} className={`tree-item-shell ${active ? 'active' : ''}`}>
+      <div key={`${doc.type}-${doc.id}`} className={`tree-item-shell ${active ? 'active' : ''}${isDragging ? ' is-dragging' : ''}`}>
         <button
           className={`sb-item sb-item-main tree-row tree-doc ${active ? 'active' : ''} ${priv ? 'sb-item-private' : ''}`}
           style={{ paddingLeft: `${10 + depth * 18}px` }}
+          draggable={!readOnly}
+          onDragEnd={handleItemDragEnd}
+          onDragStart={(event) => handleItemDragStart(event, doc)}
           onClick={() => openDocument(doc.type, doc.id, doc.folder_id)}
           type="button"
         >
@@ -805,12 +812,19 @@ export default function App() {
     const childFolders = foldersByParent[folderKey(folder.id)] || []
     const childDocs = docsByFolder[folderKey(folder.id)] || []
     const priv = isEffectivelyPrivate(folder, true)
+    const isDragging = dragItem?.type === 'folder' && dragItem.id === folder.id
+    const isDropTarget = dropTargetFolderId === folder.id
     return (
       <div key={folder.id}>
-        <div className="tree-item-shell">
+        <div className={`tree-item-shell${isDragging ? ' is-dragging' : ''}`}>
           <button
-            className={`sb-item sb-item-main tree-row tree-folder ${expanded ? 'folder-open' : ''} ${priv ? 'sb-item-private' : ''}`}
+            className={`sb-item sb-item-main tree-row tree-folder ${expanded ? 'folder-open' : ''} ${priv ? 'sb-item-private' : ''}${isDropTarget ? ' is-drop-target' : ''}`}
             style={{ paddingLeft: `${10 + depth * 18}px` }}
+            draggable={!readOnly}
+            onDragEnd={handleItemDragEnd}
+            onDragOver={(event) => handleFolderDragOver(event, folder.id)}
+            onDragStart={(event) => handleItemDragStart(event, { ...folder, type: 'folder' })}
+            onDrop={(event) => handleFolderDrop(event, folder.id)}
             onClick={() => toggleFolder(folder.id)}
             type="button"
           >
@@ -922,6 +936,128 @@ export default function App() {
       setErrorVisible(false)
       setTimeout(() => setErrorMessage(null), 300)
     }, 3000)
+  }
+
+  const clearDragState = () => {
+    dragItemRef.current = null
+    setDragItem(null)
+    setDropTargetFolderId(null)
+  }
+
+  const isFolderDescendant = (folderId, possibleAncestorId) => {
+    if (!folderId || !possibleAncestorId) return false
+    let cursor = folderId
+    const visited = new Set()
+    while (cursor && !visited.has(cursor)) {
+      if (cursor === possibleAncestorId) return true
+      visited.add(cursor)
+      cursor = folderById[cursor]?.parent_id || null
+    }
+    return false
+  }
+
+  const canDropIntoFolder = (item, targetFolderId) => {
+    if (!item) return false
+    const normalizedTargetId = targetFolderId || null
+    if (item.type === 'folder') {
+      if (item.id === normalizedTargetId) return false
+      if ((item.parent_id || null) === normalizedTargetId) return false
+      return !isFolderDescendant(normalizedTargetId, item.id)
+    }
+    return (item.folder_id || null) !== normalizedTargetId
+  }
+
+  const handleItemDragStart = (event, item) => {
+    if (readOnly) return
+    const payload = item.type === 'folder'
+      ? { type: 'folder', id: item.id, name: item.name, parent_id: item.parent_id || null }
+      : { type: item.type, id: item.id, name: item.name, folder_id: item.folder_id || null }
+    dragItemRef.current = payload
+    setDragItem(payload)
+    setDropTargetFolderId(null)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', `${payload.type}:${payload.id}`)
+  }
+
+  const handleItemDragEnd = () => {
+    clearDragState()
+  }
+
+  const handleFolderDragOver = (event, folderId) => {
+    const dragged = dragItemRef.current
+    if (!canDropIntoFolder(dragged, folderId)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'move'
+    if (dropTargetFolderId !== folderId) setDropTargetFolderId(folderId)
+  }
+
+  const moveDraggedItem = async (targetFolderId) => {
+    const dragged = dragItemRef.current
+    if (!canDropIntoFolder(dragged, targetFolderId)) {
+      clearDragState()
+      return
+    }
+
+    const url = dragged.type === 'folder'
+      ? `${API}/api/folders/${dragged.id}`
+      : dragged.type === 'board'
+      ? `${API}/api/boards/${dragged.id}`
+      : `${API}/api/sheets/${dragged.id}`
+    const body = dragged.type === 'folder'
+      ? { parent_id: targetFolderId || null }
+      : { folder_id: targetFolderId || null }
+
+    const updated = await fetchJson(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, null)
+
+    if (!updated) {
+      showError(`Could not move ${dragged.name}.`)
+      clearDragState()
+      return
+    }
+
+    if (dragged.type === 'folder') {
+      setFolders(current => current.map(folder => folder.id === updated.id ? updated : folder))
+    } else if (dragged.type === 'board') {
+      setBoards(current => current.map(board => board.id === updated.id ? updated : board))
+    } else {
+      setSheets(current => current.map(sheet => sheet.id === updated.id ? updated : sheet))
+    }
+
+    if (targetFolderId) expandFolderPath(targetFolderId)
+    clearDragState()
+  }
+
+  const handleFolderDrop = async (event, folderId) => {
+    const dragged = dragItemRef.current
+    if (!canDropIntoFolder(dragged, folderId)) return
+    event.preventDefault()
+    event.stopPropagation()
+    await moveDraggedItem(folderId)
+  }
+
+  const handleWorkspaceDragOver = (event) => {
+    const dragged = dragItemRef.current
+    if (!canDropIntoFolder(dragged, null)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    if (dropTargetFolderId !== ROOT_FOLDER) setDropTargetFolderId(ROOT_FOLDER)
+  }
+
+  const handleWorkspaceDrop = async (event) => {
+    const dragged = dragItemRef.current
+    if (!canDropIntoFolder(dragged, null)) return
+    event.preventDefault()
+    await moveDraggedItem(null)
+  }
+
+  const handleWorkspaceDragLeave = (event) => {
+    if (event.currentTarget.contains(event.relatedTarget)) return
+    setDropTargetFolderId(null)
   }
 
   const handleDelete = async () => {
@@ -1053,7 +1189,12 @@ export default function App() {
           </div>
 
           <div className="sb-section-row"><div className="sb-section">Workspace</div></div>
-          <div className="workspace-tree">
+          <div
+            className={`workspace-tree${dropTargetFolderId === ROOT_FOLDER ? ' is-root-drop-target' : ''}`}
+            onDragLeave={handleWorkspaceDragLeave}
+            onDragOver={handleWorkspaceDragOver}
+            onDrop={handleWorkspaceDrop}
+          >
             {rootFolders.map(folder => renderFolderNode(folder))}
             {rootDocs.length > 0 && rootFolders.length > 0 && <div className="sb-subsection">Unfiled</div>}
             {rootDocs.map(doc => renderDocItem(doc))}

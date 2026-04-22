@@ -204,9 +204,22 @@ html[data-mode="light"] {
   text-transform: uppercase; color: var(--s8-text-dim);
   padding: 8px 10px 4px;
 }
-.workspace-tree { display: flex; flex-direction: column; gap: 1px; }
+.workspace-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-radius: 10px;
+  transition: background 0.12s, box-shadow 0.12s;
+}
+.workspace-tree.is-root-drop-target {
+  background: var(--s8-accent-dim);
+  box-shadow: inset 0 0 0 1px var(--s8-accent-border);
+}
 
 .tree-item-shell { position: relative; display: flex; align-items: center; }
+.tree-item-shell.is-dragging {
+  opacity: 0.46;
+}
 .sb-item {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 8px; border-radius: 7px; width: 100%;
@@ -216,6 +229,11 @@ html[data-mode="light"] {
 }
 .sb-item:hover { background: var(--s8-hover); }
 .sb-item.active { background: var(--s8-active); color: var(--s8-accent); }
+.sb-item.is-drop-target {
+  background: var(--s8-accent-dim);
+  box-shadow: inset 0 0 0 1px var(--s8-accent-border);
+  color: var(--s8-accent);
+}
 .sb-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-item svg { flex-shrink: 0; }
 .tree-folder { color: var(--s8-text-mid); }
