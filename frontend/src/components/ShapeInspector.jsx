@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { track, useEditor, DefaultColorStyle, DefaultFillStyle, DefaultFontStyle, DefaultSizeStyle, DefaultHorizontalAlignStyle } from 'tldraw'
 import { FjDraftIcon, FjDataIcon, FjAnalysisIcon, FjInsightIcon } from '../icons'
 
@@ -39,6 +40,15 @@ const SIZES = [
   { id: 'xl', label: 'XL' },
 ]
 
+// Mirrors tldraw's default text shape font sizes. Text shapes also support a
+// per-shape scale multiplier, which lets us restore freeform numeric sizing.
+const SIZE_TO_PX = {
+  s: 18,
+  m: 24,
+  l: 36,
+  xl: 44,
+}
+
 const ALIGNS = [
   { id: 'start',  label: '⟵', title: 'Left' },
   { id: 'middle', label: '↔',  title: 'Center' },
@@ -67,6 +77,7 @@ const SHAPES_WITH_SIZE    = new Set(['note', 'geo', 'text', 'arrow', 'line', 'dr
 const SHAPES_WITH_ALIGN   = new Set(['note', 'geo', 'text'])
 const SHAPES_WITH_CORNERS = new Set(['frame'])
 const SHAPES_WITH_IMAGE_STYLING = new Set(['image'])
+const SHAPES_WITH_FREEFORM_TEXT_SIZE = new Set(['text'])
 
 function allShapesMatch(shapes, set) {
   return shapes.length > 0 && shapes.every((s) => set.has(s.type))
@@ -96,9 +107,51 @@ function getGeoFillOpacity(shape) {
   return shape.props?.fill === 'none' ? 0 : 1
 }
 
+function getTextSizePx(shape) {
+  const baseSize = SIZE_TO_PX[shape.props?.size] ?? SIZE_TO_PX.m
+  const scale = Number.isFinite(shape.props?.scale) ? shape.props.scale : 1
+  return baseSize * scale
+}
+
+function getSharedTextSizePx(shapes) {
+  if (!allShapesMatch(shapes, SHAPES_WITH_FREEFORM_TEXT_SIZE)) return undefined
+  const first = getTextSizePx(shapes[0])
+  return shapes.every((shape) => Math.abs(getTextSizePx(shape) - first) < 0.01) ? first : undefined
+}
+
+function getPresetSizeId(sizePx) {
+  if (sizePx === undefined) return undefined
+  return SIZES.find((size) => Math.abs(SIZE_TO_PX[size.id] - sizePx) < 0.01)?.id
+}
+
+function formatSizePx(sizePx) {
+  const rounded = Math.round(sizePx * 10) / 10
+  return String(rounded)
+}
+
+function clampTextSizePx(value) {
+  return Math.max(1, Math.min(400, value))
+}
+
+function getNearestSizePreset(sizePx) {
+  return SIZES.reduce((nearest, candidate) => {
+    const nearestDistance = Math.abs(SIZE_TO_PX[nearest.id] - sizePx)
+    const candidateDistance = Math.abs(SIZE_TO_PX[candidate.id] - sizePx)
+    return candidateDistance < nearestDistance ? candidate : nearest
+  })
+}
+
 export const ShapeInspector = track(function ShapeInspector() {
   const editor = useEditor()
+  const [textSizeDraft, setTextSizeDraft] = useState('')
+
   const shapes = editor.getSelectedShapes()
+  const activeTextSizePx = getSharedTextSizePx(shapes)
+
+  useEffect(() => {
+    setTextSizeDraft(activeTextSizePx === undefined ? '' : formatSizePx(activeTextSizePx))
+  }, [activeTextSizePx])
+
   if (shapes.length === 0) return null
 
   // Don't interrupt typing / resizing / rotating
@@ -119,6 +172,7 @@ export const ShapeInspector = track(function ShapeInspector() {
   const showAlign   = allShapesMatch(shapes, SHAPES_WITH_ALIGN)
   const showCorners = allShapesMatch(shapes, SHAPES_WITH_CORNERS)
   const showImageStyling = allShapesMatch(shapes, SHAPES_WITH_IMAGE_STYLING)
+  const showTextSizeInput = allShapesMatch(shapes, SHAPES_WITH_FREEFORM_TEXT_SIZE)
 
   const activeColor = sharedStyle(editor, DefaultColorStyle)
   const activeFillStyle = sharedStyle(editor, DefaultFillStyle)
@@ -143,6 +197,7 @@ export const ShapeInspector = track(function ShapeInspector() {
   const activeFillOpacity = showFill && shapes.every(
     (s) => Number(getGeoFillOpacity(s)) === Number(getGeoFillOpacity(shapes[0]))
   ) ? Number(getGeoFillOpacity(shapes[0])) : undefined
+  const activeSizeButton = showTextSizeInput ? getPresetSizeId(activeTextSizePx) : activeSize
 
   const applyColor  = (tl) => editor.setStyleForSelectedShapes(DefaultColorStyle, tl)
   const applyFillColor = (color) => editor.run(() => {
@@ -178,7 +233,42 @@ export const ShapeInspector = track(function ShapeInspector() {
     )
   })
   const applyFont   = (id) => editor.setStyleForSelectedShapes(DefaultFontStyle, id)
-  const applySize   = (id) => editor.setStyleForSelectedShapes(DefaultSizeStyle, id)
+  const applyTextSizePx = (value) => {
+    const nextSizePx = clampTextSizePx(value)
+    const preset = getNearestSizePreset(nextSizePx)
+    editor.updateShapes(
+      shapes.map((shape) => ({
+        id: shape.id,
+        type: shape.type,
+        props: {
+          size: preset.id,
+          scale: nextSizePx / SIZE_TO_PX[preset.id],
+        },
+      }))
+    )
+  }
+  const applySize = (id) => {
+    if (showTextSizeInput) {
+      editor.updateShapes(
+        shapes.map((shape) => ({
+          id: shape.id,
+          type: shape.type,
+          props: { size: id, scale: 1 },
+        }))
+      )
+      return
+    }
+    editor.setStyleForSelectedShapes(DefaultSizeStyle, id)
+  }
+  const commitTextSizeDraft = () => {
+    if (!showTextSizeInput) return
+    const parsed = Number(textSizeDraft)
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setTextSizeDraft(activeTextSizePx === undefined ? '' : formatSizePx(activeTextSizePx))
+      return
+    }
+    applyTextSizePx(parsed)
+  }
   const applyAlign  = (id) => editor.setStyleForSelectedShapes(DefaultHorizontalAlignStyle, id)
   const applyCorner = (rx) => editor.updateShapes(
     shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, cornerRadius: rx } }))
@@ -283,15 +373,38 @@ export const ShapeInspector = track(function ShapeInspector() {
       {showSize && (
         <div className="insp-row">
           <div className="insp-label">Size</div>
-          <div className="insp-body">
+          <div className="insp-body insp-body-size">
             {SIZES.map((s) => (
               <button
                 key={s.id}
-                className={`insp-btn ${activeSize === s.id ? 'active' : ''}`}
+                className={`insp-btn ${activeSizeButton === s.id ? 'active' : ''}`}
                 onClick={() => applySize(s.id)}
                 type="button"
               >{s.label}</button>
             ))}
+            {showTextSizeInput && (
+              <input
+                className="insp-number"
+                type="number"
+                inputMode="numeric"
+                min="1"
+                max="400"
+                step="1"
+                value={textSizeDraft}
+                onChange={(e) => setTextSizeDraft(e.target.value)}
+                onBlur={commitTextSizeDraft}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.currentTarget.blur()
+                  }
+                  if (e.key === 'Escape') {
+                    setTextSizeDraft(activeTextSizePx === undefined ? '' : formatSizePx(activeTextSizePx))
+                    e.currentTarget.blur()
+                  }
+                }}
+                aria-label="Text size"
+              />
+            )}
           </div>
         </div>
       )}

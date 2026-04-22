@@ -858,6 +858,7 @@ html[data-mode="light"] {
 .shape-inspector .insp-body { flex: 1; display: flex; gap: 6px; }
 .shape-inspector .insp-body-swatches { gap: 5px; flex-wrap: wrap; }
 .shape-inspector .insp-body-pills { gap: 6px; }
+.shape-inspector .insp-body-size { align-items: center; }
 
 .shape-inspector .insp-swatch {
   width: 24px; height: 24px;
@@ -877,6 +878,32 @@ html[data-mode="light"] {
 }
 .shape-inspector .insp-btn:hover { background: var(--s8-hover); border-color: var(--s8-sidebar-border); }
 .shape-inspector .insp-btn.active { background: var(--s8-accent); color: var(--s8-card-bg); border-color: var(--s8-accent); }
+.shape-inspector .insp-number {
+  width: 66px;
+  height: 32px;
+  border: 1px solid var(--s8-input-border);
+  background: var(--s8-input-bg);
+  color: var(--s8-text);
+  border-radius: 7px;
+  padding: 0 8px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: 'Space Mono', monospace;
+  outline: none;
+}
+.shape-inspector .insp-number:focus {
+  border-color: var(--s8-accent);
+  box-shadow: 0 0 0 1px var(--s8-accent);
+}
+.shape-inspector .insp-number::-webkit-outer-spin-button,
+.shape-inspector .insp-number::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+.shape-inspector .insp-number[type='number'] {
+  -moz-appearance: textfield;
+}
 
 .shape-inspector .font-pill {
   flex: 1; min-width: 52px;
