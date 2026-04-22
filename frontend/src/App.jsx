@@ -3,7 +3,7 @@ import Spreadsheet from 'react-spreadsheet'
 import TldrawCanvas from './TldrawCanvas'
 import {
   BoardIcon, SheetIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon,
-  SidebarExpandIcon, TrashIcon,
+  SidebarExpandIcon, SidebarCollapseIcon, TrashIcon, LockIcon, UnlockIcon,
 } from './icons'
 import './App.css'
 
@@ -596,6 +596,63 @@ export default function App() {
     if (updated.folder_id) expandFolderPath(updated.folder_id)
   }
 
+  const isEffectivelyPrivate = (item, isFolder) => {
+    if (item.private === true) return true
+    if (item.private === false) return false
+    const parentId = isFolder ? item.parent_id : item.folder_id
+    let id = parentId
+    const visited = new Set()
+    while (id && !visited.has(id)) {
+      visited.add(id)
+      const f = folderById[id]
+      if (!f) return false
+      if (f.private === true) return true
+      if (f.private === false) return false
+      id = f.parent_id
+    }
+    return false
+  }
+
+  const togglePrivate = async (item, isFolder) => {
+    const effective = isEffectivelyPrivate(item, isFolder)
+    let newValue
+    if (effective) {
+      const parentId = isFolder ? item.parent_id : item.folder_id
+      let ancestorPrivate = false
+      let id = parentId
+      const visited = new Set()
+      while (id && !visited.has(id)) {
+        visited.add(id)
+        const f = folderById[id]
+        if (!f) break
+        if (f.private === true) { ancestorPrivate = true; break }
+        if (f.private === false) break
+        id = f.parent_id
+      }
+      newValue = ancestorPrivate ? false : null
+    } else {
+      newValue = true
+    }
+    const url = isFolder
+      ? `${API}/api/folders/${item.id}`
+      : item.type === 'board'
+        ? `${API}/api/boards/${item.id}`
+        : `${API}/api/sheets/${item.id}`
+    const updated = await fetchJson(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ private: newValue }),
+    }, null)
+    if (!updated) return
+    if (isFolder) {
+      setFolders(fs => fs.map(f => f.id === updated.id ? updated : f))
+    } else if (item.type === 'board') {
+      setBoards(bs => bs.map(b => b.id === updated.id ? updated : b))
+    } else {
+      setSheets(ss => ss.map(s => s.id === updated.id ? updated : s))
+    }
+  }
+
   const toggleFolder = (folderId) => {
     setExpandedFolders(current => ({ ...current, [folderId]: current[folderId] === false ? true : false }))
   }
@@ -717,26 +774,34 @@ export default function App() {
 
   const renderDocItem = (doc, depth = 0) => {
     const active = activeId?.type === doc.type && activeId.id === doc.id
+    const priv = isEffectivelyPrivate(doc, false)
     return (
       <div key={`${doc.type}-${doc.id}`} className={`tree-item-shell ${active ? 'active' : ''}`}>
         <button
-          className={`sb-item sb-item-main tree-row tree-doc ${active ? 'active' : ''}`}
+          className={`sb-item sb-item-main tree-row tree-doc ${active ? 'active' : ''} ${priv ? 'sb-item-private' : ''}`}
           style={{ paddingLeft: `${10 + depth * 18}px` }}
           onClick={() => openDocument(doc.type, doc.id, doc.folder_id)}
           type="button"
         >
           {doc.type === 'board' ? <BoardIcon /> : <SheetIcon />}
           <span className="sb-item-label">{doc.name}</span>
+          {priv && <span className="sb-private-badge"><LockIcon /></span>}
         </button>
         {!readOnly && (
           <div className="item-actions">
             <button
+              className={`tree-privacy-btn ${priv ? 'is-private' : ''}`}
+              aria-label={priv ? `Make ${doc.name} public` : `Make ${doc.name} private`}
+              onClick={(e) => { e.stopPropagation(); togglePrivate(doc, false) }}
+              title={priv ? 'Make public' : 'Make private'}
+              type="button"
+            >
+              {priv ? <UnlockIcon /> : <LockIcon />}
+            </button>
+            <button
               className="tree-delete-btn"
               aria-label={`Delete ${doc.name}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                openDeleteDialog({ ...doc })
-              }}
+              onClick={(e) => { e.stopPropagation(); openDeleteDialog({ ...doc }) }}
               title={`Delete ${doc.name}`}
               type="button"
             >
@@ -753,11 +818,12 @@ export default function App() {
     const expanded = expandedFolders[folder.id] !== false
     const childFolders = foldersByParent[folderKey(folder.id)] || []
     const childDocs = docsByFolder[folderKey(folder.id)] || []
+    const priv = isEffectivelyPrivate(folder, true)
     return (
       <div key={folder.id}>
         <div className="tree-item-shell">
           <button
-            className={`sb-item sb-item-main tree-row tree-folder ${expanded ? 'folder-open' : ''}`}
+            className={`sb-item sb-item-main tree-row tree-folder ${expanded ? 'folder-open' : ''} ${priv ? 'sb-item-private' : ''}`}
             style={{ paddingLeft: `${10 + depth * 18}px` }}
             onClick={() => toggleFolder(folder.id)}
             type="button"
@@ -765,16 +831,23 @@ export default function App() {
             <span className={`tree-chevron ${expanded ? 'open' : ''}`}><ChevronRightIcon /></span>
             {expanded ? <FolderOpenIcon /> : <FolderIcon />}
             <span className="sb-item-label">{folder.name}</span>
+            {priv && <span className="sb-private-badge"><LockIcon /></span>}
           </button>
           {!readOnly && (
             <div className="item-actions">
               <button
+                className={`tree-privacy-btn ${priv ? 'is-private' : ''}`}
+                aria-label={priv ? `Make ${folder.name} public` : `Make ${folder.name} private`}
+                onClick={(e) => { e.stopPropagation(); togglePrivate(folder, true) }}
+                title={priv ? 'Make public' : 'Make private'}
+                type="button"
+              >
+                {priv ? <UnlockIcon /> : <LockIcon />}
+              </button>
+              <button
                 className="tree-delete-btn"
                 aria-label={`Delete ${folder.name}`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  openDeleteDialog({ ...folder, type: 'folder' })
-                }}
+                onClick={(e) => { e.stopPropagation(); openDeleteDialog({ ...folder, type: 'folder' }) }}
                 title={`Delete ${folder.name}`}
                 type="button"
               >
@@ -976,9 +1049,16 @@ export default function App() {
     <div className={`app${sidebarCollapsed ? ' sidebar-collapsed' : ''}${readOnly ? ' app-viewer' : ''}`}>
       {showSidebar && (
         <aside className="sidebar" id="workspace-sidebar" aria-hidden={sidebarCollapsed}>
-          {/* Header — brand only, no collapse button (pill handles it) */}
           <div className="sidebar-head">
             <span className="sidebar-brand">Station 8</span>
+            <button
+              className="sidebar-collapse-btn"
+              onClick={() => setSidebarCollapsed(true)}
+              title="Collapse sidebar"
+              type="button"
+            >
+              <SidebarCollapseIcon />
+            </button>
           </div>
 
           {/* Actions */}
@@ -1098,6 +1178,38 @@ export default function App() {
 
                 {titleMenuOpen && (
                   <div className="title-menu">
+                    {/* Tags */}
+                    <div className="title-menu-tags-section">
+                      <div className="title-menu-tags-label">Tags</div>
+                      <div className="title-menu-tags">
+                        {(activeDoc?.tags || []).map(t => {
+                          const c = tagColor(t)
+                          return (
+                            <span key={t} className="tag-pill" style={{ background: c.bg, color: c.fg }}>
+                              #{t}
+                              <button className="tag-pill-remove" onClick={() => removeTagFromActive(t)} type="button">×</button>
+                            </span>
+                          )
+                        })}
+                        {tagInputOpen ? (
+                          <input
+                            className="tag-input"
+                            autoFocus
+                            value={tagInput}
+                            onChange={e => setTagInput(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') { addTagToActive(); setTagInputOpen(false) }
+                              if (e.key === 'Escape') setTagInputOpen(false)
+                            }}
+                            onBlur={() => { addTagToActive(); setTagInputOpen(false) }}
+                            placeholder="tag name"
+                          />
+                        ) : (
+                          <button className="tag-add" onClick={() => setTagInputOpen(true)} type="button">+ tag</button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="title-menu-sep" />
                     <button className="title-menu-item" onClick={() => { setShareOpen(true); setTitleMenuOpen(false) }} type="button">
                       Share workspace
                     </button>
