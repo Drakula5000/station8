@@ -3,7 +3,7 @@ import Spreadsheet from 'react-spreadsheet'
 import TldrawCanvas from './TldrawCanvas'
 import {
   BoardIcon, SheetIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon,
-  SidebarCollapseIcon, SidebarExpandIcon, TrashIcon,
+  SidebarExpandIcon, TrashIcon,
 } from './icons'
 import './App.css'
 
@@ -965,30 +965,25 @@ export default function App() {
     <div className={`app${sidebarCollapsed ? ' sidebar-collapsed' : ''}${readOnly ? ' app-viewer' : ''}`}>
       {showSidebar && (
         <aside className="sidebar" id="workspace-sidebar" aria-hidden={sidebarCollapsed}>
-          <div className="sidebar-header">
-            <div className="brand">{workspace?.name || 'Research'}</div>
-            <button
-              className="sidebar-chrome-btn"
-              onClick={() => setSidebarCollapsed(true)}
-              type="button"
-              aria-controls="workspace-sidebar"
-              aria-expanded="true"
-              aria-label="Hide sidebar"
-              title="Hide sidebar"
-            >
-              <SidebarCollapseIcon />
+          {/* Header — brand only, no collapse button (pill handles it) */}
+          <div className="sidebar-head">
+            <span className="sidebar-brand">Station 8</span>
+          </div>
+
+          {/* Actions */}
+          <div className="sidebar-actions">
+            <button className="sidebar-action" onClick={openNewFolderModal} type="button">
+              <FolderIcon /> Folder
+            </button>
+            <button className="sidebar-action" onClick={openNewBoardModal} type="button">
+              <BoardIcon /> Board
+            </button>
+            <button className="sidebar-action" onClick={openNewSheetModal} type="button">
+              <SheetIcon /> Sheet
             </button>
           </div>
 
-          <div className="sidebar-actions">
-            <button className="sidebar-action" onClick={openNewFolderModal} type="button"><FolderIcon /> Folder</button>
-            <button className="sidebar-action" onClick={openNewBoardModal} type="button"><BoardIcon /> Board</button>
-            <button className="sidebar-action" onClick={openNewSheetModal} type="button"><SheetIcon /> Sheet</button>
-          </div>
-
-          <div className="sb-section-row">
-            <div className="sb-section">Workspace</div>
-          </div>
+          <div className="sb-section-row"><div className="sb-section">Workspace</div></div>
           <div className="workspace-tree">
             {rootFolders.map(folder => renderFolderNode(folder))}
             {rootDocs.length > 0 && rootFolders.length > 0 && <div className="sb-subsection">Unfiled</div>}
@@ -1003,7 +998,9 @@ export default function App() {
               <div className="sb-section-row">
                 <div className="sb-section">Tags</div>
                 {tagFilter && (
-                  <button className="sb-add" onClick={() => setTagFilter(null)} title="Clear filter" type="button"><CloseIcon /></button>
+                  <button className="sb-add" onClick={() => setTagFilter(null)} title="Clear filter" type="button">
+                    <CloseIcon />
+                  </button>
                 )}
               </div>
               <div className="sb-tags">
@@ -1011,17 +1008,9 @@ export default function App() {
                   const c = tagColor(t)
                   const active = tagFilter === t
                   return (
-                    <button
-                      key={t}
-                      className="sb-tag"
-                      style={{
-                        background: active ? c.border : c.bg,
-                        color: active ? '#fff' : c.fg,
-                        borderColor: c.border,
-                      }}
-                      onClick={() => filterByTag(t)}
-                      type="button"
-                    >
+                    <button key={t} className="sb-tag"
+                      style={{ background: active ? c.border : c.bg, color: active ? '#fff' : c.fg, borderColor: c.border }}
+                      onClick={() => filterByTag(t)} type="button">
                       #{t} · {count}
                     </button>
                   )
@@ -1030,13 +1019,26 @@ export default function App() {
             </>
           )}
 
-          <div className="sb-section-row">
-            <div className="sb-section">Search</div>
-          </div>
+          <div className="sb-section-row"><div className="sb-section">Search</div></div>
           <button className="search-btn" onClick={() => setSearchOpen(true)} type="button">
             <span className="search-btn-label"><SearchIcon /> Search</span>
             <span className="kbd">⌘F</span>
           </button>
+
+          {/* Sticky footer */}
+          <div className="sidebar-footer">
+            <button
+              className="sidebar-mode-btn"
+              onClick={() => setColorMode(m => m === 'dark' ? 'light' : 'dark')}
+              title={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              type="button"
+            >
+              {colorMode === 'dark' ? '◑ Light mode' : '◑ Dark mode'}
+            </button>
+            <button className="sidebar-logout-btn" onClick={handleLogout} type="button">
+              Log out
+            </button>
+          </div>
         </aside>
       )}
 
