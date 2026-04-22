@@ -1,4 +1,4 @@
-import { track, useEditor, DefaultColorStyle, DefaultFontStyle, DefaultSizeStyle, DefaultHorizontalAlignStyle } from 'tldraw'
+import { track, useEditor, DefaultColorStyle, DefaultFillStyle, DefaultFontStyle, DefaultSizeStyle, DefaultHorizontalAlignStyle } from 'tldraw'
 import { FjDraftIcon, FjDataIcon, FjAnalysisIcon, FjInsightIcon } from '../icons'
 
 // Aurora palette — must stay in sync with STICKY_SWATCHES in TldrawCanvas.jsx.
@@ -12,6 +12,17 @@ const COLOR_SWATCHES = [
   { id: 'purple',   bg: '#B8A0F8', tl: 'violet' },
   { id: 'red',      bg: '#e87890', tl: 'red' },
   { id: 'grey',     bg: '#8898b0', tl: 'grey' },
+]
+
+const DEFAULT_FILL_OPACITY = 0.4
+
+const FILL_OPACITY_OPTIONS = [
+  { id: 0, label: 'Off', title: 'No fill' },
+  { id: 0.2, label: '20', title: '20% fill' },
+  { id: 0.4, label: '40', title: '40% fill' },
+  { id: 0.6, label: '60', title: '60% fill' },
+  { id: 0.8, label: '80', title: '80% fill' },
+  { id: 1, label: '100', title: '100% fill' },
 ]
 
 const FONTS = [
@@ -50,6 +61,7 @@ const IMAGE_BORDER_OPTIONS = [
 // Which control rows apply to which shape types.
 // Keep conservative — show a control only when ALL selected shapes support it.
 const SHAPES_WITH_COLOR   = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 'frame', 'highlight'])
+const SHAPES_WITH_FILL    = new Set(['geo'])
 const SHAPES_WITH_TEXT    = new Set(['note', 'geo', 'text', 'arrow'])
 const SHAPES_WITH_SIZE    = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw'])
 const SHAPES_WITH_ALIGN   = new Set(['note', 'geo', 'text'])
@@ -69,6 +81,21 @@ function sharedStyle(editor, styleProp) {
   return entry.value
 }
 
+function swatchFromTlColor(tlColor) {
+  return COLOR_SWATCHES.find((swatch) => swatch.tl === tlColor)
+}
+
+function getGeoFillColor(shape) {
+  if (typeof shape.meta?.fillColor === 'string') return shape.meta.fillColor
+  if (shape.props?.fill === 'none') return null
+  return swatchFromTlColor(shape.props?.color)?.bg ?? null
+}
+
+function getGeoFillOpacity(shape) {
+  if (typeof shape.meta?.fillOpacity === 'number') return shape.meta.fillOpacity
+  return shape.props?.fill === 'none' ? 0 : 1
+}
+
 export const ShapeInspector = track(function ShapeInspector() {
   const editor = useEditor()
   const shapes = editor.getSelectedShapes()
@@ -86,6 +113,7 @@ export const ShapeInspector = track(function ShapeInspector() {
   const centerX = (topLeft.x + topRight.x) / 2
 
   const showColor   = allShapesMatch(shapes, SHAPES_WITH_COLOR)
+  const showFill    = allShapesMatch(shapes, SHAPES_WITH_FILL)
   const showFont    = allShapesMatch(shapes, SHAPES_WITH_TEXT)
   const showSize    = allShapesMatch(shapes, SHAPES_WITH_SIZE)
   const showAlign   = allShapesMatch(shapes, SHAPES_WITH_ALIGN)
@@ -93,6 +121,7 @@ export const ShapeInspector = track(function ShapeInspector() {
   const showImageStyling = allShapesMatch(shapes, SHAPES_WITH_IMAGE_STYLING)
 
   const activeColor = sharedStyle(editor, DefaultColorStyle)
+  const activeFillStyle = sharedStyle(editor, DefaultFillStyle)
   const activeFont  = sharedStyle(editor, DefaultFontStyle)
   const activeSize  = sharedStyle(editor, DefaultSizeStyle)
   const activeAlign = sharedStyle(editor, DefaultHorizontalAlignStyle)
@@ -108,8 +137,46 @@ export const ShapeInspector = track(function ShapeInspector() {
   const activeImageBorderColor = showImageStyling && shapes.every(
     s => String(s.meta?.imageBorderColor ?? COLOR_SWATCHES[5].bg) === String(shapes[0].meta?.imageBorderColor ?? COLOR_SWATCHES[5].bg)
   ) ? String(shapes[0].meta?.imageBorderColor ?? COLOR_SWATCHES[5].bg) : undefined
+  const activeFillColor = showFill && shapes.every(
+    (s) => String(getGeoFillColor(s)) === String(getGeoFillColor(shapes[0]))
+  ) ? getGeoFillColor(shapes[0]) ?? undefined : undefined
+  const activeFillOpacity = showFill && shapes.every(
+    (s) => Number(getGeoFillOpacity(s)) === Number(getGeoFillOpacity(shapes[0]))
+  ) ? Number(getGeoFillOpacity(shapes[0])) : undefined
 
   const applyColor  = (tl) => editor.setStyleForSelectedShapes(DefaultColorStyle, tl)
+  const applyFillColor = (color) => editor.run(() => {
+    editor.setStyleForSelectedShapes(DefaultFillStyle, 'solid')
+    editor.updateShapes(
+      shapes.map((s) => ({
+        id: s.id,
+        type: s.type,
+        meta: {
+          ...s.meta,
+          fillColor: color,
+          fillOpacity: Number(s.meta?.fillOpacity ?? DEFAULT_FILL_OPACITY),
+        },
+      }))
+    )
+  })
+  const applyFillOpacity = (opacity) => editor.run(() => {
+    if (opacity > 0) {
+      editor.setStyleForSelectedShapes(DefaultFillStyle, 'solid')
+    } else {
+      editor.setStyleForSelectedShapes(DefaultFillStyle, 'none')
+    }
+    editor.updateShapes(
+      shapes.map((s) => ({
+        id: s.id,
+        type: s.type,
+        meta: {
+          ...s.meta,
+          fillColor: s.meta?.fillColor ?? swatchFromTlColor(s.props?.color)?.bg ?? COLOR_SWATCHES[0].bg,
+          fillOpacity: opacity,
+        },
+      }))
+    )
+  })
   const applyFont   = (id) => editor.setStyleForSelectedShapes(DefaultFontStyle, id)
   const applySize   = (id) => editor.setStyleForSelectedShapes(DefaultSizeStyle, id)
   const applyAlign  = (id) => editor.setStyleForSelectedShapes(DefaultHorizontalAlignStyle, id)
@@ -150,6 +217,41 @@ export const ShapeInspector = track(function ShapeInspector() {
                 title={c.id}
                 type="button"
               />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showFill && (
+        <div className="insp-row">
+          <div className="insp-label">Fill</div>
+          <div className="insp-body insp-body-swatches">
+            {COLOR_SWATCHES.map((c) => (
+              <button
+                key={c.id}
+                className={`insp-swatch ${activeFillColor === c.bg ? 'active' : ''}`}
+                style={{ background: c.bg }}
+                onClick={() => applyFillColor(c.bg)}
+                title={c.id}
+                type="button"
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showFill && (
+        <div className="insp-row">
+          <div className="insp-label">Opacity</div>
+          <div className="insp-body">
+            {FILL_OPACITY_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                className={`insp-btn ${activeFillOpacity === option.id || (option.id === 0 && activeFillStyle === 'none') ? 'active' : ''}`}
+                onClick={() => applyFillOpacity(option.id)}
+                title={option.title}
+                type="button"
+              >{option.label}</button>
             ))}
           </div>
         </div>

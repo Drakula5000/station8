@@ -74,10 +74,34 @@ const ShapeColorSync = track(function ShapeColorSync() {
   const shapes = editor.getCurrentPageShapes()
   useEffect(() => {
     shapes.forEach(shape => {
-      const color = shape.props?.color
-      if (!color) return
       const el = document.querySelector(`[data-shape-id="${shape.id}"]`)
-      if (el) el.setAttribute('data-tl-color', color)
+      if (!el) return
+
+      const color = shape.props?.color
+      if (color) {
+        el.setAttribute('data-tl-color', color)
+      } else {
+        el.removeAttribute('data-tl-color')
+      }
+
+      if (shape.type === 'geo') {
+        const fillColor = typeof shape.meta?.fillColor === 'string' ? shape.meta.fillColor : null
+        const fillOpacity = typeof shape.meta?.fillOpacity === 'number' ? shape.meta.fillOpacity : 0
+
+        if (fillColor && fillOpacity > 0) {
+          el.setAttribute('data-geo-fill-custom', 'true')
+          el.style.setProperty('--s8-geo-fill-color', fillColor)
+          el.style.setProperty('--s8-geo-fill-opacity', String(fillOpacity))
+        } else {
+          el.removeAttribute('data-geo-fill-custom')
+          el.style.removeProperty('--s8-geo-fill-color')
+          el.style.removeProperty('--s8-geo-fill-opacity')
+        }
+      } else {
+        el.removeAttribute('data-geo-fill-custom')
+        el.style.removeProperty('--s8-geo-fill-color')
+        el.style.removeProperty('--s8-geo-fill-opacity')
+      }
     })
   })
   return null

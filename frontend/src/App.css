@@ -45,6 +45,7 @@ html[data-mode="dark"], html:not([data-mode]) {
   --s8-shadow-pill:    0 2px 20px rgba(0, 0, 0, 0.55);
   --s8-shadow-menu:    0 12px 40px rgba(0, 0, 0, 0.65);
   --s8-shadow-modal:   0 20px 60px rgba(0, 0, 0, 0.70);
+  --s8-radius-lg:      18px;
 }
 
 /* ── Aurora light ── */
@@ -82,6 +83,7 @@ html[data-mode="light"] {
   --s8-shadow-pill:    0 2px 16px rgba(40, 25, 100, 0.14);
   --s8-shadow-menu:    0 12px 36px rgba(40, 25, 100, 0.14);
   --s8-shadow-modal:   0 20px 50px rgba(40, 25, 100, 0.18);
+  --s8-radius-lg:      18px;
 }
 
 /* ── App layout ── */
@@ -1699,6 +1701,58 @@ html[data-mode="light"] {
   display: flex; flex-wrap: wrap; gap: 5px; align-items: center;
 }
 
+.title-menu-theme-section {
+  padding: 8px 10px 6px;
+}
+
+.title-menu-theme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title-menu-theme-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--s8-text-mid);
+  border-radius: 8px;
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.12s, background 0.12s;
+}
+
+.title-menu-theme-option:hover {
+  background: var(--s8-hover);
+  color: var(--s8-text);
+}
+
+.title-menu-theme-option.active {
+  color: var(--s8-accent);
+}
+
+.title-menu-theme-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.28;
+  flex-shrink: 0;
+}
+
+.title-menu-theme-option.active .title-menu-theme-dot {
+  opacity: 1;
+}
+
 /* ── Visitor pill elements ── */
 .pill-brand {
   font-family: 'Space Mono', monospace;
@@ -1728,11 +1782,15 @@ html[data-mode="light"] {
 /* ─── ShapeColorSync: tldraw color palette → Aurora values ─── */
 
 /* Geo shapes: mute without crushing — text labels are siblings of SVG, unaffected. */
-.tldraw-wrap .tl-theme__dark [data-shape-type='geo'] > svg {
+.tldraw-wrap .tl-theme__dark [data-shape-type='geo']:not([data-geo-fill-custom='true']) > svg {
   filter: saturate(0.55) brightness(0.68);
 }
-.tldraw-wrap .tl-theme__light [data-shape-type='geo'] > svg {
+.tldraw-wrap .tl-theme__light [data-shape-type='geo']:not([data-geo-fill-custom='true']) > svg {
   filter: saturate(0.55) brightness(0.95);
+}
+.tldraw-wrap [data-shape-type='geo'][data-geo-fill-custom='true'] > svg > path:first-child {
+  fill: var(--s8-geo-fill-color) !important;
+  fill-opacity: var(--s8-geo-fill-opacity) !important;
 }
 
 /* Note backgrounds — dark mode: mirror the Aurora swatch palette exactly */
@@ -1768,4 +1826,379 @@ html[data-mode="light"] {
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='white'] .tl-note__container {
   background-color: #dce8f8 !important;
+}
+
+/* ─── Dormant board theme presets (not wired yet) ───
+   These are per-board theme token bundles, extracted from
+   mockups/style/station8-futurism.html and renamed to the product-facing
+   names: Glass, Deck, Abyss, Archive, Prisma.
+   Apply one of these classes later to a board-scoped wrapper when wiring the
+   feature. Nothing in the app consumes these tokens yet. */
+
+.s8-board-theme-glass {
+  --s8-board-bg: #05060D;
+  --s8-board-text: #F2F4FA;
+  --s8-board-text-mid: #8891AD;
+  --s8-board-text-dim: #3A4158;
+  --s8-board-accent: #7CE6FF;
+  --s8-board-accent2: #BC8CFF;
+  --s8-board-accent-dim: rgba(124, 230, 255, 0.11);
+  --s8-board-accent-border: rgba(124, 230, 255, 0.32);
+  --s8-board-hover: rgba(255, 255, 255, 0.04);
+  --s8-board-active: rgba(124, 230, 255, 0.09);
+  --s8-board-on-accent: #04060E;
+  --s8-board-tag-bg: rgba(188, 140, 255, 0.14);
+  --s8-board-tag: #D4B8FF;
+  --s8-board-panel-bg: rgba(20, 24, 40, 0.55);
+  --s8-board-panel-border: rgba(255, 255, 255, 0.09);
+  --s8-board-panel-blur: blur(32px) saturate(180%);
+  --s8-board-sidebar-bg: rgba(20, 24, 40, 0.55);
+  --s8-board-sidebar-border: rgba(255, 255, 255, 0.09);
+  --s8-board-pill-bg: rgba(14, 18, 32, 0.62);
+  --s8-board-pill-border: rgba(255, 255, 255, 0.12);
+  --s8-board-pill-blur: blur(30px) saturate(180%);
+  --s8-board-pill-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255,255,255,0.12);
+  --s8-board-shadow-pill: 0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255,255,255,0.12);
+  --s8-board-card-bg: rgba(18, 22, 36, 0.62);
+  --s8-board-card-border: rgba(255, 255, 255, 0.08);
+  --s8-board-folder-bg: rgba(255, 255, 255, 0.03);
+  --s8-board-folder-border: rgba(255, 255, 255, 0.08);
+  --s8-board-modal-bg: rgba(12, 16, 30, 0.78);
+  --s8-board-input-bg: rgba(9, 13, 26, 0.72);
+  --s8-board-input-border: rgba(255, 255, 255, 0.10);
+  --s8-board-danger: #FF7C94;
+  --s8-board-danger-dim: rgba(255, 124, 148, 0.10);
+  --s8-board-success: #7CF0D4;
+  --s8-board-success-dim: rgba(124, 240, 212, 0.12);
+  --s8-board-shadow-menu: 0 20px 48px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(255,255,255,0.08);
+  --s8-board-shadow-modal: 0 28px 72px rgba(0, 0, 0, 0.62), inset 0 1px 0 rgba(255,255,255,0.08);
+  --s8-board-font-brand: 'Space Mono', monospace;
+  --s8-board-font-ui: 'Inter', sans-serif;
+  --s8-board-font-label: 'Inter', sans-serif;
+  --s8-board-font-section: 'Space Mono', monospace;
+  --s8-board-font-frame-label: 'Space Mono', monospace;
+  --s8-board-radius-lg: 18px;
+  --s8-board-pill-radius: 999px;
+  --s8-board-action-radius: 8px;
+  --s8-board-item-radius: 7px;
+  --s8-board-input-radius: 8px;
+  --s8-board-toolbar-radius: 20px;
+  --s8-board-toolbar-btn-radius: 14px;
+  --s8-board-tag-radius: 999px;
+  --s8-board-brand-track: 0.22em;
+  --s8-board-brand-size: 10px;
+  --s8-board-frame-radius: 16px;
+  --s8-board-frame-bg: rgba(255, 255, 255, 0.025);
+  --s8-board-frame-border: rgba(255, 255, 255, 0.07);
+  --s8-board-frame-label-bg: rgba(14, 18, 32, 0.55);
+  --s8-board-frame-label-radius: 6px;
+  --s8-board-frame-label-case: none;
+  --s8-board-frame-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+  --s8-board-sticky-bg: rgba(255, 221, 130, 0.09);
+  --s8-board-sticky-border: rgba(255, 221, 130, 0.3);
+  --s8-board-sticky-radius: 20px;
+  --s8-board-sticky-shadow: 0 10px 28px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1);
+  --s8-board-sticky-text: #FFF3CC;
+  --s8-board-canvas-bg:
+    radial-gradient(ellipse 70% 50% at 20% 10%, rgba(124, 230, 255, 0.14), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 85% 85%, rgba(188, 140, 255, 0.18), transparent 60%),
+    radial-gradient(ellipse 50% 30% at 60% 40%, rgba(255, 140, 200, 0.08), transparent 60%),
+    #05060D;
+  --s8-board-canvas-dot: rgba(255, 255, 255, 0.05);
+  --s8-board-canvas-glow: rgba(124, 230, 255, 0.10);
+  --s8-board-canvas-grid: radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1.2px);
+  --s8-board-canvas-grid-size: 32px 32px;
+}
+
+.s8-board-theme-deck {
+  --s8-board-bg: #08080A;
+  --s8-board-text: #F3E8CE;
+  --s8-board-text-mid: #8A7A52;
+  --s8-board-text-dim: #3C341D;
+  --s8-board-accent: #FFA528;
+  --s8-board-accent2: #5FE6D2;
+  --s8-board-accent-dim: rgba(255, 165, 40, 0.10);
+  --s8-board-accent-border: rgba(255, 165, 40, 0.36);
+  --s8-board-hover: rgba(255, 165, 40, 0.06);
+  --s8-board-active: rgba(255, 165, 40, 0.14);
+  --s8-board-on-accent: #08080A;
+  --s8-board-tag-bg: rgba(95, 230, 210, 0.10);
+  --s8-board-tag: #5FE6D2;
+  --s8-board-panel-bg: #0A0A0C;
+  --s8-board-panel-border: #24210F;
+  --s8-board-panel-blur: none;
+  --s8-board-sidebar-bg: #0A0A0C;
+  --s8-board-sidebar-border: #24210F;
+  --s8-board-pill-bg: rgba(10, 10, 12, 0.95);
+  --s8-board-pill-border: rgba(255, 165, 40, 0.36);
+  --s8-board-pill-blur: none;
+  --s8-board-pill-shadow: 0 0 0 1px rgba(255,165,40,0.06);
+  --s8-board-shadow-pill: 0 0 0 1px rgba(255,165,40,0.06);
+  --s8-board-card-bg: #0D0D10;
+  --s8-board-card-border: #24210F;
+  --s8-board-folder-bg: rgba(255, 165, 40, 0.04);
+  --s8-board-folder-border: rgba(255, 165, 40, 0.18);
+  --s8-board-modal-bg: #0A0A0C;
+  --s8-board-input-bg: #08080A;
+  --s8-board-input-border: #24210F;
+  --s8-board-danger: #FF6B4A;
+  --s8-board-danger-dim: rgba(255, 107, 74, 0.12);
+  --s8-board-success: #5FE6D2;
+  --s8-board-success-dim: rgba(95, 230, 210, 0.12);
+  --s8-board-shadow-menu: 0 18px 40px rgba(0, 0, 0, 0.55);
+  --s8-board-shadow-modal: 0 28px 64px rgba(0, 0, 0, 0.65);
+  --s8-board-font-brand: 'Space Mono', monospace;
+  --s8-board-font-ui: 'Inter', sans-serif;
+  --s8-board-font-label: 'Space Mono', monospace;
+  --s8-board-font-section: 'Space Mono', monospace;
+  --s8-board-font-frame-label: 'Space Mono', monospace;
+  --s8-board-radius-lg: 2px;
+  --s8-board-pill-radius: 2px;
+  --s8-board-action-radius: 2px;
+  --s8-board-item-radius: 2px;
+  --s8-board-input-radius: 2px;
+  --s8-board-toolbar-radius: 2px;
+  --s8-board-toolbar-btn-radius: 2px;
+  --s8-board-tag-radius: 2px;
+  --s8-board-brand-track: 0.26em;
+  --s8-board-brand-size: 11px;
+  --s8-board-frame-radius: 0;
+  --s8-board-frame-bg: transparent;
+  --s8-board-frame-border: transparent;
+  --s8-board-frame-label-bg: #08080A;
+  --s8-board-frame-label-radius: 0;
+  --s8-board-frame-label-case: uppercase;
+  --s8-board-frame-shadow: none;
+  --s8-board-sticky-bg: rgba(255, 165, 40, 0.08);
+  --s8-board-sticky-border: rgba(255, 165, 40, 0.45);
+  --s8-board-sticky-radius: 0;
+  --s8-board-sticky-shadow: 0 0 0 1px rgba(255,165,40,0.15);
+  --s8-board-sticky-text: #FFE3B2;
+  --s8-board-canvas-bg: #08080A;
+  --s8-board-canvas-dot: rgba(255, 165, 40, 0.14);
+  --s8-board-canvas-glow: rgba(255, 165, 40, 0.08);
+  --s8-board-canvas-grid:
+    linear-gradient(rgba(255, 165, 40, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 165, 40, 0.035) 1px, transparent 1px);
+  --s8-board-canvas-grid-size: 80px 80px, 80px 80px;
+}
+
+.s8-board-theme-abyss {
+  --s8-board-bg: #020812;
+  --s8-board-text: #D8EFE3;
+  --s8-board-text-mid: #6A8A86;
+  --s8-board-text-dim: #1F332F;
+  --s8-board-accent: #3AF5B8;
+  --s8-board-accent2: #A07AFF;
+  --s8-board-accent-dim: rgba(58, 245, 184, 0.10);
+  --s8-board-accent-border: rgba(58, 245, 184, 0.30);
+  --s8-board-hover: rgba(58, 245, 184, 0.05);
+  --s8-board-active: rgba(58, 245, 184, 0.12);
+  --s8-board-on-accent: #042018;
+  --s8-board-tag-bg: rgba(160, 122, 255, 0.14);
+  --s8-board-tag: #C8B4FF;
+  --s8-board-panel-bg: rgba(5, 15, 25, 0.7);
+  --s8-board-panel-border: rgba(58, 245, 184, 0.12);
+  --s8-board-panel-blur: blur(26px) saturate(140%);
+  --s8-board-sidebar-bg: rgba(5, 15, 25, 0.7);
+  --s8-board-sidebar-border: rgba(58, 245, 184, 0.12);
+  --s8-board-pill-bg: rgba(5, 15, 25, 0.75);
+  --s8-board-pill-border: rgba(58, 245, 184, 0.22);
+  --s8-board-pill-blur: blur(24px);
+  --s8-board-pill-shadow: 0 0 30px rgba(58, 245, 184, 0.12), 0 20px 60px rgba(0, 0, 0, 0.6);
+  --s8-board-shadow-pill: 0 0 30px rgba(58, 245, 184, 0.12), 0 20px 60px rgba(0, 0, 0, 0.6);
+  --s8-board-card-bg: rgba(7, 19, 30, 0.72);
+  --s8-board-card-border: rgba(58, 245, 184, 0.12);
+  --s8-board-folder-bg: rgba(58, 245, 184, 0.04);
+  --s8-board-folder-border: rgba(58, 245, 184, 0.14);
+  --s8-board-modal-bg: rgba(5, 15, 25, 0.82);
+  --s8-board-input-bg: rgba(3, 11, 20, 0.86);
+  --s8-board-input-border: rgba(58, 245, 184, 0.18);
+  --s8-board-danger: #FF8FA8;
+  --s8-board-danger-dim: rgba(255, 143, 168, 0.10);
+  --s8-board-success: #3AF5B8;
+  --s8-board-success-dim: rgba(58, 245, 184, 0.12);
+  --s8-board-shadow-menu: 0 20px 48px rgba(0, 0, 0, 0.62), 0 0 24px rgba(58, 245, 184, 0.08);
+  --s8-board-shadow-modal: 0 30px 80px rgba(0, 0, 0, 0.72), 0 0 36px rgba(58, 245, 184, 0.10);
+  --s8-board-font-brand: 'Crimson Pro', serif;
+  --s8-board-font-ui: 'Inter', sans-serif;
+  --s8-board-font-label: 'Inter', sans-serif;
+  --s8-board-font-section: 'Crimson Pro', serif;
+  --s8-board-font-frame-label: 'Crimson Pro', serif;
+  --s8-board-radius-lg: 18px;
+  --s8-board-pill-radius: 999px;
+  --s8-board-action-radius: 14px;
+  --s8-board-item-radius: 12px;
+  --s8-board-input-radius: 14px;
+  --s8-board-toolbar-radius: 999px;
+  --s8-board-toolbar-btn-radius: 999px;
+  --s8-board-tag-radius: 999px;
+  --s8-board-brand-track: 0.08em;
+  --s8-board-brand-size: 15px;
+  --s8-board-frame-radius: 24px;
+  --s8-board-frame-bg: rgba(58, 245, 184, 0.025);
+  --s8-board-frame-border: rgba(58, 245, 184, 0.18);
+  --s8-board-frame-label-bg: transparent;
+  --s8-board-frame-label-radius: 0;
+  --s8-board-frame-label-case: none;
+  --s8-board-frame-shadow: 0 0 40px rgba(58, 245, 184, 0.06), inset 0 1px 0 rgba(255,255,255,0.03);
+  --s8-board-sticky-bg: rgba(58, 245, 184, 0.08);
+  --s8-board-sticky-border: rgba(58, 245, 184, 0.35);
+  --s8-board-sticky-radius: 20px;
+  --s8-board-sticky-shadow: 0 0 36px rgba(58, 245, 184, 0.14), inset 0 1px 0 rgba(255,255,255,0.04);
+  --s8-board-sticky-text: #D4FCEC;
+  --s8-board-canvas-bg:
+    radial-gradient(ellipse 80% 60% at 50% 110%, rgba(58, 245, 184, 0.18), transparent 70%),
+    radial-gradient(ellipse 70% 50% at 80% 10%, rgba(160, 122, 255, 0.14), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 15% 60%, rgba(58, 245, 184, 0.06), transparent 70%),
+    #020812;
+  --s8-board-canvas-dot: rgba(58, 245, 184, 0.10);
+  --s8-board-canvas-glow: rgba(58, 245, 184, 0.12);
+  --s8-board-canvas-grid: none;
+  --s8-board-canvas-grid-size: 0;
+}
+
+.s8-board-theme-archive {
+  --s8-board-bg: #0B0B0B;
+  --s8-board-text: #EDE9DC;
+  --s8-board-text-mid: #7B7768;
+  --s8-board-text-dim: #2D2B24;
+  --s8-board-accent: #E04747;
+  --s8-board-accent2: #EDE9DC;
+  --s8-board-accent-dim: rgba(224, 71, 71, 0.09);
+  --s8-board-accent-border: #2D2B24;
+  --s8-board-hover: rgba(237, 233, 220, 0.04);
+  --s8-board-active: rgba(237, 233, 220, 0.07);
+  --s8-board-on-accent: #0B0B0B;
+  --s8-board-tag-bg: transparent;
+  --s8-board-tag: #EDE9DC;
+  --s8-board-panel-bg: #0B0B0B;
+  --s8-board-panel-border: #22211C;
+  --s8-board-panel-blur: none;
+  --s8-board-sidebar-bg: #0B0B0B;
+  --s8-board-sidebar-border: #22211C;
+  --s8-board-pill-bg: rgba(11, 11, 11, 0.85);
+  --s8-board-pill-border: #22211C;
+  --s8-board-pill-blur: none;
+  --s8-board-pill-shadow: none;
+  --s8-board-shadow-pill: none;
+  --s8-board-card-bg: #0F0F0F;
+  --s8-board-card-border: #22211C;
+  --s8-board-folder-bg: #11100E;
+  --s8-board-folder-border: #2D2B24;
+  --s8-board-modal-bg: #0B0B0B;
+  --s8-board-input-bg: #0E0D0C;
+  --s8-board-input-border: #22211C;
+  --s8-board-danger: #E04747;
+  --s8-board-danger-dim: rgba(224, 71, 71, 0.10);
+  --s8-board-success: #A9B48E;
+  --s8-board-success-dim: rgba(169, 180, 142, 0.10);
+  --s8-board-shadow-menu: 0 18px 48px rgba(0, 0, 0, 0.55);
+  --s8-board-shadow-modal: 0 26px 72px rgba(0, 0, 0, 0.62);
+  --s8-board-font-brand: 'Crimson Pro', serif;
+  --s8-board-font-ui: 'Inter', sans-serif;
+  --s8-board-font-label: 'Space Mono', monospace;
+  --s8-board-font-section: 'Space Mono', monospace;
+  --s8-board-font-frame-label: 'Space Mono', monospace;
+  --s8-board-radius-lg: 0;
+  --s8-board-pill-radius: 0;
+  --s8-board-action-radius: 0;
+  --s8-board-item-radius: 0;
+  --s8-board-input-radius: 0;
+  --s8-board-toolbar-radius: 0;
+  --s8-board-toolbar-btn-radius: 0;
+  --s8-board-tag-radius: 0;
+  --s8-board-brand-track: 0.02em;
+  --s8-board-brand-size: 20px;
+  --s8-board-frame-radius: 0;
+  --s8-board-frame-bg: transparent;
+  --s8-board-frame-border: #2D2B24;
+  --s8-board-frame-label-bg: #0B0B0B;
+  --s8-board-frame-label-radius: 0;
+  --s8-board-frame-label-case: uppercase;
+  --s8-board-frame-shadow: none;
+  --s8-board-sticky-bg: #1A1812;
+  --s8-board-sticky-border: #2D2B24;
+  --s8-board-sticky-radius: 0;
+  --s8-board-sticky-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+  --s8-board-sticky-text: #EDE9DC;
+  --s8-board-canvas-bg: #0B0B0B;
+  --s8-board-canvas-dot: rgba(237, 233, 220, 0.05);
+  --s8-board-canvas-glow: rgba(224, 71, 71, 0.08);
+  --s8-board-canvas-grid: none;
+  --s8-board-canvas-grid-size: 0;
+}
+
+.s8-board-theme-prisma {
+  --s8-board-bg: #07020E;
+  --s8-board-text: #F0EAFF;
+  --s8-board-text-mid: #7A6FA4;
+  --s8-board-text-dim: #2E2548;
+  --s8-board-accent: #FF5CE0;
+  --s8-board-accent2: #60F0FF;
+  --s8-board-accent-dim: rgba(255, 92, 224, 0.10);
+  --s8-board-accent-border: rgba(255, 92, 224, 0.34);
+  --s8-board-hover: rgba(255, 92, 224, 0.05);
+  --s8-board-active: rgba(255, 92, 224, 0.13);
+  --s8-board-on-accent: #0B0318;
+  --s8-board-tag-bg: rgba(96, 240, 255, 0.10);
+  --s8-board-tag: #8FF4FF;
+  --s8-board-panel-bg: rgba(12, 4, 24, 0.82);
+  --s8-board-panel-border: rgba(255, 92, 224, 0.16);
+  --s8-board-panel-blur: blur(20px) saturate(150%);
+  --s8-board-sidebar-bg: rgba(12, 4, 24, 0.82);
+  --s8-board-sidebar-border: rgba(255, 92, 224, 0.16);
+  --s8-board-pill-bg: rgba(12, 4, 24, 0.86);
+  --s8-board-pill-border: rgba(96, 240, 255, 0.34);
+  --s8-board-pill-blur: blur(20px) saturate(160%);
+  --s8-board-pill-shadow: 0 0 30px rgba(255, 92, 224, 0.14), 0 0 30px rgba(96, 240, 255, 0.1);
+  --s8-board-shadow-pill: 0 0 30px rgba(255, 92, 224, 0.14), 0 0 30px rgba(96, 240, 255, 0.1);
+  --s8-board-card-bg: rgba(15, 6, 28, 0.78);
+  --s8-board-card-border: rgba(255, 92, 224, 0.16);
+  --s8-board-folder-bg: rgba(255, 92, 224, 0.04);
+  --s8-board-folder-border: rgba(255, 92, 224, 0.16);
+  --s8-board-modal-bg: rgba(12, 4, 24, 0.90);
+  --s8-board-input-bg: rgba(18, 8, 34, 0.88);
+  --s8-board-input-border: rgba(96, 240, 255, 0.18);
+  --s8-board-danger: #FF6BA7;
+  --s8-board-danger-dim: rgba(255, 107, 167, 0.10);
+  --s8-board-success: #60F0FF;
+  --s8-board-success-dim: rgba(96, 240, 255, 0.12);
+  --s8-board-shadow-menu: 0 22px 54px rgba(0, 0, 0, 0.60), 0 0 30px rgba(255, 92, 224, 0.12);
+  --s8-board-shadow-modal: 0 30px 82px rgba(0, 0, 0, 0.70), 0 0 42px rgba(96, 240, 255, 0.12);
+  --s8-board-font-brand: 'Space Mono', monospace;
+  --s8-board-font-ui: 'Inter', sans-serif;
+  --s8-board-font-label: 'Inter', sans-serif;
+  --s8-board-font-section: 'Space Mono', monospace;
+  --s8-board-font-frame-label: 'Space Mono', monospace;
+  --s8-board-radius-lg: 6px;
+  --s8-board-pill-radius: 4px;
+  --s8-board-action-radius: 4px;
+  --s8-board-item-radius: 4px;
+  --s8-board-input-radius: 4px;
+  --s8-board-toolbar-radius: 6px;
+  --s8-board-toolbar-btn-radius: 4px;
+  --s8-board-tag-radius: 4px;
+  --s8-board-brand-track: 0.22em;
+  --s8-board-brand-size: 10px;
+  --s8-board-frame-radius: 6px;
+  --s8-board-frame-bg: rgba(255, 92, 224, 0.02);
+  --s8-board-frame-border: transparent;
+  --s8-board-frame-label-bg: #07020E;
+  --s8-board-frame-label-radius: 2px;
+  --s8-board-frame-label-case: uppercase;
+  --s8-board-frame-shadow: 0 0 30px rgba(255, 92, 224, 0.14), 0 0 30px rgba(96, 240, 255, 0.1);
+  --s8-board-sticky-bg: rgba(255, 92, 224, 0.05);
+  --s8-board-sticky-border: transparent;
+  --s8-board-sticky-radius: 4px;
+  --s8-board-sticky-shadow: 0 0 30px rgba(255, 92, 224, 0.15);
+  --s8-board-sticky-text: #FFDCF5;
+  --s8-board-canvas-bg:
+    radial-gradient(ellipse 60% 50% at 20% 100%, rgba(96, 240, 255, 0.18), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 90% 10%, rgba(255, 92, 224, 0.16), transparent 60%),
+    #07020E;
+  --s8-board-canvas-dot: rgba(255, 92, 224, 0.10);
+  --s8-board-canvas-glow: rgba(96, 240, 255, 0.12);
+  --s8-board-canvas-grid: repeating-linear-gradient(0deg, transparent 0 79px, rgba(255,92,224,0.04) 79px 80px);
+  --s8-board-canvas-grid-size: auto;
 }

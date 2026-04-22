@@ -11,6 +11,7 @@ const API = import.meta.env.VITE_API_URL || ''
 const ROOT_FOLDER = '__root__'
 const SIDEBAR_STORAGE_KEY = 'researchHub.sidebarCollapsed'
 const DATABASE_VIEW_STORAGE_KEY = 'researchHub.databaseView'
+const BOARD_THEME_OPTIONS = ['Abyss', 'Archive', 'Deck', 'Glass', 'Prisma']
 const DEFAULT_SHEET = [
   [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
   [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
@@ -1182,6 +1183,27 @@ export default function App() {
                         )}
                       </div>
                     </div>
+                    {activeDocType === 'board' && (
+                      <>
+                        <div className="title-menu-sep" />
+                        <div className="title-menu-theme-section">
+                          <div className="title-menu-tags-label">Canvas theme</div>
+                          <div className="title-menu-theme-list">
+                            {BOARD_THEME_OPTIONS.map((theme) => (
+                              <button
+                                key={theme}
+                                className={`title-menu-theme-option${theme === 'Glass' ? ' active' : ''}`}
+                                onClick={() => {}}
+                                type="button"
+                              >
+                                <span className="title-menu-theme-dot" />
+                                {theme}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
                     <div className="title-menu-sep" />
                     <button className="title-menu-item" onClick={() => { setShareOpen(true); setTitleMenuOpen(false) }} type="button">
                       Share workspace
