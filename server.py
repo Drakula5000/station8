@@ -30,7 +30,12 @@ else:
     print("Supabase credentials missing from environment variables!", flush=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STORAGE_ROOT = os.path.abspath(os.getenv('S8_STORAGE_DIR') or BASE_DIR)
+DEFAULT_RENDER_STORAGE_ROOT = (
+    '/var/data'
+    if (os.getenv('RENDER') or os.getenv('RENDER_EXTERNAL_URL')) and os.path.isdir('/var/data')
+    else BASE_DIR
+)
+STORAGE_ROOT = os.path.abspath(os.getenv('S8_STORAGE_DIR') or DEFAULT_RENDER_STORAGE_ROOT)
 DATA_DIR = os.path.abspath(os.getenv('S8_DATA_DIR') or os.path.join(STORAGE_ROOT, 'data'))
 UPLOADS_DIR = os.path.abspath(os.getenv('S8_UPLOADS_DIR') or os.path.join(STORAGE_ROOT, 'uploads'))
 STATIC_BUILD = os.path.join(BASE_DIR, 'static_build')
@@ -1452,4 +1457,9 @@ def static_files(path):
 
 
 if __name__ == '__main__':
-    app.run(debug=False, port=5001, host='0.0.0.0', threaded=True)
+    app.run(
+        debug=False,
+        port=int(os.getenv('PORT', '5001')),
+        host='0.0.0.0',
+        threaded=True,
+    )
