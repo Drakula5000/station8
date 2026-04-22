@@ -167,12 +167,12 @@ export function FjHandIcon() {
 }
 
 const STICKY_ICON_PALETTE = {
-  yellow: { bg: '#FFE066', fold: '#FFD43B', stroke: '#C9A227' },
-  pink:   { bg: '#FFB3C7', fold: '#F89BB4', stroke: '#C0486A' },
-  blue:   { bg: '#B3D9FF', fold: '#9AC9F5', stroke: '#2E7AB8' },
-  green:  { bg: '#C5E8A5', fold: '#B0DD8A', stroke: '#5A8E30' },
-  orange: { bg: '#FFCB8A', fold: '#F2B770', stroke: '#C8751A' },
-  purple: { bg: '#D9C6FF', fold: '#C5ADFA', stroke: '#6A3FBF' },
+  yellow: { bg: '#C8B0F5', fold: '#B098E8', stroke: '#7050C0' },  // lavender
+  pink:   { bg: '#F0A8C0', fold: '#E090A8', stroke: '#B04870' },
+  blue:   { bg: '#90BCE8', fold: '#78A8E0', stroke: '#3068A8' },
+  green:  { bg: '#88D4B0', fold: '#70C0A0', stroke: '#307060' },
+  orange: { bg: '#F0B880', fold: '#E0A068', stroke: '#B07020' },
+  purple: { bg: '#B8A0F8', fold: '#A088F0', stroke: '#5830B0' },
 }
 
 export function FjStickyIcon({ color = 'yellow' } = {}) {

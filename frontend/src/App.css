@@ -13,7 +13,7 @@ body {
 /* ── Aurora dark (default) ── */
 html[data-mode="dark"], html:not([data-mode]) {
   --bg:             #080c18;
-  --canvas-dot:     rgba(140, 100, 240, 0.055);
+  --canvas-dot:     rgba(140, 100, 240, 0.20);
   --canvas-glow:    rgba(140, 100, 240, 0.10);
   --accent:         #9d7df2;
   --accent2:        #15c4b0;
@@ -50,7 +50,7 @@ html[data-mode="dark"], html:not([data-mode]) {
 /* ── Aurora light ── */
 html[data-mode="light"] {
   --bg:             #f5f3ff;
-  --canvas-dot:     rgba(109, 68, 204, 0.045);
+  --canvas-dot:     rgba(109, 68, 204, 0.15);
   --canvas-glow:    rgba(109, 68, 204, 0.06);
   --accent:         #6d44cc;
   --accent2:        #0b8f8a;
@@ -111,7 +111,7 @@ html[data-mode="light"] {
 }
 
 .sidebar-head {
-  padding: 12px 10px 10px 14px;
+  padding: 16px 10px 14px 16px;
   border-bottom: 1px solid var(--sidebar-border);
   flex-shrink: 0;
   display: flex;
@@ -120,9 +120,9 @@ html[data-mode="light"] {
 }
 .sidebar-brand {
   font-family: 'Space Mono', monospace;
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--accent);
 }
@@ -857,6 +857,17 @@ html[data-mode="light"] {
 }
 .shape-inspector .font-pill.active .font-pill-label { color: var(--accent); }
 
+.corner-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+}
+.corner-swatch-0  { border-radius: 0; }
+.corner-swatch-8  { border-radius: 2px; }
+.corner-swatch-16 { border-radius: 4px; }
+.corner-swatch-32 { border-radius: 50%; }
+
 .section-picker {
   position: absolute; bottom: calc(100% + 10px); left: 50%;
   transform: translateX(-50%);
@@ -1086,14 +1097,15 @@ html[data-mode="light"] {
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   background: var(--pill-bg);
   border: 1px solid var(--pill-border);
-  border-radius: 18px;
-  padding: 8px;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  box-shadow: var(--shadow-pill), inset 0 1px 0 rgba(255,255,255,0.04);
+  border-top-color: rgba(255,255,255,0.06);
+  border-radius: 20px;
+  padding: 6px;
+  backdrop-filter: blur(28px) saturate(1.6);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  box-shadow: var(--shadow-pill), inset 0 1px 0 rgba(255,255,255,0.05);
   z-index: 5;
 }
 
@@ -1114,28 +1126,30 @@ html[data-mode="light"] {
 .fj-tool {
   position: relative;
   display: inline-flex; align-items: center; justify-content: center;
-  width: 44px; height: 44px;
-  background: transparent; border: none; border-radius: 12px;
-  color: var(--text); cursor: pointer; padding: 0;
-  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  width: 40px; height: 40px;
+  background: transparent; border: none; border-radius: 14px;
+  color: var(--text-mid); cursor: pointer; padding: 0;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
 }
 .fj-tool svg { display: block; }
 .fj-tool:hover {
   background: var(--hover);
+  color: var(--text);
   transform: translateY(-1px);
 }
 .fj-tool:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-dim);
+  box-shadow: 0 0 0 2px var(--accent-border);
 }
-.fj-tool:active { transform: translateY(0) scale(0.97); }
+.fj-tool:active { transform: translateY(0) scale(0.96); }
 .fj-tool.active {
   background: var(--accent);
   color: var(--on-accent);
-  box-shadow: 0 4px 14px var(--accent-dim);
+  box-shadow: 0 2px 16px var(--accent-dim), 0 0 0 1px var(--accent-border);
 }
 .fj-tool.active:hover {
   background: var(--accent);
+  color: var(--on-accent);
 }
 .fj-split {
   display: inline-flex;
@@ -1148,7 +1162,7 @@ html[data-mode="light"] {
   background: var(--hover);
 }
 .fj-tool-main {
-  width: 44px;
+  width: 40px;
 }
 .fj-tool-caret {
   width: 24px;
@@ -1187,9 +1201,9 @@ html[data-mode="light"] {
 
 .shape-option {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 44px; height: 44px;
+  width: 40px; height: 40px;
   background: transparent; border: none; border-radius: 12px;
-  color: var(--text); cursor: pointer; padding: 0;
+  color: var(--text-mid); cursor: pointer; padding: 0;
   transition: background 0.16s ease, transform 0.16s ease;
 }
 .shape-option svg { display: block; }

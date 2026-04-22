@@ -44,12 +44,12 @@ const TLDRAW_COMPONENTS = {
 }
 
 const STICKY_SWATCHES = {
-  yellow: { bg: '#FFE066', tl: 'yellow' },
-  pink:   { bg: '#FFB3C7', tl: 'light-red' },
-  blue:   { bg: '#B3D9FF', tl: 'light-blue' },
-  green:  { bg: '#C5E8A5', tl: 'light-green' },
-  orange: { bg: '#FFCB8A', tl: 'orange' },
-  purple: { bg: '#D9C6FF', tl: 'light-violet' },
+  yellow: { bg: '#C8B0F5', tl: 'light-violet' },
+  pink:   { bg: '#F0A8C0', tl: 'light-red' },
+  blue:   { bg: '#90BCE8', tl: 'light-blue' },
+  green:  { bg: '#88D4B0', tl: 'light-green' },
+  orange: { bg: '#F0B880', tl: 'orange' },
+  purple: { bg: '#B8A0F8', tl: 'violet' },
 }
 
 // tldraw NOTE_SIZE is hardcoded at 200 canvas units; scale it down on placement
@@ -57,15 +57,33 @@ const NOTE_DEFAULT_SCALE = 0.6
 
 const FRAME_SHAPE_UTILS = [FrameShapeUtil.configure({ showColors: true })]
 
+// Reactive component that injects per-frame corner-radius CSS.
+// React 19 hoists <style> tags into <head> automatically.
+const FrameCornerStyles = track(function FrameCornerStyles() {
+  const editor = useEditor()
+  const frames = editor.getCurrentPageShapes().filter(
+    s => s.type === 'frame' && Number(s.meta?.cornerRadius) > 0
+  )
+  if (frames.length === 0) return null
+  const css = frames.map(f => {
+    const rx = Number(f.meta.cornerRadius)
+    const id = f.id
+    return [
+      `[data-shape-id="${id}"] .tl-frame__body { rx: ${rx}px }`,
+      `[data-shape-id="${id}"] .tl-frame-heading,`,
+      `[data-shape-id="${id}"] .tl-frame-heading-hit-area { border-radius: ${rx * 12 / 32}px }`,
+    ].join('\n')
+  }).join('\n')
+  return <style>{css}</style>
+})
+
 const SECTION_SWATCHES = {
-  blue:   { bg: '#e7f5ff', stroke: '#1c7ed6', tl: 'blue' },
-  green:  { bg: '#ebfbee', stroke: '#2b8a3e', tl: 'green' },
-  yellow: { bg: '#fff9db', stroke: '#f08c00', tl: 'yellow' },
-  orange: { bg: '#fff4e6', stroke: '#e8590c', tl: 'orange' },
-  red:    { bg: '#fff5f5', stroke: '#c92a2a', tl: 'red' },
-  pink:   { bg: '#fff0f6', stroke: '#d6336c', tl: 'light-red' },
-  purple: { bg: '#f8f0fc', stroke: '#862e9c', tl: 'light-violet' },
-  grey:   { bg: '#f1f3f5', stroke: '#868e96', tl: 'grey' },
+  violet: { bg: '#ede8ff', stroke: '#7c5ce8', tl: 'violet' },   // aurora accent
+  teal:   { bg: '#d8f5f0', stroke: '#15c4b0', tl: 'green' },    // aurora teal
+  blue:   { bg: '#ddeeff', stroke: '#3a80d8', tl: 'blue' },
+  rose:   { bg: '#ffe8f0', stroke: '#d84a80', tl: 'light-red' },
+  amber:  { bg: '#fff0d8', stroke: '#c88030', tl: 'orange' },
+  slate:  { bg: '#e8ecf4', stroke: '#607090', tl: 'grey' },
 }
 
 function isEditableTarget(target) {
@@ -80,7 +98,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
   const [sectionPickerOpen, setSectionPickerOpen] = useState(false)
   const [shapePickerOpen, setShapePickerOpen] = useState(false)
   const [lastStickyColor, setLastStickyColor] = useState('yellow')
-  const [lastSectionColor, setLastSectionColor] = useState('blue')
+  const [lastSectionColor, setLastSectionColor] = useState('violet')
   const [lastShape, setLastShape] = useState('ellipse')
 
   const currentTool = editor.getCurrentToolId()
@@ -368,7 +386,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     editorRef.current = editor
     if (import.meta.env.DEV && typeof window !== 'undefined') window.__tlEditor = editor
     editor.user.updateUserPreferences({ colorScheme: colorModeRef.current === 'light' ? 'light' : 'dark' })
-    editor.updateInstanceState({ isGridMode: true })
     const bid = boardIdRef.current
     const ro = readOnlyRef.current
     const mode = viewerModeRef.current
@@ -443,7 +460,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
 
   const NOTE_CANVAS_SIZE = 200
   const ghostPx = ghost ? NOTE_CANVAS_SIZE * NOTE_DEFAULT_SCALE * ghost.zoom : 0
-  const ghostBg = ghost ? (STICKY_SWATCHES[ghost.color]?.bg || '#FFE066') : null
+  const ghostBg = ghost ? (STICKY_SWATCHES[ghost.color]?.bg || '#C8B0F5') : null
 
   return (
     <div
@@ -461,6 +478,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       >
         {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} />}
         {!readOnly && <ShapeInspector />}
+        <FrameCornerStyles />
       </Tldraw>
       {ghost && (
         <div

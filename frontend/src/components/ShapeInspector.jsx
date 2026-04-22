@@ -34,12 +34,20 @@ const ALIGNS = [
   { id: 'end',    label: '⟶', title: 'Right' },
 ]
 
+const CORNER_OPTIONS = [
+  { id: 0,  cls: 'corner-swatch-0',  title: 'Sharp' },
+  { id: 8,  cls: 'corner-swatch-8',  title: 'Soft' },
+  { id: 16, cls: 'corner-swatch-16', title: 'Round' },
+  { id: 32, cls: 'corner-swatch-32', title: 'Pill' },
+]
+
 // Which control rows apply to which shape types.
 // Keep conservative — show a control only when ALL selected shapes support it.
-const SHAPES_WITH_COLOR = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 'frame', 'highlight'])
-const SHAPES_WITH_TEXT  = new Set(['note', 'geo', 'text', 'arrow'])
-const SHAPES_WITH_SIZE  = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw'])
-const SHAPES_WITH_ALIGN = new Set(['note', 'geo', 'text'])
+const SHAPES_WITH_COLOR   = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 'frame', 'highlight'])
+const SHAPES_WITH_TEXT    = new Set(['note', 'geo', 'text', 'arrow'])
+const SHAPES_WITH_SIZE    = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw'])
+const SHAPES_WITH_ALIGN   = new Set(['note', 'geo', 'text'])
+const SHAPES_WITH_CORNERS = new Set(['frame'])
 
 function allShapesMatch(shapes, set) {
   return shapes.length > 0 && shapes.every((s) => set.has(s.type))
@@ -70,20 +78,27 @@ export const ShapeInspector = track(function ShapeInspector() {
   const topRight = editor.pageToScreen({ x: bounds.maxX, y: bounds.maxY })
   const centerX = (topLeft.x + topRight.x) / 2
 
-  const showColor = allShapesMatch(shapes, SHAPES_WITH_COLOR)
-  const showFont  = allShapesMatch(shapes, SHAPES_WITH_TEXT)
-  const showSize  = allShapesMatch(shapes, SHAPES_WITH_SIZE)
-  const showAlign = allShapesMatch(shapes, SHAPES_WITH_ALIGN)
+  const showColor   = allShapesMatch(shapes, SHAPES_WITH_COLOR)
+  const showFont    = allShapesMatch(shapes, SHAPES_WITH_TEXT)
+  const showSize    = allShapesMatch(shapes, SHAPES_WITH_SIZE)
+  const showAlign   = allShapesMatch(shapes, SHAPES_WITH_ALIGN)
+  const showCorners = allShapesMatch(shapes, SHAPES_WITH_CORNERS)
 
   const activeColor = sharedStyle(editor, DefaultColorStyle)
   const activeFont  = sharedStyle(editor, DefaultFontStyle)
   const activeSize  = sharedStyle(editor, DefaultSizeStyle)
   const activeAlign = sharedStyle(editor, DefaultHorizontalAlignStyle)
+  const activeCorner = showCorners && shapes.every(
+    s => Number(s.meta?.cornerRadius ?? 0) === Number(shapes[0].meta?.cornerRadius ?? 0)
+  ) ? Number(shapes[0].meta?.cornerRadius ?? 0) : undefined
 
-  const applyColor = (tl) => editor.setStyleForSelectedShapes(DefaultColorStyle, tl)
-  const applyFont  = (id) => editor.setStyleForSelectedShapes(DefaultFontStyle, id)
-  const applySize  = (id) => editor.setStyleForSelectedShapes(DefaultSizeStyle, id)
-  const applyAlign = (id) => editor.setStyleForSelectedShapes(DefaultHorizontalAlignStyle, id)
+  const applyColor  = (tl) => editor.setStyleForSelectedShapes(DefaultColorStyle, tl)
+  const applyFont   = (id) => editor.setStyleForSelectedShapes(DefaultFontStyle, id)
+  const applySize   = (id) => editor.setStyleForSelectedShapes(DefaultSizeStyle, id)
+  const applyAlign  = (id) => editor.setStyleForSelectedShapes(DefaultHorizontalAlignStyle, id)
+  const applyCorner = (rx) => editor.updateShapes(
+    shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, cornerRadius: rx } }))
+  )
 
   return (
     <div
@@ -165,6 +180,23 @@ export const ShapeInspector = track(function ShapeInspector() {
                 title={a.title}
                 type="button"
               >{a.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showCorners && (
+        <div className="insp-row">
+          <div className="insp-label">Corners</div>
+          <div className="insp-body">
+            {CORNER_OPTIONS.map((c) => (
+              <button
+                key={c.id}
+                className={`insp-btn ${activeCorner === c.id ? 'active' : ''}`}
+                onClick={() => applyCorner(c.id)}
+                title={c.title}
+                type="button"
+              ><span className={`corner-swatch ${c.cls}`} /></button>
             ))}
           </div>
         </div>

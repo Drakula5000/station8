@@ -46,6 +46,6 @@ npm install
 npm run dev
 ```
 
-Visit `http://localhost:5173`
+Visit `http://127.0.0.1:5173`
 
 If you do not provide `STUDIO_PASSWORD` and `VISITOR_PASSWORD`, the first visit will prompt you to create both passwords in the browser.
