@@ -150,6 +150,16 @@ def _load(path, default):
         return json.load(f)
 
 
+def _load_local_json(path, default):
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
 def _save(path, data):
     # Save to Supabase first if configured
     if supabase:
@@ -184,9 +194,24 @@ def _env_visitor_password():
 
 
 def _load_auth_config():
-    auth = _load(AUTH_FILE, {})
-    if not isinstance(auth, dict):
-        return {}
+    primary_auth = _load(AUTH_FILE, {})
+    local_auth = _load_local_json(AUTH_FILE, {})
+    legacy_auth = _load_local_json(os.path.join(LEGACY_DATA_DIR, 'auth.json'), {})
+
+    auth = {}
+    for candidate in (primary_auth, local_auth, legacy_auth):
+        if not isinstance(candidate, dict):
+            continue
+        for key in ('studio_password_hash', 'visitor_password_hash', 'configured_at'):
+            value = candidate.get(key)
+            if value and not auth.get(key):
+                auth[key] = value
+
+    # Heal storage drift: if one source has the passwords and another is empty/stale,
+    # sync the merged auth config back to the primary store.
+    if auth and (primary_auth != auth or local_auth != auth):
+        _save(AUTH_FILE, auth)
+
     return auth
 
 
