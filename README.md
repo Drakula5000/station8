@@ -23,10 +23,11 @@ At `YOUR_DOMAIN`, everyone sees the same password gate. The password they enter 
 2. Make sure the service has a persistent disk mounted at `/var/data`.
    The committed `render.yaml` now declares this disk and sets `S8_STORAGE_DIR=/var/data`.
 3. Set environment variables:
-   - `STUDIO_PASSWORD=<workspace-password>` or set it in-app on first run
+   - `OWNER_PASSWORD=<workspace-password>` or `STUDIO_PASSWORD=<workspace-password>`
    - `VISITOR_PASSWORD=<shared-visitor-password>` or set it in-app on first run
    - `FLASK_SECRET_KEY=<long-random-secret>`
    - `CORS_ALLOWED_ORIGINS=https://YOUR_DOMAIN,https://YOUR_DOMAIN`
+   - Optional: `S8_ALLOW_PROD_AUTH_SETUP=true` only if you intentionally want browser-based password setup in production
 4. Render runs `python server.py`.
 5. Your live JSON data and uploads will persist across deploys because the backend now reads/writes from:
    - `/var/data/data`
@@ -53,7 +54,7 @@ npm run dev
 
 Visit `http://127.0.0.1:5173`
 
-If you do not provide `STUDIO_PASSWORD` and `VISITOR_PASSWORD`, the first visit will prompt you to create both passwords in the browser.
+If you do not provide `OWNER_PASSWORD`/`STUDIO_PASSWORD` and `VISITOR_PASSWORD`, local development can prompt you to create both passwords in the browser. In production, browser-based setup should stay disabled unless you explicitly opt in with `S8_ALLOW_PROD_AUTH_SETUP=true`.
 
 ### Storage paths
 

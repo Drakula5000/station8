@@ -56,6 +56,16 @@ PRODUCTION = bool(
     or os.getenv('COOKIE_SECURE', '').lower() in {'1', 'true', 'yes'}
 )
 
+
+def _env_flag(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+ALLOW_BROWSER_AUTH_SETUP = _env_flag('S8_ALLOW_PROD_AUTH_SETUP', default=not PRODUCTION)
+
 app.secret_key = (
     os.getenv('FLASK_SECRET_KEY')
     or os.getenv('SECRET_KEY')
@@ -186,11 +196,19 @@ def _sheet_file(item_id):
 
 
 def _env_studio_password():
-    return os.getenv('STUDIO_PASSWORD') or os.getenv('RESEARCH_STUDIO_PASSWORD')
+    return (
+        os.getenv('OWNER_PASSWORD')
+        or os.getenv('STUDIO_PASSWORD')
+        or os.getenv('RESEARCH_OWNER_PASSWORD')
+        or os.getenv('RESEARCH_STUDIO_PASSWORD')
+    )
 
 
 def _env_visitor_password():
-    return os.getenv('VISITOR_PASSWORD') or os.getenv('RESEARCH_VISITOR_PASSWORD')
+    return (
+        os.getenv('VISITOR_PASSWORD')
+        or os.getenv('RESEARCH_VISITOR_PASSWORD')
+    )
 
 
 def _load_auth_config():
@@ -237,6 +255,10 @@ def _visitor_password_configured():
 
 def _requires_access_setup():
     return not _owner_password_configured() or not _visitor_password_configured()
+
+
+def _auth_configured():
+    return not _requires_access_setup()
 
 
 def _verify_studio_password(password):
@@ -736,12 +758,19 @@ def auth_status():
         'access': _current_access_level(),
         'owner_authenticated': _is_studio_authed(),
         'visitor_authenticated': _is_visitor_authed(),
-        'requires_setup': _requires_access_setup(),
+        'configured': _auth_configured(),
+        'setup_allowed': ALLOW_BROWSER_AUTH_SETUP,
+        'requires_setup': _requires_access_setup() and ALLOW_BROWSER_AUTH_SETUP,
     })
 
 
 @app.route('/api/auth/setup', methods=['POST'])
 def auth_setup():
+    if not ALLOW_BROWSER_AUTH_SETUP:
+        return jsonify({
+            'error': 'Browser-based password setup is disabled in production. Configure STUDIO_PASSWORD and VISITOR_PASSWORD on the server.',
+            'setup_allowed': False,
+        }), 403
     if not _requires_access_setup():
         return jsonify({'error': 'Access passwords are already configured'}), 409
     data = request.json or {}
@@ -769,7 +798,14 @@ def auth_login():
     data = request.json or {}
     password = data.get('password') or ''
     if _requires_access_setup():
-        return jsonify({'error': 'Access passwords have not been set up yet', 'requires_setup': True}), 409
+        if ALLOW_BROWSER_AUTH_SETUP:
+            return jsonify({'error': 'Access passwords have not been set up yet', 'requires_setup': True, 'setup_allowed': True}), 409
+        return jsonify({
+            'error': 'Access is not configured on the server.',
+            'requires_setup': False,
+            'configured': False,
+            'setup_allowed': False,
+        }), 503
     if _verify_studio_password(password):
         session['studio_authed'] = True
         session.pop('visitor_authed', None)

@@ -161,7 +161,14 @@ export default function App() {
   const [route, setRoute] = useState(() => parseRoute())
   const [activeId, setActiveId] = useState(null)
   const activeIdRef = useRef(null)
-  const [auth, setAuth] = useState({ loading: true, authenticated: false, access: null, requiresSetup: false })
+  const [auth, setAuth] = useState({
+    loading: true,
+    authenticated: false,
+    access: null,
+    configured: true,
+    setupAllowed: false,
+    requiresSetup: false,
+  })
   const [loginPassword, setLoginPassword] = useState('')
   const [ownerPassword, setOwnerPassword] = useState('')
   const [visitorPassword, setVisitorPassword] = useState('')
@@ -292,6 +299,8 @@ export default function App() {
       loading: false,
       authenticated: Boolean(data?.authenticated),
       access: data?.access || null,
+      configured: data?.configured !== false,
+      setupAllowed: Boolean(data?.setup_allowed),
       requiresSetup: Boolean(data?.requires_setup),
     })
   }, [])
@@ -1107,6 +1116,12 @@ export default function App() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
+        if ((res.status === 409 && data.requires_setup) || data.setup_allowed === false || data.configured === false) {
+          setAuthError(data.setup_allowed === false
+            ? 'Station 8 access is not configured on the server. The owner needs to set OWNER_PASSWORD and VISITOR_PASSWORD on the backend.'
+            : (data.error || 'Access passwords have not been set up yet'))
+          return
+        }
         setAuthError(data.error || 'Login failed')
         return
       }
@@ -1115,7 +1130,7 @@ export default function App() {
     } finally {
       setAuthBusy(false)
     }
-  }, [loginPassword, updateAuthStatus])
+  }, [loginPassword, route.doc, route.shareToken, updateAuthStatus])
 
   const submitSetup = useCallback(async () => {
     if (ownerPassword.length < 6 || visitorPassword.length < 6) return
@@ -1152,6 +1167,8 @@ export default function App() {
     return (
       <AccessGate
         requiresSetup={auth.requiresSetup}
+        authConfigured={auth.configured}
+        setupAllowed={auth.setupAllowed}
         authBusy={authBusy}
         authError={authError}
         loginPassword={loginPassword}
@@ -1663,6 +1680,8 @@ export default function App() {
 
 function AccessGate({
   loading = false,
+  authConfigured = true,
+  setupAllowed = false,
   requiresSetup = false,
   authBusy = false,
   authError = '',
@@ -1688,19 +1707,23 @@ function AccessGate({
   }
 
   const directLabel = route?.doc ? `${docTypeLabel(route.doc.type)} link` : 'Workspace'
+  const allowSetup = requiresSetup && setupAllowed
+  const configMissing = !authConfigured && !setupAllowed
 
   return (
     <div className="auth-shell">
       <div className="auth-card">
         <div className="auth-kicker">Station 8</div>
-        <h1 className="auth-title">{requiresSetup ? 'Set up access' : 'Enter the workspace'}</h1>
+        <h1 className="auth-title">{allowSetup ? 'Set up access' : configMissing ? 'Access offline' : 'Enter the workspace'}</h1>
         <p className="auth-copy">
-          {requiresSetup
+          {allowSetup
             ? 'Create the owner and visitor passwords. After setup, the same password field routes people into owner or visitor mode automatically.'
+            : configMissing
+            ? 'Station 8 access is not configured on the server. The owner needs to set OWNER_PASSWORD and VISITOR_PASSWORD on the backend.'
             : `${directLabel} is protected. Enter either the owner password or the visitor password to continue.`}
         </p>
 
-        {requiresSetup ? (
+        {allowSetup ? (
           <div className="auth-form">
             <label className="auth-label">
               <span>Owner password</span>
@@ -1724,7 +1747,7 @@ function AccessGate({
               {authBusy ? 'Setting up…' : 'Save passwords'}
             </button>
           </div>
-        ) : (
+        ) : !configMissing ? (
           <div className="auth-form">
             <label className="auth-label">
               <span>Password</span>
@@ -1740,7 +1763,7 @@ function AccessGate({
               {authBusy ? 'Entering…' : 'Enter Station 8'}
             </button>
           </div>
-        )}
+        ) : null}
 
         {authError && <div className="auth-error">{authError}</div>}
       </div>
