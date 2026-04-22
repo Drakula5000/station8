@@ -691,11 +691,14 @@ export default function App() {
   }
 
   const tagColor = (tag) => {
-    if (!tag) return { bg: '#eee', fg: '#666', border: '#ccc' }
+    if (!tag) return { bg: 'var(--hover)', fg: 'var(--text-mid)', border: 'var(--sidebar-border)' }
     let h = 0
     for (let i = 0; i < tag.length; i++) h = (h * 31 + tag.charCodeAt(i)) >>> 0
     const hue = h % 360
-    return { bg: `hsl(${hue}, 70%, 93%)`, fg: `hsl(${hue}, 50%, 35%)`, border: `hsl(${hue}, 55%, 55%)` }
+    if (colorMode === 'dark') {
+      return { bg: `hsl(${hue}, 50%, 18%)`, fg: `hsl(${hue}, 80%, 72%)`, border: `hsl(${hue}, 55%, 38%)` }
+    }
+    return { bg: `hsl(${hue}, 70%, 90%)`, fg: `hsl(${hue}, 50%, 28%)`, border: `hsl(${hue}, 55%, 60%)` }
   }
 
   const saveTags = async (tagsStr) => {

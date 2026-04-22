@@ -41,6 +41,7 @@ html[data-mode="dark"], html:not([data-mode]) {
   --danger-dim:     rgba(248, 113, 113, 0.08);
   --success:        #22c55e;
   --success-dim:    rgba(34, 197, 94, 0.10);
+  --on-accent:      #ffffff;
   --shadow-pill:    0 2px 20px rgba(0, 0, 0, 0.55);
   --shadow-menu:    0 12px 40px rgba(0, 0, 0, 0.65);
   --shadow-modal:   0 20px 60px rgba(0, 0, 0, 0.70);
@@ -77,6 +78,7 @@ html[data-mode="light"] {
   --danger-dim:     rgba(192, 57, 43, 0.07);
   --success:        #16a34a;
   --success-dim:    rgba(34, 197, 94, 0.10);
+  --on-accent:      #ffffff;
   --shadow-pill:    0 2px 16px rgba(60, 40, 120, 0.12);
   --shadow-menu:    0 12px 36px rgba(60, 40, 120, 0.15);
   --shadow-modal:   0 20px 50px rgba(60, 40, 120, 0.18);
@@ -1050,12 +1052,13 @@ html[data-mode="light"] {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: var(--modal-bg);
-  border: 1px solid var(--sidebar-border);
+  background: var(--pill-bg);
+  border: 1px solid var(--pill-border);
   border-radius: 18px;
   padding: 8px;
-  backdrop-filter: blur(14px);
-  box-shadow: var(--shadow-modal);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-pill), inset 0 1px 0 rgba(255,255,255,0.04);
   z-index: 5;
 }
 
@@ -1093,10 +1096,8 @@ html[data-mode="light"] {
 .fj-tool:active { transform: translateY(0) scale(0.97); }
 .fj-tool.active {
   background: var(--accent);
-  color: var(--card-bg);
-  box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,0.04),
-    0 10px 18px rgba(15,23,42,0.18);
+  color: var(--on-accent);
+  box-shadow: 0 4px 14px var(--accent-dim);
 }
 .fj-tool.active:hover {
   background: var(--accent);
@@ -1131,10 +1132,10 @@ html[data-mode="light"] {
 }
 .fj-split .fj-tool-main.active {
   background: var(--accent);
-  color: var(--card-bg);
+  color: var(--on-accent);
 }
 .fj-sep {
-  width: 1px; height: 28px; background: linear-gradient(180deg, rgba(15,23,42,0.04), rgba(15,23,42,0.14), rgba(15,23,42,0.04)); margin: 0 2px;
+  width: 1px; height: 28px; background: var(--pill-border); margin: 0 2px;
 }
 
 .shape-btn-wrap { position: relative; display: inline-flex; }
