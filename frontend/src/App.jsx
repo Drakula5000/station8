@@ -1129,7 +1129,6 @@ export default function App() {
       <main className="canvas-wrap">
         {showDatabaseHome ? (
           <DatabaseHome
-            workspace={workspace}
             query={query}
             onQueryChange={setQuery}
             databaseView={databaseView}
@@ -1251,17 +1250,17 @@ export default function App() {
             {readOnly && activeDoc && (
               <div className="pill-wrap">
                 <div className="pill">
-                  <span className="pill-brand">STATION 8</span>
-                  <div className="pill-sep" />
-                  <span className="pill-title-text pill-title-static">{activeDoc.name}</span>
-                  <span className="pill-ro-badge">Read Only</span>
-                  <div className="pill-sep" />
                   <button
                     className="pill-icon-btn"
                     onClick={goToDatabaseHome}
                     title="Back to database"
                     type="button"
                   >←</button>
+                  <div className="pill-sep" />
+                  <span className="pill-brand">STATION 8</span>
+                  <div className="pill-sep" />
+                  <span className="pill-title-text pill-title-static">{activeDoc.name}</span>
+                  <span className="pill-ro-badge">Read Only</span>
                 </div>
               </div>
             )}
@@ -1626,7 +1625,6 @@ function AccessGate({
 }
 
 function DatabaseHome({
-  workspace,
   query,
   onQueryChange,
   databaseView,
@@ -1640,10 +1638,7 @@ function DatabaseHome({
   return (
     <div className="database-home">
       <div className="database-topbar">
-        <div className="database-title-block">
-          <div className="database-kicker">Station 8</div>
-          <div className="database-title">{workspace?.name || 'Research Database'}</div>
-        </div>
+        <span className="database-brand">STATION 8</span>
         <label className="database-search">
           <SearchIcon />
           <input

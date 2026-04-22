@@ -49,39 +49,39 @@ html[data-mode="dark"], html:not([data-mode]) {
 
 /* ── Aurora light ── */
 html[data-mode="light"] {
-  --s8-bg:             #e2daf8;
-  --s8-canvas-dot:     rgba(109, 68, 204, 0.22);
-  --s8-canvas-glow:    rgba(109, 68, 204, 0.08);
-  --s8-accent:         #6d44cc;
+  --s8-bg:             #f3f2f8;
+  --s8-canvas-dot:     rgba(90, 55, 180, 0.11);
+  --s8-canvas-glow:    rgba(90, 55, 180, 0.05);
+  --s8-accent:         #6038c0;
   --s8-accent2:        #0b8f8a;
-  --s8-accent-dim:     rgba(109, 68, 204, 0.14);
-  --s8-accent-border:  rgba(109, 68, 204, 0.32);
-  --s8-sidebar-bg:     #d6ccf4;
-  --s8-sidebar-border: #bfb0e8;
-  --s8-hover:          rgba(109, 68, 204, 0.10);
-  --s8-active:         rgba(109, 68, 204, 0.18);
-  --s8-text:           #140c34;
-  --s8-text-mid:       #5c48a0;
-  --s8-text-dim:       #a898d8;
-  --s8-pill-bg:        rgba(248, 245, 255, 0.96);
-  --s8-pill-border:    rgba(109, 68, 204, 0.32);
-  --s8-tag-bg:         rgba(11, 143, 138, 0.12);
+  --s8-accent-dim:     rgba(96, 56, 192, 0.10);
+  --s8-accent-border:  rgba(96, 56, 192, 0.26);
+  --s8-sidebar-bg:     #eae8f4;
+  --s8-sidebar-border: #d4cee8;
+  --s8-hover:          rgba(96, 56, 192, 0.07);
+  --s8-active:         rgba(96, 56, 192, 0.13);
+  --s8-text:           #18143a;
+  --s8-text-mid:       #6855a8;
+  --s8-text-dim:       #b4acd4;
+  --s8-pill-bg:        rgba(255, 255, 255, 0.96);
+  --s8-pill-border:    rgba(96, 56, 192, 0.22);
+  --s8-tag-bg:         rgba(11, 143, 138, 0.10);
   --s8-tag:            #0b8f8a;
-  --s8-card-bg:        #f2eeff;
-  --s8-card-border:    #c4b4e8;
-  --s8-folder-bg:      #e4daf8;
-  --s8-folder-border:  #c4b4e8;
-  --s8-modal-bg:       #eee8ff;
-  --s8-input-bg:       #faf8ff;
-  --s8-input-border:   #c4b4e8;
+  --s8-card-bg:        #ffffff;
+  --s8-card-border:    #ddd8f0;
+  --s8-folder-bg:      #edeaf8;
+  --s8-folder-border:  #d4cee8;
+  --s8-modal-bg:       #f8f7ff;
+  --s8-input-bg:       #ffffff;
+  --s8-input-border:   #d4cee8;
   --s8-danger:         #c0392b;
   --s8-danger-dim:     rgba(192, 57, 43, 0.07);
   --s8-success:        #16a34a;
   --s8-success-dim:    rgba(34, 197, 94, 0.10);
   --s8-on-accent:      #ffffff;
-  --s8-shadow-pill:    0 2px 20px rgba(60, 40, 120, 0.18);
-  --s8-shadow-menu:    0 12px 36px rgba(60, 40, 120, 0.20);
-  --s8-shadow-modal:   0 20px 50px rgba(60, 40, 120, 0.25);
+  --s8-shadow-pill:    0 2px 16px rgba(40, 25, 100, 0.14);
+  --s8-shadow-menu:    0 12px 36px rgba(40, 25, 100, 0.14);
+  --s8-shadow-modal:   0 20px 50px rgba(40, 25, 100, 0.18);
 }
 
 /* ── App layout ── */
@@ -232,6 +232,7 @@ html[data-mode="light"] {
   color: var(--s8-text-mid); border-radius: 5px; cursor: pointer;
   transition: color 0.1s, background 0.1s;
 }
+.tree-delete-btn svg { width: 15px; height: 15px; }
 .tree-delete-btn:hover { color: var(--s8-danger); background: var(--s8-danger-dim); }
 
 .tree-privacy-btn {
@@ -240,6 +241,7 @@ html[data-mode="light"] {
   color: var(--s8-text-mid); border-radius: 5px; cursor: pointer;
   transition: color 0.1s, background 0.1s;
 }
+.tree-privacy-btn svg { width: 15px; height: 15px; }
 .tree-privacy-btn:hover { color: var(--s8-accent); background: var(--s8-accent-dim); }
 /* When locked: always show the lock button (not just on hover) */
 .tree-privacy-btn.is-private {
@@ -256,7 +258,7 @@ html[data-mode="light"] {
   color: var(--s8-accent); opacity: 0.5; flex-shrink: 0;
   margin-left: 2px;
 }
-.sb-private-badge svg { width: 11px; height: 11px; }
+.sb-private-badge svg { width: 15px; height: 15px; }
 /* On hover, hide the badge since item-actions is now visible */
 .tree-item-shell:hover .sb-private-badge { display: none; }
 
@@ -475,18 +477,34 @@ html[data-mode="light"] {
   gap: 14px;
 }
 
-.database-title-block {
-  min-width: 0;
-}
-
-.database-kicker {
-  font-family: 'tldraw_mono', ui-monospace, monospace;
+.database-brand {
+  font-family: 'Space Mono', monospace;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.20em;
   text-transform: uppercase;
+  color: var(--s8-accent);
+  white-space: nowrap;
+}
+
+.topbar-logout {
+  border: 1px solid var(--s8-sidebar-border);
+  border-radius: 8px;
+  background: transparent;
   color: var(--s8-text-mid);
-  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Space Mono', monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.topbar-logout:hover {
+  color: var(--s8-danger);
+  border-color: var(--s8-danger);
+  background: var(--s8-danger-dim);
 }
 
 .database-title {
@@ -1718,74 +1736,45 @@ html[data-mode="light"] {
 
 /* ─── ShapeColorSync: tldraw color palette → Aurora values ─── */
 
-/* Geo shapes: desaturate SVG fill. Text labels are siblings of SVG, not children — safe. */
+/* Geo shapes: mute without crushing — text labels are siblings of SVG, unaffected. */
 .tldraw-wrap .tl-theme__dark [data-shape-type='geo'] > svg {
-  filter: saturate(0.32) brightness(0.52);
+  filter: saturate(0.55) brightness(0.68);
 }
 .tldraw-wrap .tl-theme__light [data-shape-type='geo'] > svg {
-  filter: saturate(0.45) brightness(0.98) hue-rotate(20deg);
+  filter: saturate(0.55) brightness(0.95);
 }
 
-/* Note backgrounds — dark mode */
-.tldraw-wrap .tl-theme__dark [data-tl-color='yellow'] .tl-note__container,
-.tldraw-wrap .tl-theme__dark [data-tl-color='light-violet'] .tl-note__container {
-  background-color: #241258 !important;
+/* Note backgrounds — dark mode: mirror the Aurora swatch palette exactly */
+.tldraw-wrap .tl-theme__dark [data-tl-color='light-violet'] .tl-note__container,
+.tldraw-wrap .tl-theme__dark [data-tl-color='yellow'] .tl-note__container {
+  background-color: #C8B0F5 !important;
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='violet'] .tl-note__container {
-  background-color: #2f1674 !important;
+  background-color: #B8A0F8 !important;
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='light-red'] .tl-note__container {
-  background-color: #3a1028 !important;
+  background-color: #F0A8C0 !important;
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='red'] .tl-note__container {
-  background-color: #380c20 !important;
+  background-color: #e87890 !important;
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='light-blue'] .tl-note__container,
 .tldraw-wrap .tl-theme__dark [data-tl-color='blue'] .tl-note__container {
-  background-color: #0e1e44 !important;
+  background-color: #90BCE8 !important;
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='light-green'] .tl-note__container,
 .tldraw-wrap .tl-theme__dark [data-tl-color='green'] .tl-note__container {
-  background-color: #0c2c22 !important;
+  background-color: #88D4B0 !important;
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='orange'] .tl-note__container {
-  background-color: #301a04 !important;
+  background-color: #F0B880 !important;
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='grey'] .tl-note__container {
-  background-color: #16202e !important;
+  background-color: #8898b0 !important;
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='black'] .tl-note__container {
-  background-color: #0a0c12 !important;
+  background-color: #1e2438 !important;
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='white'] .tl-note__container {
-  background-color: #1a1e30 !important;
-}
-
-/* Note backgrounds — light mode */
-.tldraw-wrap .tl-theme__light [data-tl-color='yellow'] .tl-note__container,
-.tldraw-wrap .tl-theme__light [data-tl-color='light-violet'] .tl-note__container {
-  background-color: #d4c8ff !important;
-}
-.tldraw-wrap .tl-theme__light [data-tl-color='violet'] .tl-note__container {
-  background-color: #bfaeff !important;
-}
-.tldraw-wrap .tl-theme__light [data-tl-color='light-red'] .tl-note__container {
-  background-color: #ffc0d4 !important;
-}
-.tldraw-wrap .tl-theme__light [data-tl-color='red'] .tl-note__container {
-  background-color: #ffacc8 !important;
-}
-.tldraw-wrap .tl-theme__light [data-tl-color='light-blue'] .tl-note__container,
-.tldraw-wrap .tl-theme__light [data-tl-color='blue'] .tl-note__container {
-  background-color: #b4d0f8 !important;
-}
-.tldraw-wrap .tl-theme__light [data-tl-color='light-green'] .tl-note__container,
-.tldraw-wrap .tl-theme__light [data-tl-color='green'] .tl-note__container {
-  background-color: #a4e4c4 !important;
-}
-.tldraw-wrap .tl-theme__light [data-tl-color='orange'] .tl-note__container {
-  background-color: #ffd0a0 !important;
-}
-.tldraw-wrap .tl-theme__light [data-tl-color='grey'] .tl-note__container {
-  background-color: #ccd4e4 !important;
+  background-color: #dce8f8 !important;
 }

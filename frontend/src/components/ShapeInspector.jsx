@@ -1,17 +1,17 @@
 import { track, useEditor, DefaultColorStyle, DefaultFontStyle, DefaultSizeStyle, DefaultHorizontalAlignStyle } from 'tldraw'
 import { FjDraftIcon, FjDataIcon, FjAnalysisIcon, FjInsightIcon } from '../icons'
 
-// Research palette → tldraw's DefaultColorStyle values.
-// Keep this aligned with STICKY_SWATCHES / SECTION_SWATCHES in TldrawCanvas.jsx.
+// Aurora palette — must stay in sync with STICKY_SWATCHES in TldrawCanvas.jsx.
+// bg = what the swatch shows = what you'll see on the canvas.
 const COLOR_SWATCHES = [
-  { id: 'yellow',        bg: '#FFE066', tl: 'yellow' },
-  { id: 'pink',          bg: '#FFB3C7', tl: 'light-red' },
-  { id: 'blue',          bg: '#B3D9FF', tl: 'light-blue' },
-  { id: 'green',         bg: '#C5E8A5', tl: 'light-green' },
-  { id: 'orange',        bg: '#FFCB8A', tl: 'orange' },
-  { id: 'purple',        bg: '#D9C6FF', tl: 'light-violet' },
-  { id: 'red',           bg: '#FF8A8A', tl: 'red' },
-  { id: 'grey',          bg: '#D0D4D9', tl: 'grey' },
+  { id: 'lavender', bg: '#C8B0F5', tl: 'light-violet' },
+  { id: 'pink',     bg: '#F0A8C0', tl: 'light-red' },
+  { id: 'blue',     bg: '#90BCE8', tl: 'light-blue' },
+  { id: 'teal',     bg: '#88D4B0', tl: 'light-green' },
+  { id: 'orange',   bg: '#F0B880', tl: 'orange' },
+  { id: 'purple',   bg: '#B8A0F8', tl: 'violet' },
+  { id: 'red',      bg: '#e87890', tl: 'red' },
+  { id: 'grey',     bg: '#8898b0', tl: 'grey' },
 ]
 
 const FONTS = [
