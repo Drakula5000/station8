@@ -917,6 +917,25 @@ html[data-mode="light"] {
 .tldraw-wrap .tl-background { background-color: transparent !important; }
 .tldraw-wrap .tl-canvas { background: transparent !important; }
 .tldraw-wrap .tl-container { --tl-color-background: transparent; }
+
+/* Theme tldraw's UI panels to match Aurora */
+.tldraw-wrap .tl-theme__dark,
+.tldraw-wrap .tl-theme__light {
+  --tl-color-panel:           var(--pill-bg);
+  --tl-color-panel-contrast:  var(--pill-border);
+  --tl-color-low:             var(--hover);
+  --tl-color-low-border:      var(--sidebar-border);
+  --tl-color-divider:         var(--sidebar-border);
+  --tl-color-text:            var(--text);
+  --tl-color-text-0:          var(--text);
+  --tl-color-text-1:          var(--text-mid);
+  --tl-color-text-3:          var(--text-mid);
+  --tl-color-selected:        var(--accent);
+  --tl-color-primary:         var(--accent);
+  --tl-color-focus:           var(--accent-border);
+  --tl-shadow-2:              var(--shadow-pill);
+  --tl-shadow-3:              var(--shadow-menu);
+}
 .sticky-ghost {
   position: absolute;
   pointer-events: none;
@@ -1483,7 +1502,8 @@ html[data-mode="light"] {
 .pill-wrap {
   position: absolute;
   top: 12px;
-  left: 12px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 10000;
 }
 
@@ -1524,8 +1544,11 @@ html[data-mode="light"] {
   font-size: 12.5px; font-weight: 500;
   color: var(--text); font-family: inherit;
   transition: color 0.12s;
-  white-space: nowrap;
-  padding: 0;
+  white-space: nowrap; overflow: hidden;
+  min-width: 0; padding: 0;
+}
+.pill-title-text {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .pill-title-btn:hover { color: var(--accent); }
 

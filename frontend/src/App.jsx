@@ -1160,7 +1160,7 @@ export default function App() {
                     onClick={() => setTitleMenuOpen(o => !o)}
                     type="button"
                   >
-                    {activeDoc.name}
+                    <span className="pill-title-text">{activeDoc.name}</span>
                     <span className="pill-chevron">▾</span>
                   </button>
                   {saveState === 'saving' && <span className="pill-saving" />}
