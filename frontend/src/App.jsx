@@ -222,6 +222,17 @@ export default function App() {
     try { window.localStorage.setItem('s8.colorMode', colorMode) } catch {}
   }, [colorMode])
 
+  const [titleMenuOpen, setTitleMenuOpen] = useState(false)
+
+  useEffect(() => {
+    if (!titleMenuOpen) return
+    const close = (e) => {
+      if (!e.target.closest('.pill-wrap')) setTitleMenuOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [titleMenuOpen])
+
   const viewerMode = route.shareToken ? 'share' : auth.access
   const readOnly = viewerMode === 'visitor' || viewerMode === 'share'
   const ownerMode = viewerMode === 'owner'
@@ -1058,107 +1069,80 @@ export default function App() {
           />
         ) : (
           <>
-            <div className="topbar">
-              {showSidebar && sidebarCollapsed && (
-                <button
-                  className="sidebar-toggle"
-                  onClick={() => setSidebarCollapsed(false)}
-                  type="button"
-                  aria-controls="workspace-sidebar"
-                  aria-expanded="false"
-                  aria-label="Show sidebar"
-                  title="Show sidebar"
-                >
-                  <SidebarExpandIcon />
-                </button>
-              )}
-              {readOnly && (
-                <button className="database-back-btn" onClick={goToDatabaseHome} type="button">
-                  Database
-                </button>
-              )}
-              <div className="crumb-col">
-                {activeDoc && (
-                  <div className="crumb-path">
-                    {activeFolderPath || 'Workspace root'}
-                  </div>
-                )}
-                <div className="crumb">
-                  {activeBoard ? activeBoard.name : activeSheet ? activeSheet.name : showDatabaseHome ? 'Research Database' : 'Select or create something'}
+            {/* Floating pill — owner view, board open */}
+            {ownerMode && activeDoc && (
+              <div className="pill-wrap">
+                <div className="pill">
+                  {sidebarCollapsed && (
+                    <button
+                      className="pill-icon-btn"
+                      onClick={() => setSidebarCollapsed(false)}
+                      aria-label="Show sidebar"
+                      type="button"
+                    >
+                      <SidebarExpandIcon />
+                    </button>
+                  )}
+                  {sidebarCollapsed && <div className="pill-sep" />}
+                  <button
+                    className="pill-title-btn"
+                    onClick={() => setTitleMenuOpen(o => !o)}
+                    type="button"
+                  >
+                    {activeDoc.name}
+                    <span className="pill-chevron">▾</span>
+                  </button>
+                  {saveState === 'saving' && <span className="pill-saving" />}
+                  {saveState === 'error' && <span className="pill-error">!</span>}
                 </div>
-                {activeDoc && (
-                  <div className="doc-tags">
-                    {!readOnly && (
-                      <label className="folder-field">
-                        <span className="folder-field-label">Folder</span>
-                        <select
-                          className="folder-select"
-                          value={activeDoc.folder_id || ROOT_FOLDER}
-                          onChange={(e) => moveActiveDoc(e.target.value)}
+
+                {titleMenuOpen && (
+                  <div className="title-menu">
+                    <button className="title-menu-item" onClick={() => { setShareOpen(true); setTitleMenuOpen(false) }} type="button">
+                      Share workspace
+                    </button>
+                    <button
+                      className="title-menu-item"
+                      onClick={() => {
+                        navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}`)
+                        setTitleMenuOpen(false)
+                      }}
+                      type="button"
+                    >
+                      Copy board link
+                    </button>
+                    {activeDoc && activeDocType && (
+                      <>
+                        <div className="title-menu-sep" />
+                        <button
+                          className="title-menu-item title-menu-danger"
+                          onClick={() => { openDeleteDialog({ ...activeDoc, type: activeDocType }); setTitleMenuOpen(false) }}
+                          type="button"
                         >
-                          {folderOptions.map(option => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </select>
-                      </label>
+                          Delete board…
+                        </button>
+                      </>
                     )}
-                    {(activeDoc.tags || []).map(t => {
-                      const c = tagColor(t)
-                      return (
-                        <span key={t} className="tag-pill" style={{ background: c.bg, color: c.fg }}>
-                          #{t}
-                          {!readOnly && <button className="tag-pill-remove" onClick={() => removeTagFromActive(t)} title="Remove tag" type="button">×</button>}
-                        </span>
-                      )
-                    })}
-                    {!readOnly && (tagInputOpen ? (
-                      <input
-                        autoFocus
-                        className="tag-input"
-                        value={tagInput}
-                        onChange={e => setTagInput(e.target.value)}
-                        onBlur={() => { addTagToActive() }}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') addTagToActive()
-                          if (e.key === 'Escape') { setTagInput(''); setTagInputOpen(false) }
-                        }}
-                        placeholder="tag-name"
-                      />
-                    ) : (
-                      <button className="tag-add" onClick={() => setTagInputOpen(true)} type="button">+ tag</button>
-                    ))}
                   </div>
                 )}
               </div>
-              <div className="topbar-actions">
-                {readOnly && (
-                  <span className="readonly-chip">
-                    Read-only
-                  </span>
-                )}
-                {ownerMode && (
-                  <>
-                    <span className={`save-indicator save-${saveState}`} aria-live="polite">
-                      {saveState === 'saving' && '· saving…'}
-                      {saveState === 'saved' && '✓ saved'}
-                      {saveState === 'error' && '! save failed'}
-                    </span>
-                    {activeDoc && activeDocType && (
-                      <button
-                        className="topbar-delete-btn"
-                        onClick={() => openDeleteDialog({ ...activeDoc, type: activeDocType })}
-                        type="button"
-                      >
-                        <TrashIcon />
-                        Delete...
-                      </button>
-                    )}
-                    <button className="share-btn" onClick={() => setShareOpen(true)} type="button">Share</button>
-                  </>
-                )}
-                <button className="topbar-logout" onClick={handleLogout} type="button">Logout</button>
+            )}
+
+            {/* Pill — sidebar collapsed, no active doc */}
+            {ownerMode && !activeDoc && sidebarCollapsed && (
+              <div className="pill-wrap">
+                <div className="pill">
+                  <button
+                    className="pill-icon-btn"
+                    onClick={() => setSidebarCollapsed(false)}
+                    aria-label="Show sidebar"
+                    type="button"
+                  >
+                    <SidebarExpandIcon />
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="work-area">
               {activeId?.type === 'board' && (

@@ -288,34 +288,6 @@ html[data-mode="light"] {
   flex-direction: column;
 }
 
-.topbar {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 16px;
-  background: #fff; border-bottom: 1px solid #ebebeb;
-}
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.topbar-delete-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border: none;
-  background: transparent;
-  color: #6b7280;
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-}
-.topbar-delete-btn:hover {
-  background: #fff1f2;
-  color: #b42318;
-}
 .database-back-btn {
   display: inline-flex;
   align-items: center;
@@ -978,20 +950,6 @@ html[data-mode="light"] {
   padding: 7px 14px; font-size: 12px; cursor: pointer;
 }
 .share-btn:disabled { background: #ccc; cursor: not-allowed; }
-.topbar-logout {
-  background: transparent;
-  color: #666;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 7px 12px;
-  font-size: 12px;
-  cursor: pointer;
-  font-family: inherit;
-}
-.topbar-logout:hover {
-  border-color: #bbb;
-  color: #111;
-}
 
 .save-indicator {
   font-size: 11px; color: #888;
@@ -1169,9 +1127,6 @@ html[data-mode="light"] {
     padding: 16px;
   }
 
-  .topbar {
-    flex-wrap: wrap;
-  }
 }
 .fj-tool {
   position: relative;
@@ -1578,3 +1533,95 @@ html[data-mode="light"] {
   font-size: 12px;
   text-align: center;
 }
+
+/* ── Pill ── */
+.pill-wrap {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 200;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  background: var(--pill-bg);
+  border: 1px solid var(--pill-border);
+  border-radius: 100px;
+  padding: 4px 14px 4px 5px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-pill), inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.pill-icon-btn {
+  width: 30px; height: 30px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent;
+  border-radius: 100px; cursor: pointer;
+  color: var(--text-mid);
+  transition: background 0.12s, color 0.12s;
+}
+.pill-icon-btn:hover { background: var(--hover); color: var(--text); }
+
+.pill-sep {
+  width: 1px; height: 16px;
+  background: var(--pill-border);
+  margin: 0 8px;
+  flex-shrink: 0;
+}
+
+.pill-title-btn {
+  display: flex; align-items: center; gap: 5px;
+  border: none; background: transparent; cursor: pointer;
+  font-size: 12.5px; font-weight: 500;
+  color: var(--text); font-family: inherit;
+  transition: color 0.12s;
+  white-space: nowrap;
+  padding: 0;
+}
+.pill-title-btn:hover { color: var(--accent); }
+
+.pill-chevron { font-size: 10px; color: var(--text-mid); opacity: 0.6; }
+
+.pill-saving {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); margin-left: 6px;
+  animation: pill-pulse 1.2s ease-in-out infinite;
+}
+.pill-error {
+  font-size: 11px; font-weight: 700;
+  color: var(--danger); margin-left: 6px;
+}
+@keyframes pill-pulse {
+  0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+}
+
+/* ── Title menu ── */
+.title-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 200px;
+  background: var(--modal-bg);
+  border: 1px solid var(--sidebar-border);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: var(--shadow-menu), inset 0 1px 0 rgba(255,255,255,0.04);
+  backdrop-filter: blur(20px);
+}
+
+.title-menu-item {
+  display: flex; align-items: center;
+  width: 100%; padding: 8px 10px;
+  border: none; background: transparent;
+  border-radius: 7px; cursor: pointer;
+  font-size: 12px; color: var(--text);
+  font-family: inherit; text-align: left;
+  transition: background 0.1s;
+}
+.title-menu-item:hover { background: var(--hover); }
+.title-menu-danger { color: var(--danger); }
+.title-menu-danger:hover { background: var(--danger-dim); }
+.title-menu-sep { height: 1px; background: var(--sidebar-border); margin: 4px 0; }
