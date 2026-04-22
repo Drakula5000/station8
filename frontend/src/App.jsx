@@ -213,6 +213,15 @@ export default function App() {
     }
   })
 
+  const [colorMode, setColorMode] = useState(() => {
+    try { return window.localStorage.getItem('s8.colorMode') || 'dark' } catch { return 'dark' }
+  })
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-mode', colorMode)
+    try { window.localStorage.setItem('s8.colorMode', colorMode) } catch {}
+  }, [colorMode])
+
   const viewerMode = route.shareToken ? 'share' : auth.access
   const readOnly = viewerMode === 'visitor' || viewerMode === 'share'
   const ownerMode = viewerMode === 'owner'
