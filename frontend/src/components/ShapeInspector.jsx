@@ -41,6 +41,12 @@ const CORNER_OPTIONS = [
   { id: 32, cls: 'corner-swatch-32', title: 'Pill' },
 ]
 
+const IMAGE_BORDER_OPTIONS = [
+  { id: 0, label: 'Off', title: 'No border' },
+  { id: 2, label: 'Thin', title: 'Thin border' },
+  { id: 4, label: 'Bold', title: 'Bold border' },
+]
+
 // Which control rows apply to which shape types.
 // Keep conservative — show a control only when ALL selected shapes support it.
 const SHAPES_WITH_COLOR   = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 'frame', 'highlight'])
@@ -48,6 +54,7 @@ const SHAPES_WITH_TEXT    = new Set(['note', 'geo', 'text', 'arrow'])
 const SHAPES_WITH_SIZE    = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw'])
 const SHAPES_WITH_ALIGN   = new Set(['note', 'geo', 'text'])
 const SHAPES_WITH_CORNERS = new Set(['frame'])
+const SHAPES_WITH_IMAGE_STYLING = new Set(['image'])
 
 function allShapesMatch(shapes, set) {
   return shapes.length > 0 && shapes.every((s) => set.has(s.type))
@@ -83,6 +90,7 @@ export const ShapeInspector = track(function ShapeInspector() {
   const showSize    = allShapesMatch(shapes, SHAPES_WITH_SIZE)
   const showAlign   = allShapesMatch(shapes, SHAPES_WITH_ALIGN)
   const showCorners = allShapesMatch(shapes, SHAPES_WITH_CORNERS)
+  const showImageStyling = allShapesMatch(shapes, SHAPES_WITH_IMAGE_STYLING)
 
   const activeColor = sharedStyle(editor, DefaultColorStyle)
   const activeFont  = sharedStyle(editor, DefaultFontStyle)
@@ -91,6 +99,15 @@ export const ShapeInspector = track(function ShapeInspector() {
   const activeCorner = showCorners && shapes.every(
     s => Number(s.meta?.cornerRadius ?? 0) === Number(shapes[0].meta?.cornerRadius ?? 0)
   ) ? Number(shapes[0].meta?.cornerRadius ?? 0) : undefined
+  const activeImageCorner = showImageStyling && shapes.every(
+    s => Number(s.meta?.imageCornerRadius ?? 0) === Number(shapes[0].meta?.imageCornerRadius ?? 0)
+  ) ? Number(shapes[0].meta?.imageCornerRadius ?? 0) : undefined
+  const activeImageBorder = showImageStyling && shapes.every(
+    s => Number(s.meta?.imageBorderWidth ?? 0) === Number(shapes[0].meta?.imageBorderWidth ?? 0)
+  ) ? Number(shapes[0].meta?.imageBorderWidth ?? 0) : undefined
+  const activeImageBorderColor = showImageStyling && shapes.every(
+    s => String(s.meta?.imageBorderColor ?? COLOR_SWATCHES[5].bg) === String(shapes[0].meta?.imageBorderColor ?? COLOR_SWATCHES[5].bg)
+  ) ? String(shapes[0].meta?.imageBorderColor ?? COLOR_SWATCHES[5].bg) : undefined
 
   const applyColor  = (tl) => editor.setStyleForSelectedShapes(DefaultColorStyle, tl)
   const applyFont   = (id) => editor.setStyleForSelectedShapes(DefaultFontStyle, id)
@@ -98,6 +115,15 @@ export const ShapeInspector = track(function ShapeInspector() {
   const applyAlign  = (id) => editor.setStyleForSelectedShapes(DefaultHorizontalAlignStyle, id)
   const applyCorner = (rx) => editor.updateShapes(
     shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, cornerRadius: rx } }))
+  )
+  const applyImageCorner = (rx) => editor.updateShapes(
+    shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, imageCornerRadius: rx } }))
+  )
+  const applyImageBorder = (width) => editor.updateShapes(
+    shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, imageBorderWidth: width } }))
+  )
+  const applyImageBorderColor = (color) => editor.updateShapes(
+    shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, imageBorderColor: color } }))
   )
 
   return (
@@ -111,16 +137,16 @@ export const ShapeInspector = track(function ShapeInspector() {
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
-      {showColor && (
+      {(showColor || showImageStyling) && (
         <div className="insp-row">
           <div className="insp-label">Color</div>
           <div className="insp-body insp-body-swatches">
             {COLOR_SWATCHES.map((c) => (
               <button
                 key={c.id}
-                className={`insp-swatch ${activeColor === c.tl ? 'active' : ''}`}
+                className={`insp-swatch ${(showImageStyling ? activeImageBorderColor === c.bg : activeColor === c.tl) ? 'active' : ''}`}
                 style={{ background: c.bg }}
-                onClick={() => applyColor(c.tl)}
+                onClick={() => (showImageStyling ? applyImageBorderColor(c.bg) : applyColor(c.tl))}
                 title={c.id}
                 type="button"
               />
@@ -201,6 +227,41 @@ export const ShapeInspector = track(function ShapeInspector() {
           </div>
         </div>
       )}
+
+      {showImageStyling && (
+        <div className="insp-row">
+          <div className="insp-label">Corners</div>
+          <div className="insp-body">
+            {CORNER_OPTIONS.map((c) => (
+              <button
+                key={c.id}
+                className={`insp-btn ${activeImageCorner === c.id ? 'active' : ''}`}
+                onClick={() => applyImageCorner(c.id)}
+                title={c.title}
+                type="button"
+              ><span className={`corner-swatch ${c.cls}`} /></button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showImageStyling && (
+        <div className="insp-row">
+          <div className="insp-label">Border</div>
+          <div className="insp-body">
+            {IMAGE_BORDER_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                className={`insp-btn ${activeImageBorder === option.id ? 'active' : ''}`}
+                onClick={() => applyImageBorder(option.id)}
+                title={option.title}
+                type="button"
+              >{option.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
     </div>
   )
 })

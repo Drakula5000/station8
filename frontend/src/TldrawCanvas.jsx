@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Tldraw, useEditor, track, DefaultColorStyle, GeoShapeGeoStyle, FrameShapeUtil } from 'tldraw'
+import {
+  Tldraw,
+  useEditor,
+  track,
+  DefaultColorStyle,
+  GeoShapeGeoStyle,
+  FrameShapeUtil,
+  TldrawUiButtonIcon,
+} from 'tldraw'
 import 'tldraw/tldraw.css'
 import {
   FjCursorIcon, FjHandIcon, FjStickyIcon, FjTextIcon, FjArrowIcon, FjPenIcon, FjSectionIcon,
@@ -41,6 +49,8 @@ const TLDRAW_COMPONENTS = {
   HelpMenu: null,
   DebugMenu: null,
   DebugPanel: null,
+  NavigationPanel: null,
+  ImageToolbar: null,
 }
 
 const STICKY_SWATCHES = {
@@ -56,6 +66,22 @@ const STICKY_SWATCHES = {
 const NOTE_DEFAULT_SCALE = 0.6
 
 const FRAME_SHAPE_UTILS = [FrameShapeUtil.configure({ showColors: true })]
+
+// Stamps data-tl-color on each shape DOM node so CSS can remap tldraw's
+// native dark-mode color palette to Aurora-appropriate values.
+const ShapeColorSync = track(function ShapeColorSync() {
+  const editor = useEditor()
+  const shapes = editor.getCurrentPageShapes()
+  useEffect(() => {
+    shapes.forEach(shape => {
+      const color = shape.props?.color
+      if (!color) return
+      const el = document.querySelector(`[data-shape-id="${shape.id}"]`)
+      if (el) el.setAttribute('data-tl-color', color)
+    })
+  })
+  return null
+})
 
 // Reactive component that injects per-frame corner-radius CSS.
 // React 19 hoists <style> tags into <head> automatically.
@@ -74,6 +100,32 @@ const FrameCornerStyles = track(function FrameCornerStyles() {
       `[data-shape-id="${id}"] .tl-frame-heading-hit-area { border-radius: ${rx * 12 / 32}px }`,
     ].join('\n')
   }).join('\n')
+  return <style>{css}</style>
+})
+
+const ImageShapeStyles = track(function ImageShapeStyles() {
+  const editor = useEditor()
+  const images = editor.getCurrentPageShapes().filter((s) => {
+    if (s.type !== 'image') return false
+    return Number(s.meta?.imageCornerRadius ?? 0) > 0 || Number(s.meta?.imageBorderWidth ?? 0) > 0
+  })
+  if (images.length === 0) return null
+
+  const css = images.map((image) => {
+    const id = image.id
+    const radius = image.props.crop?.isCircle ? '50%' : `${Number(image.meta?.imageCornerRadius ?? 0)}px`
+    const borderWidth = Number(image.meta?.imageBorderWidth ?? 0)
+    const borderColor = image.meta?.imageBorderColor || 'var(--s8-accent)'
+    const borderShadow = borderWidth > 0 ? `inset 0 0 0 ${borderWidth}px ${borderColor}` : 'none'
+
+    return [
+      `[data-shape-id="${id}"] .tl-html-container { position: relative; border-radius: ${radius}; overflow: hidden; }`,
+      `[data-shape-id="${id}"] .tl-html-container::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: ${borderShadow}; pointer-events: none; }`,
+      `[data-shape-id="${id}"] .tl-image-container,`,
+      `[data-shape-id="${id}"] .tl-image { border-radius: inherit; }`,
+    ].join('\n')
+  }).join('\n')
+
   return <style>{css}</style>
 })
 
@@ -97,11 +149,23 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
   const [stickyPickerOpen, setStickyPickerOpen] = useState(false)
   const [sectionPickerOpen, setSectionPickerOpen] = useState(false)
   const [shapePickerOpen, setShapePickerOpen] = useState(false)
+  const [editingAltText, setEditingAltText] = useState(false)
+  const [altTextDraft, setAltTextDraft] = useState('')
   const [lastStickyColor, setLastStickyColor] = useState('yellow')
   const [lastSectionColor, setLastSectionColor] = useState('violet')
   const [lastShape, setLastShape] = useState('ellipse')
 
   const currentTool = editor.getCurrentToolId()
+  const selectedImage = editor.getOnlySelectedShape()?.type === 'image' ? editor.getOnlySelectedShape() : null
+
+  useEffect(() => {
+    if (!selectedImage) {
+      setEditingAltText(false)
+      setAltTextDraft('')
+      return
+    }
+    setAltTextDraft(selectedImage.props.altText || '')
+  }, [selectedImage])
 
   // Keep toolInfoRef in sync so TldrawCanvas can render the ghost
   if (toolInfoRef) {
@@ -137,6 +201,71 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
     setShapePickerOpen(false)
   }
 
+  const stopToolbarPointer = (e) => {
+    e.stopPropagation()
+  }
+
+  const startImageCrop = () => {
+    if (!selectedImage) return
+    editor.select(selectedImage.id)
+    editor.setCurrentTool('select.crop.idle')
+  }
+
+  const replaceImage = async () => {
+    if (!selectedImage) return
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.style.display = 'none'
+    document.body.appendChild(input)
+    input.addEventListener('change', () => {
+      const file = input.files?.[0]
+      if (file) {
+        editor.markHistoryStoppingPoint('replace image')
+        editor.replaceExternalContent({
+          type: 'file-replace',
+          file,
+          shapeId: selectedImage.id,
+          isImage: true,
+        })
+      }
+      input.remove()
+    }, { once: true })
+    input.click()
+  }
+
+  const downloadImage = async () => {
+    if (!selectedImage) return
+    if (!selectedImage.props.assetId) return
+    const asset = editor.getAsset(selectedImage.props.assetId)
+    if (!asset) return
+    const url = await editor.resolveAssetUrl(asset.id, { shouldResolveToOriginal: true })
+    if (!url) return
+    const resp = await fetch(url)
+    if (!resp.ok) {
+      window.open(url, '_blank', 'noopener,noreferrer')
+      return
+    }
+    const blob = await resp.blob()
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = asset.props.name || 'image'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(link.href)
+  }
+
+  const saveAltText = () => {
+    if (!selectedImage) return
+    editor.updateShapes([{
+      id: selectedImage.id,
+      type: 'image',
+      props: { altText: altTextDraft },
+    }])
+    setEditingAltText(false)
+  }
+
   const setTool = (tool) => {
     editor.setCurrentTool(tool)
     closeAll()
@@ -145,14 +274,14 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
   const placeNote = (color) => {
     setLastStickyColor(color)
     if (toolInfoRef) toolInfoRef.current.stickyColor = color
-    try { editor.setStyleForNextShapes(DefaultColorStyle, STICKY_SWATCHES[color]?.tl || 'yellow') } catch {}
+    try { editor.setStyleForNextShapes(DefaultColorStyle, STICKY_SWATCHES[color]?.tl || 'yellow') } catch { /* no-op */ }
     editor.setCurrentTool('note')
     setStickyPickerOpen(false)
   }
 
   const placeFrame = (color) => {
     setLastSectionColor(color)
-    try { editor.setStyleForNextShapes(DefaultColorStyle, SECTION_SWATCHES[color]?.tl || 'blue') } catch {}
+    try { editor.setStyleForNextShapes(DefaultColorStyle, SECTION_SWATCHES[color]?.tl || 'blue') } catch { /* no-op */ }
     editor.setCurrentTool('frame')
     setSectionPickerOpen(false)
   }
@@ -162,7 +291,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
     if (shape === 'line') {
       editor.setCurrentTool('line')
     } else {
-      try { editor.setStyleForNextShapes(GeoShapeGeoStyle, shape) } catch {}
+      try { editor.setStyleForNextShapes(GeoShapeGeoStyle, shape) } catch { /* no-op */ }
       editor.setCurrentTool('geo')
     }
     closeAll()
@@ -170,10 +299,15 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
 
   return (
     <>
-    <div className="fj-toolbar">
+    <div
+      className="fj-toolbar"
+      onPointerDownCapture={stopToolbarPointer}
+      onMouseDownCapture={stopToolbarPointer}
+    >
       <button
         className={`fj-tool ${currentTool === 'select' ? 'active' : ''}`}
         onClick={() => setTool('select')}
+        onPointerDown={stopToolbarPointer}
         title="Select"
         type="button"
       ><FjCursorIcon /></button>
@@ -181,6 +315,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
       <button
         className={`fj-tool ${currentTool === 'hand' ? 'active' : ''}`}
         onClick={() => setTool('hand')}
+        onPointerDown={stopToolbarPointer}
         title="Hand"
         type="button"
       ><FjHandIcon /></button>
@@ -193,12 +328,14 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
           <button
             className={`fj-tool fj-tool-main ${currentTool === 'note' ? 'active' : ''}`}
             onClick={() => placeNote(lastStickyColor)}
+            onPointerDown={stopToolbarPointer}
             title="Sticky note"
             type="button"
           ><FjStickyIcon color={lastStickyColor} /></button>
           <button
             className={`fj-tool fj-tool-caret ${stickyPickerOpen ? 'active' : ''}`}
             onClick={() => { setStickyPickerOpen(o => !o); setSectionPickerOpen(false); setShapePickerOpen(false) }}
+            onPointerDown={stopToolbarPointer}
             type="button"
           ><FjChevronDownIcon /></button>
         </div>
@@ -226,12 +363,14 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
           <button
             className={`fj-tool fj-tool-main ${currentTool === 'frame' ? 'active' : ''}`}
             onClick={() => placeFrame(lastSectionColor)}
+            onPointerDown={stopToolbarPointer}
             title="Section"
             type="button"
           ><FjSectionIcon /></button>
           <button
             className={`fj-tool fj-tool-caret ${sectionPickerOpen ? 'active' : ''}`}
             onClick={() => { setSectionPickerOpen(o => !o); setStickyPickerOpen(false); setShapePickerOpen(false) }}
+            onPointerDown={stopToolbarPointer}
             type="button"
           ><FjChevronDownIcon /></button>
         </div>
@@ -259,6 +398,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
           <button
             className={`fj-tool fj-tool-main ${['geo', 'line'].includes(currentTool) ? 'active' : ''}`}
             onClick={() => setShape(lastShape)}
+            onPointerDown={stopToolbarPointer}
             title="Shapes"
             type="button"
           >
@@ -270,6 +410,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
           <button
             className={`fj-tool fj-tool-caret ${shapePickerOpen ? 'active' : ''}`}
             onClick={() => { setShapePickerOpen(o => !o); setStickyPickerOpen(false); setSectionPickerOpen(false) }}
+            onPointerDown={stopToolbarPointer}
             type="button"
           ><FjChevronDownIcon /></button>
         </div>
@@ -286,6 +427,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
       <button
         className={`fj-tool ${currentTool === 'text' ? 'active' : ''}`}
         onClick={() => setTool('text')}
+        onPointerDown={stopToolbarPointer}
         title="Text"
         type="button"
       ><FjTextIcon /></button>
@@ -293,6 +435,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
       <button
         className={`fj-tool ${currentTool === 'arrow' ? 'active' : ''}`}
         onClick={() => setTool('arrow')}
+        onPointerDown={stopToolbarPointer}
         title="Connector"
         type="button"
       ><FjArrowIcon /></button>
@@ -300,9 +443,71 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
       <button
         className={`fj-tool ${currentTool === 'draw' ? 'active' : ''}`}
         onClick={() => setTool('draw')}
+        onPointerDown={stopToolbarPointer}
         title="Draw"
         type="button"
       ><FjPenIcon /></button>
+
+      {selectedImage && (
+        <>
+          <div className="fj-sep" />
+          <button
+            className="fj-tool"
+            onClick={replaceImage}
+            onPointerDown={stopToolbarPointer}
+            title="Replace image"
+            type="button"
+          ><TldrawUiButtonIcon small icon="tool-media" /></button>
+          <button
+            className={`fj-tool ${currentTool.startsWith('select.crop') ? 'active' : ''}`}
+            onClick={startImageCrop}
+            onPointerDown={stopToolbarPointer}
+            title="Crop image"
+            type="button"
+          ><TldrawUiButtonIcon small icon="crop" /></button>
+          <button
+            className="fj-tool"
+            onClick={downloadImage}
+            onPointerDown={stopToolbarPointer}
+            title="Download original"
+            type="button"
+          ><TldrawUiButtonIcon small icon="download" /></button>
+          {editingAltText ? (
+            <div
+              className="fj-alt-wrap"
+              onPointerDownCapture={stopToolbarPointer}
+              onMouseDownCapture={stopToolbarPointer}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                className="fj-alt-input"
+                value={altTextDraft}
+                onChange={(e) => setAltTextDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveAltText()
+                  if (e.key === 'Escape') setEditingAltText(false)
+                }}
+                placeholder="Alt text"
+              />
+              <button
+                className="fj-mini-btn"
+                onClick={saveAltText}
+                onPointerDown={stopToolbarPointer}
+                title="Save alt text"
+                type="button"
+              ><TldrawUiButtonIcon small icon="check" /></button>
+            </div>
+          ) : (
+            <button
+              className={`fj-tool ${selectedImage.props.altText ? 'active' : ''}`}
+              onClick={() => setEditingAltText(true)}
+              onPointerDown={stopToolbarPointer}
+              title="Edit alt text"
+              type="button"
+            ><span className="fj-alt-label">ALT</span></button>
+          )}
+        </>
+      )}
     </div>
     </>
   )
@@ -321,13 +526,15 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   const toolInfoRef = useRef({ tool: 'select', stickyColor: 'yellow' })
   const [ghost, setGhost] = useState(null) // { x, y, color } | null
 
-  boardIdRef.current = boardId
-  readOnlyRef.current = readOnly
-  viewerModeRef.current = viewerMode
-  shareSlugRef.current = shareSlug
-  onSaveStateRef.current = onSaveState
-
   const editorRef = useRef(null)
+
+  useEffect(() => {
+    boardIdRef.current = boardId
+    readOnlyRef.current = readOnly
+    viewerModeRef.current = viewerMode
+    shareSlugRef.current = shareSlug
+    onSaveStateRef.current = onSaveState
+  }, [boardId, readOnly, viewerMode, shareSlug, onSaveState])
 
   const doSave = useCallback(async () => {
     const editor = editorRef.current
@@ -380,11 +587,12 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   }, [doSave])
 
   const colorModeRef = useRef(colorMode)
-  colorModeRef.current = colorMode
+  useEffect(() => {
+    colorModeRef.current = colorMode
+  }, [colorMode])
 
   const handleMount = useCallback((editor) => {
     editorRef.current = editor
-    if (import.meta.env.DEV && typeof window !== 'undefined') window.__tlEditor = editor
     editor.user.updateUserPreferences({ colorScheme: colorModeRef.current === 'light' ? 'light' : 'dark' })
     const bid = boardIdRef.current
     const ro = readOnlyRef.current
@@ -479,6 +687,8 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} />}
         {!readOnly && <ShapeInspector />}
         <FrameCornerStyles />
+        <ImageShapeStyles />
+        <ShapeColorSync />
       </Tldraw>
       {ghost && (
         <div
