@@ -12,26 +12,38 @@ const common = {
 
 export function BoardIcon(props) {
   return (
-    <svg {...common} {...props}>
-      <rect x="3" y="3" width="14" height="14" rx="2"/>
-      <path d="M3 8h14M8 3v14"/>
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...props}>
+      <rect x="1.5" y="1.5" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.1"/>
+      <rect x="3.5" y="3.5" width="2.8" height="2.8" rx=".5" fill="currentColor" opacity=".45"/>
+      <rect x="7.7" y="3.5" width="2.8" height="2.8" rx=".5" fill="currentColor" opacity=".45"/>
+      <rect x="3.5" y="7.7" width="2.8" height="2.8" rx=".5" fill="currentColor" opacity=".45"/>
     </svg>
   )
 }
 
 export function SheetIcon(props) {
   return (
-    <svg {...common} {...props}>
-      <rect x="3" y="3" width="14" height="14" rx="1"/>
-      <path d="M3 8h14M3 13h14M8 3v14M13 3v14"/>
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...props}>
+      <rect x="1.5" y="1.5" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.1"/>
+      <line x1="1.5" y1="4.8" x2="12.5" y2="4.8" stroke="currentColor" strokeWidth=".9"/>
+      <line x1="1.5" y1="9.2" x2="12.5" y2="9.2" stroke="currentColor" strokeWidth=".9"/>
+      <line x1="5" y1="1.5" x2="5" y2="12.5" stroke="currentColor" strokeWidth=".9"/>
     </svg>
   )
 }
 
 export function FolderIcon(props) {
   return (
-    <svg {...common} {...props}>
-      <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H8l1.5 1.8h6A1.5 1.5 0 0 1 17 8.3v6.2A1.5 1.5 0 0 1 15.5 16h-11A1.5 1.5 0 0 1 3 14.5z"/>
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M1.5 4C1.5 3.45 1.95 3 2.5 3H5.5L7 4.5H11.5C12.05 4.5 12.5 4.95 12.5 5.5V10.5C12.5 11.05 12.05 11.5 11.5 11.5H2.5C1.95 11.5 1.5 11.05 1.5 10.5V4Z" stroke="currentColor" strokeWidth="1.1"/>
+    </svg>
+  )
+}
+
+export function PlusIcon(props) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" {...props}>
+      <path d="M6 1V11M1 6H11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
     </svg>
   )
 }

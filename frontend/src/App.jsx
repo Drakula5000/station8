@@ -3,7 +3,7 @@ import Spreadsheet from 'react-spreadsheet'
 import TldrawCanvas from './TldrawCanvas'
 import {
   BoardIcon, SheetIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon,
-  SidebarExpandIcon, SidebarCollapseIcon, TrashIcon, LockIcon, UnlockIcon,
+  SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon,
 } from './icons'
 import './App.css'
 
@@ -1054,20 +1054,12 @@ export default function App() {
         <aside className="sidebar" id="workspace-sidebar" aria-hidden={sidebarCollapsed}>
           <div className="sidebar-head">
             <span className="sidebar-brand">Station 8</span>
-            <button
-              className="sidebar-collapse-btn"
-              onClick={() => setSidebarCollapsed(true)}
-              title="Collapse sidebar"
-              type="button"
-            >
-              <SidebarCollapseIcon />
-            </button>
           </div>
 
           {/* Actions */}
           <div className="sidebar-actions">
             <button className="sidebar-action" onClick={openNewFolderModal} type="button">
-              <FolderIcon /> Folder
+              <PlusIcon /> Folder
             </button>
             <button className="sidebar-action" onClick={openNewBoardModal} type="button">
               <BoardIcon /> Board
@@ -1099,11 +1091,9 @@ export default function App() {
               </div>
               <div className="sb-tags">
                 {allTags.map(([t, count]) => {
-                  const c = tagColor(t)
                   const active = tagFilter === t
                   return (
-                    <button key={t} className="sb-tag"
-                      style={{ background: active ? c.border : c.bg, color: active ? '#fff' : c.fg, borderColor: c.border }}
+                    <button key={t} className={`sb-tag${active ? ' active' : ''}`}
                       onClick={() => filterByTag(t)} type="button">
                       #{t} · {count}
                     </button>
@@ -1156,17 +1146,15 @@ export default function App() {
             {ownerMode && activeDoc && (
               <div className="pill-wrap">
                 <div className="pill">
-                  {sidebarCollapsed && (
-                    <button
-                      className="pill-icon-btn"
-                      onClick={() => setSidebarCollapsed(false)}
-                      aria-label="Show sidebar"
-                      type="button"
-                    >
-                      <SidebarExpandIcon />
-                    </button>
-                  )}
-                  {sidebarCollapsed && <div className="pill-sep" />}
+                  <button
+                    className="pill-icon-btn"
+                    onClick={() => setSidebarCollapsed(c => !c)}
+                    aria-label="Toggle sidebar"
+                    type="button"
+                  >
+                    <SidebarExpandIcon />
+                  </button>
+                  <div className="pill-sep" />
                   <button
                     className="pill-title-btn"
                     onClick={() => setTitleMenuOpen(o => !o)}
@@ -1268,6 +1256,7 @@ export default function App() {
                   viewerMode={viewerMode}
                   shareSlug={route.shareToken}
                   onSaveState={setSaveState}
+                  colorMode={colorMode}
                 />
               )}
               {activeId?.type === 'sheet' && (

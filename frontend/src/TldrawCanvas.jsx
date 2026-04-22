@@ -282,7 +282,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
   )
 })
 
-export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug, onSaveState }) {
+export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug, onSaveState, colorMode }) {
   const boardIdRef = useRef(boardId)
   const readOnlyRef = useRef(readOnly)
   const viewerModeRef = useRef(viewerMode)
@@ -325,6 +325,12 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     }
   }, [])
 
+  useEffect(() => {
+    if (editorRef.current) {
+      editorRef.current.user.updateUserPreferences({ colorScheme: colorMode === 'light' ? 'light' : 'dark' })
+    }
+  }, [colorMode])
+
   useEffect(() => () => {
     cleanupRef.current?.()
     if (saveTimerRef.current) {
@@ -334,9 +340,13 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     }
   }, [doSave])
 
+  const colorModeRef = useRef(colorMode)
+  colorModeRef.current = colorMode
+
   const handleMount = useCallback((editor) => {
     editorRef.current = editor
     if (import.meta.env.DEV && typeof window !== 'undefined') window.__tlEditor = editor
+    editor.user.updateUserPreferences({ colorScheme: colorModeRef.current === 'light' ? 'light' : 'dark' })
     const bid = boardIdRef.current
     const ro = readOnlyRef.current
     const mode = viewerModeRef.current
