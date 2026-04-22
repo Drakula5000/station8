@@ -269,7 +269,27 @@ export const ShapeInspector = track(function ShapeInspector() {
     }
     applyTextSizePx(parsed)
   }
-  const applyAlign  = (id) => editor.setStyleForSelectedShapes(DefaultHorizontalAlignStyle, id)
+  const applyAlign  = (id) => editor.run(() => {
+    shapes.forEach((s) => {
+      if (s.type === 'text') {
+        editor.updateShapes([
+          {
+            id: s.id,
+            type: s.type,
+            props: { textAlign: id === 'start' ? 'start' : id === 'middle' ? 'middle' : 'end' },
+          },
+        ])
+      } else {
+        editor.updateShapes([
+          {
+            id: s.id,
+            type: s.type,
+            props: { align: id },
+          },
+        ])
+      }
+    })
+  })
   const applyCorner = (rx) => editor.updateShapes(
     shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, cornerRadius: rx } }))
   )
