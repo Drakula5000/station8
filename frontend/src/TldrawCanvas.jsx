@@ -34,7 +34,10 @@ const assetStore = {
     return { src: url }
   },
   resolve(asset) {
-    return asset.props.src || null
+    const src = asset.props.src || null
+    if (!src) return null
+    if (src.startsWith('/')) return `${API}${src}`
+    return src
   },
 }
 
