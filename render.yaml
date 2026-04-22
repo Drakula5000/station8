@@ -4,6 +4,12 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python server.py
+    disk:
+      name: station8-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: S8_STORAGE_DIR
+        value: /var/data

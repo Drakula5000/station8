@@ -18,19 +18,24 @@ At `YOUR_DOMAIN`, everyone sees the same password gate. The password they enter 
 
 ## Deploy
 
-### Backend (Railway)
-1. Connect this repo to Railway
-2. Set environment variables:
+### Backend (Render)
+1. Create or update the Render web service from this repo.
+2. Make sure the service has a persistent disk mounted at `/var/data`.
+   The committed `render.yaml` now declares this disk and sets `S8_STORAGE_DIR=/var/data`.
+3. Set environment variables:
    - `STUDIO_PASSWORD=<workspace-password>` or set it in-app on first run
    - `VISITOR_PASSWORD=<shared-visitor-password>` or set it in-app on first run
    - `FLASK_SECRET_KEY=<long-random-secret>`
    - `CORS_ALLOWED_ORIGINS=https://YOUR_DOMAIN,https://YOUR_DOMAIN`
-3. Railway auto-detects Python and runs `python server.py`
-4. Copy the Railway URL (e.g., `https://research-hub-production.up.railway.app`)
+4. Render runs `python server.py`.
+5. Your live JSON data and uploads will persist across deploys because the backend now reads/writes from:
+   - `/var/data/data`
+   - `/var/data/uploads`
+6. Copy the Render URL (e.g. `https://your-app.onrender.com`)
 
 ### Frontend (Vercel)
 1. Connect this repo to Vercel
-2. Set environment variable: `VITE_API_URL=<your-railway-url>`
+2. Set environment variable: `VITE_API_URL=<your-render-url>`
 3. Point your domain `YOUR_DOMAIN` to the Vercel deployment
 
 ## Local Development
@@ -49,3 +54,17 @@ npm run dev
 Visit `http://127.0.0.1:5173`
 
 If you do not provide `STUDIO_PASSWORD` and `VISITOR_PASSWORD`, the first visit will prompt you to create both passwords in the browser.
+
+### Storage paths
+
+By default, the backend stores files in local repo folders:
+- `data/`
+- `uploads/`
+
+To move them somewhere persistent in production, set one of:
+- `S8_STORAGE_DIR=/some/root`
+  Then the app will use `/some/root/data` and `/some/root/uploads`.
+- `S8_DATA_DIR=/some/data/path`
+- `S8_UPLOADS_DIR=/some/uploads/path`
+
+`S8_DATA_DIR` and `S8_UPLOADS_DIR` override `S8_STORAGE_DIR` if all three are set.
