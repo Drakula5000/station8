@@ -936,6 +936,24 @@ html[data-mode="light"] {
   --tl-shadow-2:              var(--shadow-pill);
   --tl-shadow-3:              var(--shadow-menu);
 }
+.tldraw-wrap .tlui-layout__bottom__main {
+  justify-content: flex-end;
+  padding-right: 12px;
+}
+.tldraw-wrap .tlui-menu-zone {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--sidebar-border);
+  background: var(--pill-bg);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow: var(--shadow-pill);
+}
+.tldraw-wrap .tlui-layout__top__left {
+  overflow: visible;
+}
 .sticky-ghost {
   position: absolute;
   pointer-events: none;
@@ -1502,8 +1520,7 @@ html[data-mode="light"] {
 .pill-wrap {
   position: absolute;
   top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 12px;
   z-index: 10000;
 }
 

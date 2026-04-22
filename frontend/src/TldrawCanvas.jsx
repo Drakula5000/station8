@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Tldraw, useEditor, track, DefaultColorStyle, GeoShapeGeoStyle } from 'tldraw'
+import { Tldraw, useEditor, track, DefaultColorStyle, GeoShapeGeoStyle, FrameShapeUtil } from 'tldraw'
 import 'tldraw/tldraw.css'
 import {
   FjCursorIcon, FjHandIcon, FjStickyIcon, FjTextIcon, FjArrowIcon, FjPenIcon, FjSectionIcon,
@@ -54,6 +54,8 @@ const STICKY_SWATCHES = {
 
 // tldraw NOTE_SIZE is hardcoded at 200 canvas units; scale it down on placement
 const NOTE_DEFAULT_SCALE = 0.6
+
+const FRAME_SHAPE_UTILS = [FrameShapeUtil.configure({ showColors: true })]
 
 const SECTION_SWATCHES = {
   blue:   { bg: '#e7f5ff', stroke: '#1c7ed6', tl: 'blue' },
@@ -427,6 +429,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         components={TLDRAW_COMPONENTS}
         onMount={handleMount}
         assets={assetStore}
+        shapeUtils={FRAME_SHAPE_UTILS}
       >
         {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} />}
         {!readOnly && <ShapeInspector />}
