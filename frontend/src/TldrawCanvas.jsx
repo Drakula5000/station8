@@ -68,6 +68,12 @@ const SECTION_SWATCHES = {
   grey:   { bg: '#f1f3f5', stroke: '#868e96', tl: 'grey' },
 }
 
+function isEditableTarget(target) {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  return target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+}
+
 const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
   const editor = useEditor()
   const [stickyPickerOpen, setStickyPickerOpen] = useState(false)
@@ -333,6 +339,19 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     }
   }, [colorMode])
 
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key !== 'Backspace' && e.key !== 'Delete') return
+      if (isEditableTarget(e.target)) return
+      // Prevent the browser from interpreting macOS Delete / Backspace as history navigation
+      // while a board is open. Tldraw still receives the event and deletes selected shapes.
+      e.preventDefault()
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   useEffect(() => () => {
     cleanupRef.current?.()
     if (saveTimerRef.current) {
@@ -349,6 +368,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     editorRef.current = editor
     if (import.meta.env.DEV && typeof window !== 'undefined') window.__tlEditor = editor
     editor.user.updateUserPreferences({ colorScheme: colorModeRef.current === 'light' ? 'light' : 'dark' })
+    editor.updateInstanceState({ isGridMode: true })
     const bid = boardIdRef.current
     const ro = readOnlyRef.current
     const mode = viewerModeRef.current
@@ -414,6 +434,13 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
 
   const handleMouseLeave = () => setGhost(null)
 
+  const handleWheelCapture = useCallback(() => {
+    const editor = editorRef.current
+    if (editor && !editor.getInstanceState().isFocused) {
+      editor.focus()
+    }
+  }, [])
+
   const NOTE_CANVAS_SIZE = 200
   const ghostPx = ghost ? NOTE_CANVAS_SIZE * NOTE_DEFAULT_SCALE * ghost.zoom : 0
   const ghostBg = ghost ? (STICKY_SWATCHES[ghost.color]?.bg || '#FFE066') : null
@@ -424,6 +451,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       ref={wrapRef}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
+      onWheelCapture={handleWheelCapture}
     >
       <Tldraw
         components={TLDRAW_COMPONENTS}

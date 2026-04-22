@@ -918,7 +918,7 @@ html[data-mode="light"] {
 .tldraw-wrap .tl-canvas { background: transparent !important; }
 .tldraw-wrap .tl-container { --tl-color-background: transparent; }
 
-/* Theme tldraw's UI panels to match Aurora */
+/* Theme tldraw's UI panels and grid to match Aurora */
 .tldraw-wrap .tl-theme__dark,
 .tldraw-wrap .tl-theme__light {
   --tl-color-panel:           var(--pill-bg);
@@ -933,6 +933,7 @@ html[data-mode="light"] {
   --tl-color-selected:        var(--accent);
   --tl-color-primary:         var(--accent);
   --tl-color-focus:           var(--accent-border);
+  --tl-color-grid:            var(--canvas-dot);
   --tl-shadow-2:              var(--shadow-pill);
   --tl-shadow-3:              var(--shadow-menu);
 }
