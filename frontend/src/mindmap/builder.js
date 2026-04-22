@@ -101,7 +101,7 @@ function makeNode({ x, y, label, depth }) {
     locked: false,
     text: label,
     fontSize: style.fontSize,
-    fontFamily: 1,
+    fontFamily: 2,
     textAlign: 'center',
     verticalAlign: 'middle',
     baseline: Math.round(style.fontSize * 0.8),

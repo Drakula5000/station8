@@ -171,11 +171,9 @@ def _normalize_folder_id(folder_id, folders):
 def _normalize_workspace(ws):
     ws = dict(ws or {})
     if not ws.get('name'):
-        ws['name'] = 'My Research'
+        ws['name'] = 'Station 8'
     if 'owner' not in ws:
         ws['owner'] = ''
-    if 'public_slug' not in ws:
-        ws['public_slug'] = uuid.uuid4().hex[:10]
     if 'created_at' not in ws:
         ws['created_at'] = datetime.now().isoformat()
 
@@ -212,9 +210,8 @@ def _get_workspace():
     ws = _load(WORKSPACE_FILE, None)
     if not ws:
         ws = _normalize_workspace({
-            'name': 'My Research',
+            'name': 'Station 8',
             'owner': '',
-            'public_slug': uuid.uuid4().hex[:10],
             'created_at': datetime.now().isoformat(),
             'folders': [],
         })
@@ -331,7 +328,6 @@ def _normalize_share(item):
     share['scope_type'] = share.get('scope_type') or 'workspace'
     share['scope_id'] = share.get('scope_id')
     share['token'] = str(share.get('token') or secrets.token_urlsafe(18))
-    share['password_hash'] = share.get('password_hash') or ''
     share['revoked'] = bool(share.get('revoked'))
     share['created_at'] = share.get('created_at') or datetime.now().isoformat()
     share['label'] = (share.get('label') or '').strip()
@@ -357,13 +353,6 @@ def _find_share_by_token(token):
     return None
 
 
-def _find_share_by_id(share_id):
-    for share in _load_shares():
-        if share.get('id') == share_id:
-            return share
-    return None
-
-
 def _is_studio_authed():
     return bool(session.get('studio_authed'))
 
@@ -372,11 +361,28 @@ def _is_visitor_authed():
     return bool(session.get('visitor_authed'))
 
 
+def _current_access_level():
+    if _is_studio_authed():
+        return 'owner'
+    if _is_visitor_authed():
+        return 'visitor'
+    return None
+
+
 def _studio_auth_required(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
         if not _is_studio_authed():
             return jsonify({'error': 'Studio password required'}), 401
+        return fn(*args, **kwargs)
+    return wrapped
+
+
+def _viewer_auth_required(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        if not (_is_studio_authed() or _is_visitor_authed()):
+            return jsonify({'error': 'Password required'}), 401
         return fn(*args, **kwargs)
     return wrapped
 
@@ -492,6 +498,61 @@ def _snapshot_upload_filenames(snapshot):
     return names
 
 
+def _board_upload_filenames(board_id):
+    data = _load(_board_file(board_id), {'snapshot': None})
+    return _snapshot_upload_filenames(data.get('snapshot'))
+
+
+def _uploads_referenced_by_boards(board_ids=None):
+    allowed_ids = set(board_ids) if board_ids is not None else None
+    names = set()
+    for board in _load_boards():
+        board_id = board.get('id')
+        if allowed_ids is not None and board_id not in allowed_ids:
+            continue
+        names.update(_board_upload_filenames(board_id))
+    return names
+
+
+def _delete_upload_artifacts(filenames):
+    if not filenames:
+        return
+
+    ocr = _load(OCR_FILE, {})
+    updated_ocr = False
+    for filename in filenames:
+        path = os.path.join(UPLOADS_DIR, filename)
+        if os.path.exists(path):
+            os.remove(path)
+        if filename in ocr:
+            ocr.pop(filename, None)
+            updated_ocr = True
+    if updated_ocr:
+        _save(OCR_FILE, ocr)
+
+
+def _cleanup_unreferenced_uploads(candidate_filenames):
+    if not candidate_filenames:
+        return
+    still_used = _uploads_referenced_by_boards()
+    unused = {filename for filename in candidate_filenames if filename not in still_used}
+    _delete_upload_artifacts(unused)
+
+
+def _delete_board_files(board_ids):
+    for board_id in board_ids:
+        fp = _board_file(board_id)
+        if os.path.exists(fp):
+            os.remove(fp)
+
+
+def _delete_sheet_files(sheet_ids):
+    for sheet_id in sheet_ids:
+        fp = _sheet_file(sheet_id)
+        if os.path.exists(fp):
+            os.remove(fp)
+
+
 def _share_allows_upload(share, filename):
     payload = _scoped_share_payload(share)
     for board in payload['boards']:
@@ -536,7 +597,10 @@ def _serialize_share_for_list(share):
 @app.route('/api/auth/status', methods=['GET'])
 def auth_status():
     return jsonify({
-        'authenticated': _is_studio_authed(),
+        'authenticated': bool(_current_access_level()),
+        'access': _current_access_level(),
+        'owner_authenticated': _is_studio_authed(),
+        'visitor_authenticated': _is_visitor_authed(),
         'requires_setup': _requires_access_setup(),
     })
 
@@ -560,8 +624,9 @@ def auth_setup():
     auth['configured_at'] = datetime.now().isoformat()
     _save_auth_config(auth)
     session['studio_authed'] = True
+    session.pop('visitor_authed', None)
     session.modified = True
-    return jsonify({'authenticated': True, 'requires_setup': False})
+    return jsonify({'authenticated': True, 'requires_setup': False, 'access': 'owner'})
 
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -570,24 +635,17 @@ def auth_login():
     password = data.get('password') or ''
     if _requires_access_setup():
         return jsonify({'error': 'Access passwords have not been set up yet', 'requires_setup': True}), 409
-    if not _verify_studio_password(password):
-        return jsonify({'error': 'Wrong password'}), 401
-    session['studio_authed'] = True
-    session.modified = True
-    return jsonify({'authenticated': True})
-
-
-@app.route('/api/visitor/login', methods=['POST'])
-def visitor_login():
-    data = request.json or {}
-    password = data.get('password') or ''
-    if _requires_access_setup():
-        return jsonify({'error': 'Access passwords have not been set up yet', 'requires_setup': True}), 409
+    if _verify_studio_password(password):
+        session['studio_authed'] = True
+        session.pop('visitor_authed', None)
+        session.modified = True
+        return jsonify({'authenticated': True, 'access': 'owner'})
     if not _verify_visitor_password(password):
         return jsonify({'error': 'Wrong password'}), 401
     session['visitor_authed'] = True
+    session.pop('studio_authed', None)
     session.modified = True
-    return jsonify({'authenticated': True})
+    return jsonify({'authenticated': True, 'access': 'visitor'})
 
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -683,7 +741,13 @@ def delete_folder(folder_id):
 @_studio_auth_required
 def get_workspace():
     ws = _get_workspace()
-    ws.pop('public_slug', None)
+    return jsonify(ws)
+
+
+@app.route('/api/visitor/workspace', methods=['GET'])
+@_viewer_auth_required
+def get_visitor_workspace():
+    ws = _get_workspace()
     return jsonify(ws)
 
 
@@ -697,7 +761,6 @@ def patch_workspace():
     if 'owner' in data:
         ws['owner'] = (data['owner'] or '').strip()
     _save(WORKSPACE_FILE, ws)
-    ws.pop('public_slug', None)
     return jsonify(ws)
 
 
@@ -794,6 +857,14 @@ def list_boards():
     return jsonify(boards)
 
 
+@app.route('/api/visitor/boards', methods=['GET'])
+@_viewer_auth_required
+def list_visitor_boards():
+    boards = _load_boards()
+    boards.sort(key=lambda item: item.get('created_at', ''), reverse=True)
+    return jsonify(boards)
+
+
 @app.route('/api/boards', methods=['POST'])
 @_studio_auth_required
 def create_board():
@@ -851,6 +922,12 @@ def get_board(board_id):
     return jsonify(_load(_board_file(board_id), {'snapshot': None}))
 
 
+@app.route('/api/visitor/boards/<board_id>', methods=['GET'])
+@_viewer_auth_required
+def get_visitor_board(board_id):
+    return jsonify(_load(_board_file(board_id), {'snapshot': None}))
+
+
 @app.route('/api/boards/<board_id>', methods=['PUT'])
 @_studio_auth_required
 def update_board(board_id):
@@ -864,6 +941,14 @@ def update_board(board_id):
 @app.route('/api/sheets', methods=['GET'])
 @_studio_auth_required
 def list_sheets():
+    sheets = _load_sheets()
+    sheets.sort(key=lambda item: item.get('created_at', ''), reverse=True)
+    return jsonify(sheets)
+
+
+@app.route('/api/visitor/sheets', methods=['GET'])
+@_viewer_auth_required
+def list_visitor_sheets():
     sheets = _load_sheets()
     sheets.sort(key=lambda item: item.get('created_at', ''), reverse=True)
     return jsonify(sheets)
@@ -924,6 +1009,12 @@ def get_sheet(sheet_id):
     return jsonify(_load(_sheet_file(sheet_id), {'data': []}))
 
 
+@app.route('/api/visitor/sheets/<sheet_id>', methods=['GET'])
+@_viewer_auth_required
+def get_visitor_sheet(sheet_id):
+    return jsonify(_load(_sheet_file(sheet_id), {'data': []}))
+
+
 @app.route('/api/sheets/<sheet_id>', methods=['PUT'])
 @_studio_auth_required
 def update_sheet(sheet_id):
@@ -970,9 +1061,7 @@ def serve_upload(filename):
     if _is_studio_authed():
         return send_from_directory(UPLOADS_DIR, filename)
     if _is_visitor_authed():
-        for share in _load_shares():
-            if not share.get('revoked') and _share_allows_upload(share, filename):
-                return send_from_directory(UPLOADS_DIR, filename)
+        return send_from_directory(UPLOADS_DIR, filename)
     return jsonify({'error': 'Not found'}), 404
 
 
@@ -1010,6 +1099,58 @@ def _text_from_excalidraw(snapshot):
     return out
 
 
+def _extract_rich_text(node):
+    """Recursively pull text out of a tldraw/ProseMirror rich-text doc."""
+    if not isinstance(node, dict):
+        return ''
+    parts = []
+    if node.get('type') == 'text' and node.get('text'):
+        parts.append(node['text'])
+    for child in node.get('content') or []:
+        extracted = _extract_rich_text(child)
+        if extracted:
+            parts.append(extracted)
+    return ' '.join(parts)
+
+
+def _text_from_tldraw(snapshot):
+    out = []
+    if not snapshot:
+        return out
+    store = snapshot.get('store') or {}
+    assets = {
+        record_id: record for record_id, record in store.items()
+        if isinstance(record, dict) and record.get('typeName') == 'asset'
+    }
+    ocr = _load(OCR_FILE, {})
+    for record in store.values():
+        if not isinstance(record, dict) or record.get('typeName') != 'shape':
+            continue
+        shape_type = record.get('type')
+        props = record.get('props') or {}
+        text = (
+            _extract_rich_text(props.get('richText'))
+            or props.get('text')
+            or ''
+        )
+        if shape_type in ('note', 'text', 'geo', 'arrow') and text.strip():
+            out.append({'kind': 'text', 'text': text.strip()})
+        elif shape_type == 'frame':
+            name = record.get('name') or props.get('name') or ''
+            if name.strip():
+                out.append({'kind': 'frame', 'text': name.strip()})
+        elif shape_type in ('image', 'video'):
+            asset_id = props.get('assetId')
+            asset = assets.get(asset_id) if asset_id else None
+            src = ((asset or {}).get('props') or {}).get('src') or ''
+            match = re.search(r'/uploads/([a-z0-9-]+\.[a-z]+)', src)
+            if match:
+                ocr_text = ocr.get(match.group(1), '')
+                if ocr_text:
+                    out.append({'kind': 'ocr', 'text': ocr_text})
+    return out
+
+
 def _text_from_sheet(data):
     out = []
     if not data:
@@ -1027,7 +1168,9 @@ def _all_items(boards=None, sheets=None):
     sheet_items = sheets if sheets is not None else _load_sheets()
     for board in board_items:
         data = _load(_board_file(board['id']), {'snapshot': None})
-        for entry in _text_from_excalidraw(data.get('snapshot')):
+        snap = data.get('snapshot') or {}
+        extractor = _text_from_tldraw if snap.get('store') else _text_from_excalidraw
+        for entry in extractor(snap):
             yield {
                 'doc_type': 'board',
                 'doc_id': board['id'],
@@ -1126,6 +1269,12 @@ def _search_payload(boards=None, sheets=None):
 @app.route('/api/search', methods=['POST'])
 @_studio_auth_required
 def search():
+    return jsonify(_search_payload())
+
+
+@app.route('/api/visitor/search', methods=['POST'])
+@_viewer_auth_required
+def visitor_search():
     return jsonify(_search_payload())
 
 

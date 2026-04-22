@@ -15,7 +15,8 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-spreadsheet": "^0.10.1",
-    "react-syntax-highlighter": "^16.1.1"
+    "react-syntax-highlighter": "^16.1.1",
+    "tldraw": "^4.5.10"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

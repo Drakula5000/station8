@@ -1,4 +1,4 @@
-import { convertToExcalidrawElements, ROUNDNESS } from '@excalidraw/excalidraw'
+import { convertToExcalidrawElements } from '@excalidraw/excalidraw'
 
 export const SECTION_COLORS = {
   grey:   { bg: '#f1f3f5', stroke: '#868e96', label: 'Grey' },
@@ -20,23 +20,26 @@ export const STICKY_COLORS = {
   purple: { bg: '#D9C6FF', stroke: '#6A3FBF' },
 }
 
-export const SECTION_DEFAULT_NAME = 'Untitled section'
+export const SECTION_DEFAULT_NAME = 'Section'
+export const SECTION_DEFAULT_W = 520
+export const SECTION_DEFAULT_H = 360
+export const SECTION_MIN_SIZE = 80
 
 export function isSectionElement(element) {
   return element?.type === 'frame' || Boolean(element?.customData?.isSection)
 }
 
-export function isSectionLabel(element) {
-  return Boolean(element?.customData?.isSectionLabel)
-}
-
-export function makeSection({ x, y, w = 560, h = 380, color = 'blue', name = SECTION_DEFAULT_NAME, id } = {}) {
+export function makeSection({ x, y, w = SECTION_DEFAULT_W, h = SECTION_DEFAULT_H, color = 'blue', name, id } = {}) {
   const c = SECTION_COLORS[color] || SECTION_COLORS.blue
+  const sectionName = name ?? SECTION_DEFAULT_NAME
 
+  // Sections are a single styled rectangle. Title is rendered as an HTML
+  // overlay (see App.jsx) so it stays screen-space constant size like FigJam,
+  // is always above the rectangle, and never scales with zoom.
   return convertToExcalidrawElements([
     {
       id,
-      type: 'frame',
+      type: 'rectangle',
       x,
       y,
       width: w,
@@ -47,99 +50,30 @@ export function makeSection({ x, y, w = 560, h = 380, color = 'blue', name = SEC
       strokeWidth: 2,
       strokeStyle: 'solid',
       roughness: 0,
-      roundness: { type: ROUNDNESS.ADAPTIVE_RADIUS },
-      name: name,
-      customData: { isSection: true, sectionColor: color, sectionLock: 'none' },
+      roundness: null,
+      customData: {
+        isSection: true,
+        sectionColor: color,
+        sectionLock: 'none',
+        sectionName,
+      },
     },
   ])
 }
 
-function normalizeFrameSection(element, labelText) {
-  const color = element.customData?.sectionColor || 'blue'
-  const c = SECTION_COLORS[color] || SECTION_COLORS.blue
-  return {
-    ...element,
-    strokeColor: c.stroke,
-    backgroundColor: c.bg,
-    fillStyle: 'solid',
-    strokeWidth: 2,
-    strokeStyle: 'solid',
-    roughness: 0,
-    roundness: { type: ROUNDNESS.ADAPTIVE_RADIUS },
-    name: labelText ?? element.name ?? SECTION_DEFAULT_NAME,
-    customData: {
-      ...element.customData,
-      isSection: true,
-      sectionColor: color,
-      sectionLock: element.customData?.sectionLock || 'none',
-    },
-  }
-}
-
-function isWithinFrameBounds(element, frame) {
-  if (!element || !frame) return false
-  const padding = 12
-  const left = frame.x
-  const top = frame.y
-  const right = frame.x + frame.width
-  const bottom = frame.y + frame.height
-  return (
-    element.x >= left + padding &&
-    element.y >= top + padding &&
-    element.x + element.width <= right - padding &&
-    element.y + element.height <= bottom - padding
-  )
-}
-
-export function migrateLegacySections(elements) {
-  const migrated = []
-  const oldSectionRects = elements.filter(el => el.type === 'rectangle' && el.customData?.isSection)
-  const sectionLabels = elements.filter(isSectionLabel)
-  const labelBySectionId = new Map(sectionLabels.map(label => [label.customData.sectionId, label.text]))
-  const oldSectionIds = new Set(oldSectionRects.map(r => r.id))
-  const normalizedFrames = []
-
-  if (oldSectionIds.size === 0 && !elements.some(el => el.type === 'frame') && sectionLabels.length === 0) return elements
-
+export function nextSectionName(elements) {
+  let maxNum = 0
   for (const element of elements) {
-    if (element.type === 'rectangle' && element.customData?.isSection) {
-      const color = element.customData.sectionColor || 'blue'
-      const [frame] = makeSection({
-        id: element.id,
-        x: element.x,
-        y: element.y,
-        w: element.width,
-        h: element.height,
-        color,
-        name: labelBySectionId.get(element.id) || element.name || SECTION_DEFAULT_NAME,
-      })
-      normalizedFrames.push(frame)
-      migrated.push(frame)
-      continue
-    }
-
-    if (isSectionLabel(element)) {
-      continue
-    }
-
-    if (element.type === 'frame') {
-      const normalized = normalizeFrameSection(element, labelBySectionId.get(element.id))
-      normalizedFrames.push(normalized)
-      migrated.push(normalized)
-      continue
-    }
-
-    migrated.push(element)
+    if (!isSectionElement(element)) continue
+    const nameSource = element.customData?.sectionName || element.name || ''
+    const match = /^Section\s+(\d+)$/.exec(nameSource)
+    if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10))
   }
+  return `Section ${maxNum + 1}`
+}
 
-  return migrated.map((element) => {
-    if (isSectionElement(element) || isSectionLabel(element)) return element
-    if (element.frameId) return element
-
-    const containingFrame = normalizedFrames.find(frame => isWithinFrameBounds(element, frame))
-    if (!containingFrame) return element
-    return { ...element, frameId: containingFrame.id }
-  })
+export function isSectionLabel(element) {
+  return Boolean(element?.customData?.isSectionLabel)
 }
 
 export function viewportCenter(excalidrawAPI) {

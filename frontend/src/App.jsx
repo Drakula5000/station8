@@ -10,6 +10,7 @@ import './App.css'
 const API = import.meta.env.VITE_API_URL || ''
 const ROOT_FOLDER = '__root__'
 const SIDEBAR_STORAGE_KEY = 'researchHub.sidebarCollapsed'
+const DATABASE_VIEW_STORAGE_KEY = 'researchHub.databaseView'
 const DEFAULT_SHEET = [
   [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
   [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
@@ -115,17 +116,68 @@ function pluralize(count, singular, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`
 }
 
+function parseRoute() {
+  const url = new URL(window.location.href)
+  const path = url.pathname.replace(/\/+$/, '') || '/'
+  const docMatch = path.match(/^\/(board|sheet)\/([^/]+)$/)
+  return {
+    shareToken: url.searchParams.get('share') || null,
+    doc: docMatch ? { type: docMatch[1], id: docMatch[2] } : null,
+  }
+}
+
+function buildUrl(doc = null, shareToken = null) {
+  const pathname = doc?.type && doc?.id ? `/${doc.type}/${doc.id}` : '/'
+  return shareToken ? `${pathname}?share=${encodeURIComponent(shareToken)}` : pathname
+}
+
+function docTypeLabel(type) {
+  return type === 'board' ? 'Board' : 'Sheet'
+}
+
+function formatDocDate(value) {
+  if (!value) return 'No timestamp'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'No timestamp'
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
+}
+
+async function fetchJson(url, options = {}, fallback = null) {
+  try {
+    const res = await fetch(url, { credentials: 'include', ...options })
+    if (!res.ok) return fallback
+    return await res.json()
+  } catch {
+    return fallback
+  }
+}
+
 export default function App() {
   const [boards, setBoards] = useState([])
   const [sheets, setSheets] = useState([])
   const [folders, setFolders] = useState([])
   const foldersRef = useRef([])
   const [expandedFolders, setExpandedFolders] = useState({})
+  const [route, setRoute] = useState(() => parseRoute())
   const [activeId, setActiveId] = useState(null)
   const activeIdRef = useRef(null)
+  const [auth, setAuth] = useState({ loading: true, authenticated: false, access: null, requiresSetup: false })
+  const [loginPassword, setLoginPassword] = useState('')
+  const [ownerPassword, setOwnerPassword] = useState('')
+  const [visitorPassword, setVisitorPassword] = useState('')
+  const [authBusy, setAuthBusy] = useState(false)
+  const [authError, setAuthError] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
+  const [databaseView, setDatabaseView] = useState(() => {
+    try {
+      return window.localStorage.getItem(DATABASE_VIEW_STORAGE_KEY) || 'list'
+    } catch {
+      return 'list'
+    }
+  })
+  const homeSearchRef = useRef(null)
   const [newBoardOpen, setNewBoardOpen] = useState(false)
   const [newBoardName, setNewBoardName] = useState('')
   const [newBoardFolderId, setNewBoardFolderId] = useState(ROOT_FOLDER)
@@ -140,11 +192,10 @@ export default function App() {
   const [tagFilter, setTagFilter] = useState(null)
   const [tagInput, setTagInput] = useState('')
   const [tagInputOpen, setTagInputOpen] = useState(false)
-  const shareSlugFromUrl = new URLSearchParams(window.location.search).get('share')
-  const readOnly = Boolean(shareSlugFromUrl)
   const [workspace, setWorkspace] = useState(null)
   const [shareOpen, setShareOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [copiedDocLink, setCopiedDocLink] = useState(false)
   const [ownerPromptOpen, setOwnerPromptOpen] = useState(false)
   const [ownerPromptDismissed, setOwnerPromptDismissed] = useState(false)
   const [ownerInput, setOwnerInput] = useState('')
@@ -161,6 +212,11 @@ export default function App() {
       return false
     }
   })
+
+  const viewerMode = route.shareToken ? 'share' : auth.access
+  const readOnly = viewerMode === 'visitor' || viewerMode === 'share'
+  const ownerMode = viewerMode === 'owner'
+  const showSidebar = ownerMode
 
   const folderById = buildFolderMap(folders)
   const folderOptions = [{ value: ROOT_FOLDER, label: 'Workspace root' }, ...buildFolderOptions(folders)]
@@ -189,6 +245,48 @@ export default function App() {
     }
   }, [sidebarCollapsed])
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DATABASE_VIEW_STORAGE_KEY, databaseView)
+    } catch {
+      // Ignore storage failures; database view can fall back to per-session.
+    }
+  }, [databaseView])
+
+  useEffect(() => {
+    const onPopState = () => setRoute(parseRoute())
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  useEffect(() => {
+    if (!ownerMode) setSidebarCollapsed(true)
+  }, [ownerMode])
+
+  const updateAuthStatus = useCallback(async () => {
+    setAuth(current => ({ ...current, loading: true }))
+    const data = await fetchJson(`${API}/api/auth/status`, {}, {})
+    setAuth({
+      loading: false,
+      authenticated: Boolean(data?.authenticated),
+      access: data?.access || null,
+      requiresSetup: Boolean(data?.requires_setup),
+    })
+  }, [])
+
+  useEffect(() => {
+    updateAuthStatus()
+  }, [updateAuthStatus])
+
+  const navigate = useCallback((doc = null, { replace = false } = {}) => {
+    const nextUrl = buildUrl(doc, route.shareToken)
+    const currentUrl = `${window.location.pathname}${window.location.search}`
+    if (currentUrl !== nextUrl) {
+      window.history[replace ? 'replaceState' : 'pushState']({}, '', nextUrl)
+    }
+    setRoute({ shareToken: route.shareToken, doc })
+  }, [route.shareToken])
+
   const expandFolderPath = useCallback((folderId, folderList) => {
     if (!folderId) return
     const list = folderList || foldersRef.current
@@ -206,18 +304,45 @@ export default function App() {
 
   const openDocument = useCallback((type, id, folderId = null) => {
     if (folderId) expandFolderPath(folderId)
-    setActiveId({ type, id })
-  }, [expandFolderPath])
+    const next = { type, id }
+    setActiveId(next)
+    navigate(next)
+  }, [expandFolderPath, navigate])
+
+  const goToDatabaseHome = useCallback(() => {
+    setActiveId(null)
+    navigate(null)
+  }, [navigate])
 
   const refresh = useCallback(async () => {
+    if (auth.loading) return
+    if (!auth.authenticated && !route.shareToken) return
+    if (!viewerMode) return
+
     const currentActiveId = activeIdRef.current
-    if (readOnly) {
-      const res = await fetch(`${API}/api/share/${shareSlugFromUrl}`)
-      if (!res.ok) return
-      const data = await res.json()
-      setBoards(data.boards || [])
-      setSheets(data.sheets || [])
+
+    if (viewerMode === 'share') {
+      const data = await fetchJson(`${API}/api/share/${route.shareToken}`, {}, null)
+      if (!data) return
+      const nextBoards = data.boards || []
+      const nextSheets = data.sheets || []
       const nextFolders = data.workspace?.folders || []
+      const scopedDoc = route.doc?.type === 'board'
+        ? nextBoards.find(item => item.id === route.doc.id)
+        : route.doc?.type === 'sheet'
+        ? nextSheets.find(item => item.id === route.doc.id)
+        : null
+      let nextActive = null
+      if (scopedDoc) {
+        nextActive = route.doc
+      } else if (data.share?.scope_type === 'board' && nextBoards[0]) {
+        nextActive = { type: 'board', id: nextBoards[0].id }
+      } else if (data.share?.scope_type === 'sheet' && nextSheets[0]) {
+        nextActive = { type: 'sheet', id: nextSheets[0].id }
+      }
+
+      setBoards(nextBoards)
+      setSheets(nextSheets)
       setFolders(nextFolders)
       setExpandedFolders((current) => {
         const next = { ...current }
@@ -227,25 +352,40 @@ export default function App() {
         return next
       })
       setWorkspace(data.workspace || null)
-      const nextActive = pickNextActiveDoc(currentActiveId, data.boards || [], data.sheets || [])
       setActiveId(nextActive)
       if (nextActive?.type === 'board') {
-        const board = (data.boards || []).find(item => item.id === nextActive.id)
+        const board = nextBoards.find(item => item.id === nextActive.id)
         if (board?.folder_id) expandFolderPath(board.folder_id, nextFolders)
       } else if (nextActive?.type === 'sheet') {
-        const sheet = (data.sheets || []).find(item => item.id === nextActive.id)
+        const sheet = nextSheets.find(item => item.id === nextActive.id)
         if (sheet?.folder_id) expandFolderPath(sheet.folder_id, nextFolders)
       }
       return
     }
+
+    const prefix = viewerMode === 'visitor' ? 'visitor/' : ''
     const [bs, ss, ws] = await Promise.all([
-      fetch(`${API}/api/boards`).then(r => r.json()).catch(() => []),
-      fetch(`${API}/api/sheets`).then(r => r.json()).catch(() => []),
-      fetch(`${API}/api/workspace`).then(r => r.json()).catch(() => null),
+      fetchJson(`${API}/api/${prefix}boards`, {}, []),
+      fetchJson(`${API}/api/${prefix}sheets`, {}, []),
+      fetchJson(`${API}/api/${prefix}workspace`, {}, null),
     ])
-    setBoards(bs)
-    setSheets(ss)
+
+    const nextBoards = Array.isArray(bs) ? bs : []
+    const nextSheets = Array.isArray(ss) ? ss : []
     const nextFolders = ws?.folders || []
+    const routedDoc = route.doc?.type === 'board'
+      ? nextBoards.find(item => item.id === route.doc.id)
+      : route.doc?.type === 'sheet'
+      ? nextSheets.find(item => item.id === route.doc.id)
+      : null
+    const nextActive = routedDoc
+      ? route.doc
+      : viewerMode === 'visitor'
+      ? null
+      : pickNextActiveDoc(currentActiveId, nextBoards, nextSheets)
+
+    setBoards(nextBoards)
+    setSheets(nextSheets)
     setFolders(nextFolders)
     setExpandedFolders((current) => {
       const next = { ...current }
@@ -255,38 +395,38 @@ export default function App() {
       return next
     })
     setWorkspace(ws)
-    if (!readOnly && ws && !ws.owner && !ownerPromptDismissed) setOwnerPromptOpen(true)
-    const nextActive = pickNextActiveDoc(currentActiveId, bs, ss)
+    if (ownerMode && ws && !ws.owner && !ownerPromptDismissed) setOwnerPromptOpen(true)
     setActiveId(nextActive)
     if (nextActive?.type === 'board') {
-      const board = bs.find(item => item.id === nextActive.id)
+      const board = nextBoards.find(item => item.id === nextActive.id)
       if (board?.folder_id) expandFolderPath(board.folder_id, nextFolders)
     } else if (nextActive?.type === 'sheet') {
-      const sheet = ss.find(item => item.id === nextActive.id)
+      const sheet = nextSheets.find(item => item.id === nextActive.id)
       if (sheet?.folder_id) expandFolderPath(sheet.folder_id, nextFolders)
     }
-  }, [expandFolderPath, readOnly, shareSlugFromUrl, ownerPromptDismissed])
+  }, [auth.authenticated, auth.loading, expandFolderPath, ownerMode, ownerPromptDismissed, route.doc, route.shareToken, viewerMode])
 
   useEffect(() => {
     refresh()
   }, [refresh])
 
-  // ── sheet load/save ──
-  const loadSheet = async (id) => {
-    const url = readOnly
-      ? `${API}/api/share/${shareSlugFromUrl}/sheet/${id}`
+  const loadSheet = useCallback(async (id) => {
+    const url = viewerMode === 'share'
+      ? `${API}/api/share/${route.shareToken}/sheet/${id}`
+      : viewerMode === 'visitor'
+      ? `${API}/api/visitor/sheets/${id}`
       : `${API}/api/sheets/${id}`
-    const res = await fetch(url)
-    if (!res.ok) return
-    const data = await res.json()
+    const data = await fetchJson(url, {}, null)
+    if (!data) return
     setSheetData(data.data && data.data.length ? data.data : DEFAULT_SHEET)
-  }
+  }, [route.shareToken, viewerMode])
 
   const saveSheet = useCallback(async (data) => {
     if (readOnly) return
     if (!activeId || activeId.type !== 'sheet') return
     await fetch(`${API}/api/sheets/${activeId.id}`, {
       method: 'PUT',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ data }),
     })
@@ -297,16 +437,21 @@ export default function App() {
     saveTimer.current = setTimeout(() => saveSheet(nextData), 800)
   }, [saveSheet])
 
-  // ── When activeId changes, load its content ──
   useEffect(() => {
     if (!activeId || activeId.type !== 'sheet') return
     loadSheet(activeId.id)
-  }, [activeId])
+  }, [activeId, loadSheet])
+
+  const showDatabaseHome = readOnly && !activeId
 
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
         e.preventDefault()
+        if (showDatabaseHome) {
+          homeSearchRef.current?.focus()
+          return
+        }
         setSearchOpen(true)
       }
       if (e.key === 'Escape') {
@@ -321,26 +466,30 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [showDatabaseHome])
 
   useEffect(() => {
-    if (!query.trim()) { setResults([]); return }
+    if (!query.trim()) {
+      setResults([])
+      return
+    }
+    if (!viewerMode) return
+    const url = viewerMode === 'share'
+      ? `${API}/api/share/${route.shareToken}/search`
+      : viewerMode === 'visitor'
+      ? `${API}/api/visitor/search`
+      : `${API}/api/search`
+
     const t = setTimeout(async () => {
-      const url = readOnly
-        ? `${API}/api/share/${shareSlugFromUrl}/search`
-        : `${API}/api/search`
-      const res = await fetch(url, {
+      const data = await fetchJson(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setResults(data.hits || [])
-      }
+      }, null)
+      if (data) setResults(data.hits || [])
     }, 200)
     return () => clearTimeout(t)
-  }, [query])
+  }, [query, route.shareToken, viewerMode])
 
   const openNewBoardModal = () => {
     setNewBoardName('')
@@ -363,30 +512,30 @@ export default function App() {
   const createBoard = async () => {
     const name = newBoardName.trim()
     if (!name) return
-    const res = await fetch(`${API}/api/boards`, {
+    const board = await fetchJson(`${API}/api/boards`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, folder_id: normalizeFolderValue(newBoardFolderId) }),
-    })
-    const b = await res.json()
-    setBoards(bs => [b, ...bs])
-    if (b.folder_id) expandFolderPath(b.folder_id)
-    openDocument('board', b.id, b.folder_id)
+    }, null)
+    if (!board) return
+    setBoards(bs => [board, ...bs])
+    if (board.folder_id) expandFolderPath(board.folder_id)
+    openDocument('board', board.id, board.folder_id)
     setNewBoardOpen(false)
   }
 
   const createSheet = async () => {
     const name = newSheetName.trim()
     if (!name) return
-    const res = await fetch(`${API}/api/sheets`, {
+    const sheet = await fetchJson(`${API}/api/sheets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, folder_id: normalizeFolderValue(newSheetFolderId) }),
-    })
-    const s = await res.json()
-    setSheets(ss => [s, ...ss])
-    if (s.folder_id) expandFolderPath(s.folder_id)
-    openDocument('sheet', s.id, s.folder_id)
+    }, null)
+    if (!sheet) return
+    setSheets(ss => [sheet, ...ss])
+    if (sheet.folder_id) expandFolderPath(sheet.folder_id)
+    openDocument('sheet', sheet.id, sheet.folder_id)
     setNewSheetOpen(false)
   }
 
@@ -394,13 +543,12 @@ export default function App() {
     const name = newFolderName.trim()
     if (!name) return
     const parentId = normalizeFolderValue(newFolderParentId)
-    const res = await fetch(`${API}/api/folders`, {
+    const folder = await fetchJson(`${API}/api/folders`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, parent_id: parentId }),
-    })
-    if (!res.ok) return
-    const folder = await res.json()
+    }, null)
+    if (!folder) return
     setFolders(current => [...current, folder])
     setExpandedFolders(current => ({
       ...current,
@@ -414,13 +562,12 @@ export default function App() {
   const moveActiveDoc = async (nextFolderValue) => {
     if (!activeId || readOnly) return
     const endpoint = activeId.type === 'board' ? 'boards' : 'sheets'
-    const res = await fetch(`${API}/api/${endpoint}/${activeId.id}`, {
+    const updated = await fetchJson(`${API}/api/${endpoint}/${activeId.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ folder_id: normalizeFolderValue(nextFolderValue) }),
-    })
-    if (!res.ok) return
-    const updated = await res.json()
+    }, null)
+    if (!updated) return
     if (activeId.type === 'board') {
       setBoards(bs => bs.map(b => b.id === updated.id ? updated : b))
     } else {
@@ -444,7 +591,28 @@ export default function App() {
     setDeleteConfirmOpen(true)
   }
 
-  // ── tags ──
+  const handleLogout = async () => {
+    try {
+      const res = await fetch(`${API}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      if (!res.ok) throw new Error('logout failed')
+      setBoards([])
+      setSheets([])
+      setFolders([])
+      setActiveId(null)
+      setQuery('')
+      setResults([])
+      setWorkspace(null)
+      navigate(null, { replace: true })
+      await updateAuthStatus()
+    } catch {
+      setErrorMessage('Could not log out right now.')
+      setErrorVisible(true)
+    }
+  }
+
   const tagColor = (tag) => {
     if (!tag) return { bg: '#eee', fg: '#666', border: '#ccc' }
     let h = 0
@@ -456,13 +624,12 @@ export default function App() {
   const saveTags = async (tagsStr) => {
     if (!activeId) return
     const endpoint = activeId.type === 'board' ? 'boards' : 'sheets'
-    const res = await fetch(`${API}/api/${endpoint}/${activeId.id}`, {
+    const updated = await fetchJson(`${API}/api/${endpoint}/${activeId.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tags: tagsStr }),
-    })
-    if (!res.ok) return
-    const updated = await res.json()
+    }, null)
+    if (!updated) return
     if (activeId.type === 'board') {
       setBoards(bs => bs.map(b => b.id === updated.id ? updated : b))
     } else {
@@ -479,7 +646,11 @@ export default function App() {
   const addTagToActive = () => {
     const t = tagInput.trim().replace(/^#/, '')
     if (!t || !activeDoc) return
-    if ((activeDoc.tags || []).includes(t)) { setTagInput(''); setTagInputOpen(false); return }
+    if ((activeDoc.tags || []).includes(t)) {
+      setTagInput('')
+      setTagInputOpen(false)
+      return
+    }
     const next = [...(activeDoc.tags || []), t]
     saveTags(next.join(','))
     setTagInput('')
@@ -611,15 +782,51 @@ export default function App() {
   const rootDocs = docsByFolder[ROOT_FOLDER] || []
   const hasWorkspaceItems = rootFolders.some(folder => !tagFilter || folderHasVisibleContent(folder.id)) || rootDocs.length > 0
 
+  const databaseItems = query.trim()
+    ? results.map((hit, index) => {
+      const doc = hit.kind === 'sheet'
+        ? sheets.find(item => item.id === hit.doc_id)
+        : boards.find(item => item.id === hit.doc_id)
+      if (!doc) return null
+      return {
+        key: `${hit.doc_id}-${index}`,
+        type: hit.kind === 'sheet' ? 'sheet' : 'board',
+        docId: hit.doc_id,
+        name: hit.doc_name,
+        snippet: hit.snippet,
+        source: hit.source,
+        createdAt: doc.created_at,
+        folderPath: buildFolderPath(doc.folder_id, folderById),
+        tags: doc.tags || [],
+      }
+    }).filter(Boolean)
+    : sortDocs([
+      ...boards.map(board => ({ ...board, type: 'board' })),
+      ...sheets.map(sheet => ({ ...sheet, type: 'sheet' })),
+    ]).map(doc => ({
+      key: doc.id,
+      type: doc.type,
+      docId: doc.id,
+      name: doc.name,
+      snippet: doc.type === 'board'
+        ? 'Canvas board ready for notes, frames, and visual research.'
+        : 'Structured sheet available for sorting, tracking, and synthesis.',
+      source: docTypeLabel(doc.type),
+      createdAt: doc.created_at,
+      folderPath: buildFolderPath(doc.folder_id, folderById),
+      tags: doc.tags || [],
+    }))
+
   const saveOwner = async () => {
     const name = ownerInput.trim()
     if (!name) return
-    await fetch(`${API}/api/workspace`, {
+    const updated = await fetchJson(`${API}/api/workspace`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ owner: name }),
-    })
-    setWorkspace(w => ({ ...w, owner: name }))
+    }, null)
+    if (!updated) return
+    setWorkspace(updated)
     setOwnerPromptDismissed(true)
     setOwnerPromptOpen(false)
   }
@@ -646,7 +853,7 @@ export default function App() {
         : deleteTarget.type === 'board'
         ? `/api/boards/${deleteTarget.id}`
         : `/api/sheets/${deleteTarget.id}`
-      const res = await fetch(`${API}${endpoint}`, { method: 'DELETE' })
+      const res = await fetch(`${API}${endpoint}`, { method: 'DELETE', credentials: 'include' })
       if (!res.ok) {
         showError(res.status === 404 ? 'Item not found' : 'Delete failed')
         return
@@ -658,10 +865,10 @@ export default function App() {
         await refresh()
       } else if (deleteTarget.type === 'board') {
         setBoards(bs => bs.filter(b => b.id !== deleteTarget.id))
-        if (activeId?.id === deleteTarget.id) setActiveId(null)
+        if (activeId?.id === deleteTarget.id) goToDatabaseHome()
       } else if (deleteTarget.type === 'sheet') {
         setSheets(ss => ss.filter(s => s.id !== deleteTarget.id))
-        if (activeId?.id === deleteTarget.id) setActiveId(null)
+        if (activeId?.id === deleteTarget.id) goToDatabaseHome()
       }
       setDeleteConfirmOpen(false)
       setDeleteTarget(null)
@@ -671,230 +878,327 @@ export default function App() {
     }
   }
 
-  return (
-    <div className={`app${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
-      {readOnly && (
-        <div className="readonly-banner">
-          <strong>Read-only view.</strong> {workspace?.name || 'Research'} shared by {workspace?.owner || 'the owner'}. You can browse and search; you cannot edit.
-        </div>
-      )}
-      <aside
-        className="sidebar"
-        id="workspace-sidebar"
-        aria-hidden={sidebarCollapsed}
-      >
-        <div className="sidebar-header">
-          <div className="brand">{workspace?.name || 'Research'}</div>
-          <button
-            className="sidebar-chrome-btn"
-            onClick={() => setSidebarCollapsed(true)}
-            type="button"
-            aria-controls="workspace-sidebar"
-            aria-expanded="true"
-            aria-label="Hide sidebar"
-            title="Hide sidebar"
-          >
-            <SidebarCollapseIcon />
-          </button>
-        </div>
+  const submitLogin = useCallback(async () => {
+    const password = loginPassword.trim()
+    if (!password) return
+    setAuthBusy(true)
+    setAuthError('')
+    try {
+      const res = await fetch(`${API}/api/auth/login`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setAuthError(data.error || 'Login failed')
+        return
+      }
+      setLoginPassword('')
+      await updateAuthStatus()
+    } finally {
+      setAuthBusy(false)
+    }
+  }, [loginPassword, updateAuthStatus])
 
-        {!readOnly && (
+  const submitSetup = useCallback(async () => {
+    if (ownerPassword.length < 6 || visitorPassword.length < 6) return
+    setAuthBusy(true)
+    setAuthError('')
+    try {
+      const res = await fetch(`${API}/api/auth/setup`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          owner_password: ownerPassword,
+          visitor_password: visitorPassword,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setAuthError(data.error || 'Setup failed')
+        return
+      }
+      setOwnerPassword('')
+      setVisitorPassword('')
+      await updateAuthStatus()
+    } finally {
+      setAuthBusy(false)
+    }
+  }, [ownerPassword, updateAuthStatus, visitorPassword])
+
+  if (auth.loading) {
+    return <AccessGate loading />
+  }
+
+  if (!auth.authenticated) {
+    return (
+      <AccessGate
+        requiresSetup={auth.requiresSetup}
+        authBusy={authBusy}
+        authError={authError}
+        loginPassword={loginPassword}
+        ownerPassword={ownerPassword}
+        visitorPassword={visitorPassword}
+        route={route}
+        onLoginPasswordChange={setLoginPassword}
+        onOwnerPasswordChange={setOwnerPassword}
+        onVisitorPasswordChange={setVisitorPassword}
+        onSubmitLogin={submitLogin}
+        onSubmitSetup={submitSetup}
+      />
+    )
+  }
+
+  return (
+    <div className={`app${sidebarCollapsed ? ' sidebar-collapsed' : ''}${readOnly ? ' app-viewer' : ''}`}>
+      {showSidebar && (
+        <aside className="sidebar" id="workspace-sidebar" aria-hidden={sidebarCollapsed}>
+          <div className="sidebar-header">
+            <div className="brand">{workspace?.name || 'Research'}</div>
+            <button
+              className="sidebar-chrome-btn"
+              onClick={() => setSidebarCollapsed(true)}
+              type="button"
+              aria-controls="workspace-sidebar"
+              aria-expanded="true"
+              aria-label="Hide sidebar"
+              title="Hide sidebar"
+            >
+              <SidebarCollapseIcon />
+            </button>
+          </div>
+
           <div className="sidebar-actions">
             <button className="sidebar-action" onClick={openNewFolderModal} type="button"><FolderIcon /> Folder</button>
             <button className="sidebar-action" onClick={openNewBoardModal} type="button"><BoardIcon /> Board</button>
             <button className="sidebar-action" onClick={openNewSheetModal} type="button"><SheetIcon /> Sheet</button>
           </div>
-        )}
 
-        <div className="sb-section-row">
-          <div className="sb-section">Workspace</div>
-        </div>
-        <div className="workspace-tree">
-          {rootFolders.map(folder => renderFolderNode(folder))}
-          {rootDocs.length > 0 && rootFolders.length > 0 && <div className="sb-subsection">Unfiled</div>}
-          {rootDocs.map(doc => renderDocItem(doc))}
-          {!hasWorkspaceItems && (
-            <div className="sb-empty">{tagFilter ? 'No matching items' : 'Nothing here yet'}</div>
+          <div className="sb-section-row">
+            <div className="sb-section">Workspace</div>
+          </div>
+          <div className="workspace-tree">
+            {rootFolders.map(folder => renderFolderNode(folder))}
+            {rootDocs.length > 0 && rootFolders.length > 0 && <div className="sb-subsection">Unfiled</div>}
+            {rootDocs.map(doc => renderDocItem(doc))}
+            {!hasWorkspaceItems && (
+              <div className="sb-empty">{tagFilter ? 'No matching items' : 'Nothing here yet'}</div>
+            )}
+          </div>
+
+          {allTags.length > 0 && (
+            <>
+              <div className="sb-section-row">
+                <div className="sb-section">Tags</div>
+                {tagFilter && (
+                  <button className="sb-add" onClick={() => setTagFilter(null)} title="Clear filter" type="button"><CloseIcon /></button>
+                )}
+              </div>
+              <div className="sb-tags">
+                {allTags.map(([t, count]) => {
+                  const c = tagColor(t)
+                  const active = tagFilter === t
+                  return (
+                    <button
+                      key={t}
+                      className="sb-tag"
+                      style={{
+                        background: active ? c.border : c.bg,
+                        color: active ? '#fff' : c.fg,
+                        borderColor: c.border,
+                      }}
+                      onClick={() => filterByTag(t)}
+                      type="button"
+                    >
+                      #{t} · {count}
+                    </button>
+                  )
+                })}
+              </div>
+            </>
           )}
-        </div>
 
-        {allTags.length > 0 && (
+          <div className="sb-section-row">
+            <div className="sb-section">Search</div>
+          </div>
+          <button className="search-btn" onClick={() => setSearchOpen(true)} type="button">
+            <span className="search-btn-label"><SearchIcon /> Search</span>
+            <span className="kbd">⌘F</span>
+          </button>
+        </aside>
+      )}
+
+      <main className="canvas-wrap">
+        {showDatabaseHome ? (
+          <DatabaseHome
+            workspace={workspace}
+            query={query}
+            onQueryChange={setQuery}
+            databaseView={databaseView}
+            onDatabaseViewChange={setDatabaseView}
+            items={databaseItems}
+            tagColor={tagColor}
+            onOpenItem={openDocument}
+            onLogout={handleLogout}
+            searchRef={homeSearchRef}
+          />
+        ) : (
           <>
-            <div className="sb-section-row">
-              <div className="sb-section">Tags</div>
-              {tagFilter && (
-                <button className="sb-add" onClick={() => setTagFilter(null)} title="Clear filter" type="button"><CloseIcon /></button>
+            <div className="topbar">
+              {showSidebar && sidebarCollapsed && (
+                <button
+                  className="sidebar-toggle"
+                  onClick={() => setSidebarCollapsed(false)}
+                  type="button"
+                  aria-controls="workspace-sidebar"
+                  aria-expanded="false"
+                  aria-label="Show sidebar"
+                  title="Show sidebar"
+                >
+                  <SidebarExpandIcon />
+                </button>
               )}
+              {readOnly && (
+                <button className="database-back-btn" onClick={goToDatabaseHome} type="button">
+                  Database
+                </button>
+              )}
+              <div className="crumb-col">
+                {activeDoc && (
+                  <div className="crumb-path">
+                    {activeFolderPath || 'Workspace root'}
+                  </div>
+                )}
+                <div className="crumb">
+                  {activeBoard ? activeBoard.name : activeSheet ? activeSheet.name : showDatabaseHome ? 'Research Database' : 'Select or create something'}
+                </div>
+                {activeDoc && (
+                  <div className="doc-tags">
+                    {!readOnly && (
+                      <label className="folder-field">
+                        <span className="folder-field-label">Folder</span>
+                        <select
+                          className="folder-select"
+                          value={activeDoc.folder_id || ROOT_FOLDER}
+                          onChange={(e) => moveActiveDoc(e.target.value)}
+                        >
+                          {folderOptions.map(option => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    {(activeDoc.tags || []).map(t => {
+                      const c = tagColor(t)
+                      return (
+                        <span key={t} className="tag-pill" style={{ background: c.bg, color: c.fg }}>
+                          #{t}
+                          {!readOnly && <button className="tag-pill-remove" onClick={() => removeTagFromActive(t)} title="Remove tag" type="button">×</button>}
+                        </span>
+                      )
+                    })}
+                    {!readOnly && (tagInputOpen ? (
+                      <input
+                        autoFocus
+                        className="tag-input"
+                        value={tagInput}
+                        onChange={e => setTagInput(e.target.value)}
+                        onBlur={() => { addTagToActive() }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') addTagToActive()
+                          if (e.key === 'Escape') { setTagInput(''); setTagInputOpen(false) }
+                        }}
+                        placeholder="tag-name"
+                      />
+                    ) : (
+                      <button className="tag-add" onClick={() => setTagInputOpen(true)} type="button">+ tag</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="topbar-actions">
+                {readOnly && (
+                  <span className="readonly-chip">
+                    Read-only
+                  </span>
+                )}
+                {ownerMode && (
+                  <>
+                    <span className={`save-indicator save-${saveState}`} aria-live="polite">
+                      {saveState === 'saving' && '· saving…'}
+                      {saveState === 'saved' && '✓ saved'}
+                      {saveState === 'error' && '! save failed'}
+                    </span>
+                    {activeDoc && activeDocType && (
+                      <button
+                        className="topbar-delete-btn"
+                        onClick={() => openDeleteDialog({ ...activeDoc, type: activeDocType })}
+                        type="button"
+                      >
+                        <TrashIcon />
+                        Delete...
+                      </button>
+                    )}
+                    <button className="share-btn" onClick={() => setShareOpen(true)} type="button">Share</button>
+                  </>
+                )}
+                <button className="topbar-logout" onClick={handleLogout} type="button">Logout</button>
+              </div>
             </div>
-            <div className="sb-tags">
-              {allTags.map(([t, count]) => {
-                const c = tagColor(t)
-                const active = tagFilter === t
-                return (
-                  <button
-                    key={t}
-                    className="sb-tag"
-                    style={{
-                      background: active ? c.border : c.bg,
-                      color: active ? '#fff' : c.fg,
-                      borderColor: c.border,
-                    }}
-                    onClick={() => filterByTag(t)}
-                    type="button"
-                  >
-                    #{t} · {count}
-                  </button>
-                )
-              })}
+
+            <div className="work-area">
+              {activeId?.type === 'board' && (
+                <TldrawCanvas
+                  key={activeId.id}
+                  boardId={activeId.id}
+                  readOnly={readOnly}
+                  viewerMode={viewerMode}
+                  shareSlug={route.shareToken}
+                  onSaveState={setSaveState}
+                />
+              )}
+              {activeId?.type === 'sheet' && (
+                <div className="sheet-wrap" key={activeId.id}>
+                  {readOnly ? (
+                    <ReadOnlySheet data={sheetData} />
+                  ) : (
+                    <Spreadsheet
+                      data={sheetData}
+                      onChange={(d) => { setSheetData(d); scheduleSaveSheet(d) }}
+                    />
+                  )}
+                </div>
+              )}
+              {!activeId && ownerMode && (
+                <div className="empty-main">
+                  <div>
+                    <div className="big">Nothing open</div>
+                    <div className="small">Create folders, boards, and sheets to organize your research.</div>
+                    <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'center' }}>
+                      <button className="cta" onClick={openNewFolderModal} type="button">New folder</button>
+                      <button className="cta" onClick={openNewBoardModal} type="button">New board</button>
+                      <button className="cta" onClick={openNewSheetModal} type="button">New sheet</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}
-
-        <div className="sb-section-row">
-          <div className="sb-section">Search</div>
-        </div>
-        <button className="search-btn" onClick={() => setSearchOpen(true)} type="button">
-          <span className="search-btn-label"><SearchIcon /> Search</span>
-          <span className="kbd">⌘F</span>
-        </button>
-      </aside>
-
-      <main className="canvas-wrap">
-        <div className="topbar">
-          {sidebarCollapsed && (
-            <button
-              className="sidebar-toggle"
-              onClick={() => setSidebarCollapsed(false)}
-              type="button"
-              aria-controls="workspace-sidebar"
-              aria-expanded="false"
-              aria-label="Show sidebar"
-              title="Show sidebar"
-            >
-              <SidebarExpandIcon />
-            </button>
-          )}
-          <div className="crumb-col">
-            {activeDoc && (
-              <div className="crumb-path">
-                {activeFolderPath || 'Workspace root'}
-              </div>
-            )}
-            <div className="crumb">
-              {activeBoard ? activeBoard.name : activeSheet ? activeSheet.name : 'Select or create something'}
-            </div>
-            {activeDoc && (
-              <div className="doc-tags">
-                {!readOnly && (
-                  <label className="folder-field">
-                    <span className="folder-field-label">Folder</span>
-                    <select
-                      className="folder-select"
-                      value={activeDoc.folder_id || ROOT_FOLDER}
-                      onChange={(e) => moveActiveDoc(e.target.value)}
-                    >
-                      {folderOptions.map(option => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                {(activeDoc.tags || []).map(t => {
-                  const c = tagColor(t)
-                  return (
-                    <span key={t} className="tag-pill" style={{ background: c.bg, color: c.fg }}>
-                      #{t}
-                      {!readOnly && <button className="tag-pill-remove" onClick={() => removeTagFromActive(t)} title="Remove tag" type="button">×</button>}
-                    </span>
-                  )
-                })}
-                {!readOnly && (tagInputOpen ? (
-                  <input
-                    autoFocus
-                    className="tag-input"
-                    value={tagInput}
-                    onChange={e => setTagInput(e.target.value)}
-                    onBlur={() => { addTagToActive() }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') addTagToActive()
-                      if (e.key === 'Escape') { setTagInput(''); setTagInputOpen(false) }
-                    }}
-                    placeholder="tag-name"
-                  />
-                ) : (
-                  <button className="tag-add" onClick={() => setTagInputOpen(true)} type="button">+ tag</button>
-                ))}
-              </div>
-            )}
-          </div>
-          {!readOnly && (
-            <>
-              <span className={`save-indicator save-${saveState}`} aria-live="polite">
-                {saveState === 'saving' && '· saving…'}
-                {saveState === 'saved' && '✓ saved'}
-                {saveState === 'error' && '! save failed'}
-              </span>
-              {activeDoc && activeDocType && (
-                <button
-                  className="topbar-delete-btn"
-                  onClick={() => openDeleteDialog({ ...activeDoc, type: activeDocType })}
-                  type="button"
-                >
-                  <TrashIcon />
-                  Delete...
-                </button>
-              )}
-              <button className="share-btn" onClick={() => setShareOpen(true)} type="button">Share</button>
-            </>
-          )}
-        </div>
-
-        <div className="work-area">
-          {activeId?.type === 'board' && (
-            <TldrawCanvas
-              key={activeId.id}
-              boardId={activeId.id}
-              readOnly={readOnly}
-              shareSlug={shareSlugFromUrl}
-              onSaveState={setSaveState}
-            />
-          )}
-          {activeId?.type === 'sheet' && (
-            <div className="sheet-wrap" key={activeId.id}>
-              {readOnly ? (
-                <ReadOnlySheet data={sheetData} />
-              ) : (
-                <Spreadsheet
-                  data={sheetData}
-                  onChange={(d) => { setSheetData(d); scheduleSaveSheet(d) }}
-                />
-              )}
-            </div>
-          )}
-          {!activeId && (
-            <div className="empty-main">
-              <div>
-                <div className="big">Nothing open</div>
-                <div className="small">Create folders, boards, and sheets to organize your research.</div>
-                <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'center' }}>
-                  {!readOnly && <>
-                    <button className="cta" onClick={openNewFolderModal} type="button">New folder</button>
-                    <button className="cta" onClick={openNewBoardModal} type="button">New board</button>
-                    <button className="cta" onClick={openNewSheetModal} type="button">New sheet</button>
-                  </>}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
       </main>
 
       {newBoardOpen && (
         <Modal onClose={() => setNewBoardOpen(false)} title="New board">
-          <input autoFocus value={newBoardName}
-                 onChange={e => setNewBoardName(e.target.value)}
-                 placeholder="Name this board"
-                 onKeyDown={e => { if (e.key === 'Enter') createBoard() }} />
+          <input
+            autoFocus
+            value={newBoardName}
+            onChange={e => setNewBoardName(e.target.value)}
+            placeholder="Name this board"
+            onKeyDown={e => { if (e.key === 'Enter') createBoard() }}
+          />
           <FolderField label="Create in" value={newBoardFolderId} options={folderOptions} onChange={setNewBoardFolderId} />
           <ModalFooter onCancel={() => setNewBoardOpen(false)} onConfirm={createBoard} disabled={!newBoardName.trim()} />
         </Modal>
@@ -902,10 +1206,13 @@ export default function App() {
 
       {newSheetOpen && (
         <Modal onClose={() => setNewSheetOpen(false)} title="New sheet">
-          <input autoFocus value={newSheetName}
-                 onChange={e => setNewSheetName(e.target.value)}
-                 placeholder="Name this sheet"
-                 onKeyDown={e => { if (e.key === 'Enter') createSheet() }} />
+          <input
+            autoFocus
+            value={newSheetName}
+            onChange={e => setNewSheetName(e.target.value)}
+            placeholder="Name this sheet"
+            onKeyDown={e => { if (e.key === 'Enter') createSheet() }}
+          />
           <FolderField label="Create in" value={newSheetFolderId} options={folderOptions} onChange={setNewSheetFolderId} />
           <ModalFooter onCancel={() => setNewSheetOpen(false)} onConfirm={createSheet} disabled={!newSheetName.trim()} />
         </Modal>
@@ -913,10 +1220,13 @@ export default function App() {
 
       {newFolderOpen && (
         <Modal onClose={() => setNewFolderOpen(false)} title="New folder">
-          <input autoFocus value={newFolderName}
-                 onChange={e => setNewFolderName(e.target.value)}
-                 placeholder="Name this folder"
-                 onKeyDown={e => { if (e.key === 'Enter') createFolder() }} />
+          <input
+            autoFocus
+            value={newFolderName}
+            onChange={e => setNewFolderName(e.target.value)}
+            placeholder="Name this folder"
+            onKeyDown={e => { if (e.key === 'Enter') createFolder() }}
+          />
           <FolderField label="Parent folder" value={newFolderParentId} options={folderOptions} onChange={setNewFolderParentId} />
           <ModalFooter onCancel={() => setNewFolderOpen(false)} onConfirm={createFolder} disabled={!newFolderName.trim()} />
         </Modal>
@@ -926,29 +1236,50 @@ export default function App() {
         <Modal onClose={() => setShareOpen(false)} title="Share your research">
           <div className="share-body">
             <div className="share-desc">
-              Anyone with this link can view and search everything in your workspace. They cannot edit.
+              These links use the visitor password gate. Visitors land in the database view by default, and deep links can open a specific board or sheet directly.
             </div>
             <div className="share-url-row">
               <input
                 readOnly
                 className="share-url"
-                value={`${window.location.origin}${window.location.pathname}?share=${workspace.public_slug}`}
+                value={`${window.location.origin}/`}
                 onFocus={(e) => e.target.select()}
               />
               <button
                 className="btn-primary"
                 onClick={() => {
-                  const url = `${window.location.origin}${window.location.pathname}?share=${workspace.public_slug}`
-                  navigator.clipboard.writeText(url).then(() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/`).then(() => {
                     setCopied(true)
                     setTimeout(() => setCopied(false), 1500)
                   })
                 }}
                 type="button"
               >
-                {copied ? 'Copied' : 'Copy'}
+                {copied ? 'Copied' : 'Copy home'}
               </button>
             </div>
+            {activeDoc && activeDocType && (
+              <div className="share-url-row">
+                <input
+                  readOnly
+                  className="share-url"
+                  value={`${window.location.origin}/${activeDocType}/${activeDoc.id}`}
+                  onFocus={(e) => e.target.select()}
+                />
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}/${activeDocType}/${activeDoc.id}`).then(() => {
+                      setCopiedDocLink(true)
+                      setTimeout(() => setCopiedDocLink(false), 1500)
+                    })
+                  }}
+                  type="button"
+                >
+                  {copiedDocLink ? 'Copied' : `Copy ${activeDocType}`}
+                </button>
+              </div>
+            )}
             <div className="share-owner-row">
               <label>Your display name:</label>
               <input
@@ -956,11 +1287,12 @@ export default function App() {
                 value={workspace.owner || ''}
                 onChange={(e) => setWorkspace(w => ({ ...w, owner: e.target.value }))}
                 onBlur={async (e) => {
-                  await fetch(`${API}/api/workspace`, {
+                  const updated = await fetchJson(`${API}/api/workspace`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ owner: e.target.value }),
-                  })
+                  }, null)
+                  if (updated) setWorkspace(updated)
                 }}
               />
             </div>
@@ -971,7 +1303,7 @@ export default function App() {
       {ownerPromptOpen && (
         <Modal onClose={skipOwner} title="What's your name?">
           <p style={{ fontSize: 13, color: '#666', marginBottom: 12 }}>
-            This shows on shared links so viewers know who shared the workspace.
+            This shows on visitor links so people know who shared the workspace.
           </p>
           <input
             autoFocus
@@ -1047,22 +1379,30 @@ export default function App() {
 
       {searchOpen && (
         <Modal onClose={() => setSearchOpen(false)} wide>
-          <input autoFocus className="search-input" value={query}
-                 onChange={e => setQuery(e.target.value)}
-                 placeholder="Search across everything…" />
+          <input
+            autoFocus
+            className="search-input"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search across everything…"
+          />
           <div className="hint">Text, shapes, sticky notes, sheet cells, OCR — across all boards and sheets.</div>
           <div className="results">
             {results.map((r, i) => (
-              <div key={i} className="result" onClick={() => {
-                if (r.kind === 'sheet') {
-                  const sheet = sheets.find(item => item.id === r.doc_id)
-                  openDocument('sheet', r.doc_id, sheet?.folder_id)
-                } else {
-                  const board = boards.find(item => item.id === r.doc_id)
-                  openDocument('board', r.doc_id, board?.folder_id)
-                }
-                setSearchOpen(false)
-              }}>
+              <div
+                key={i}
+                className="result"
+                onClick={() => {
+                  if (r.kind === 'sheet') {
+                    const sheet = sheets.find(item => item.id === r.doc_id)
+                    openDocument('sheet', r.doc_id, sheet?.folder_id)
+                  } else {
+                    const board = boards.find(item => item.id === r.doc_id)
+                    openDocument('board', r.doc_id, board?.folder_id)
+                  }
+                  setSearchOpen(false)
+                }}
+              >
                 <div className="result-title">{r.doc_name}</div>
                 <div className="result-snippet">{r.snippet}</div>
                 <div className="result-meta">{r.source}</div>
@@ -1076,6 +1416,174 @@ export default function App() {
       {errorVisible && errorMessage && (
         <div className="error-toast">{errorMessage}</div>
       )}
+    </div>
+  )
+}
+
+function AccessGate({
+  loading = false,
+  requiresSetup = false,
+  authBusy = false,
+  authError = '',
+  loginPassword = '',
+  ownerPassword = '',
+  visitorPassword = '',
+  route,
+  onLoginPasswordChange,
+  onOwnerPasswordChange,
+  onVisitorPasswordChange,
+  onSubmitLogin,
+  onSubmitSetup,
+}) {
+  if (loading) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card auth-card-loading">
+          <div className="auth-kicker">Station 8</div>
+          <div className="auth-title">Loading access state…</div>
+        </div>
+      </div>
+    )
+  }
+
+  const directLabel = route?.doc ? `${docTypeLabel(route.doc.type)} link` : 'Workspace'
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-card">
+        <div className="auth-kicker">Station 8</div>
+        <h1 className="auth-title">{requiresSetup ? 'Set up access' : 'Enter the workspace'}</h1>
+        <p className="auth-copy">
+          {requiresSetup
+            ? 'Create the owner and visitor passwords. After setup, the same password field routes people into owner or visitor mode automatically.'
+            : `${directLabel} is protected. Enter either the owner password or the visitor password to continue.`}
+        </p>
+
+        {requiresSetup ? (
+          <div className="auth-form">
+            <label className="auth-label">
+              <span>Owner password</span>
+              <input
+                type="password"
+                value={ownerPassword}
+                onChange={(e) => onOwnerPasswordChange(e.target.value)}
+                placeholder="At least 6 characters"
+              />
+            </label>
+            <label className="auth-label">
+              <span>Visitor password</span>
+              <input
+                type="password"
+                value={visitorPassword}
+                onChange={(e) => onVisitorPasswordChange(e.target.value)}
+                placeholder="At least 6 characters"
+              />
+            </label>
+            <button className="auth-submit" onClick={onSubmitSetup} disabled={authBusy || ownerPassword.length < 6 || visitorPassword.length < 6} type="button">
+              {authBusy ? 'Setting up…' : 'Save passwords'}
+            </button>
+          </div>
+        ) : (
+          <div className="auth-form">
+            <label className="auth-label">
+              <span>Password</span>
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={(e) => onLoginPasswordChange(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') onSubmitLogin() }}
+                placeholder="Owner or visitor password"
+              />
+            </label>
+            <button className="auth-submit" onClick={onSubmitLogin} disabled={authBusy || !loginPassword.trim()} type="button">
+              {authBusy ? 'Entering…' : 'Enter Station 8'}
+            </button>
+          </div>
+        )}
+
+        {authError && <div className="auth-error">{authError}</div>}
+      </div>
+    </div>
+  )
+}
+
+function DatabaseHome({
+  workspace,
+  query,
+  onQueryChange,
+  databaseView,
+  onDatabaseViewChange,
+  items,
+  tagColor,
+  onOpenItem,
+  onLogout,
+  searchRef,
+}) {
+  return (
+    <div className="database-home">
+      <div className="database-topbar">
+        <div className="database-title-block">
+          <div className="database-kicker">Station 8</div>
+          <div className="database-title">{workspace?.name || 'Research Database'}</div>
+        </div>
+        <label className="database-search">
+          <SearchIcon />
+          <input
+            ref={searchRef}
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            placeholder="Search every public note, board, sheet, and OCR fragment…"
+          />
+        </label>
+        <div className="database-toggle" role="tablist" aria-label="Database layout">
+          <button className={databaseView === 'list' ? 'active' : ''} onClick={() => onDatabaseViewChange('list')} type="button">List</button>
+          <button className={databaseView === 'grid' ? 'active' : ''} onClick={() => onDatabaseViewChange('grid')} type="button">Grid</button>
+        </div>
+        <button className="topbar-logout" onClick={onLogout} type="button">Logout</button>
+      </div>
+
+      <div className={`database-results database-${databaseView}`}>
+        {items.map((item) => (
+          <button
+            key={item.key}
+            className={`database-card database-card-${databaseView}`}
+            onClick={() => onOpenItem(item.type, item.docId)}
+            type="button"
+          >
+            <div className={`database-thumb database-thumb-${item.type}`}>
+              {item.type === 'board' ? <BoardIcon /> : <SheetIcon />}
+              <span>{docTypeLabel(item.type)}</span>
+            </div>
+            <div className="database-card-body">
+              <div className="database-card-title">{item.name}</div>
+              <div className="database-card-snippet">{item.snippet}</div>
+              <div className="database-card-meta">
+                <span>{item.folderPath || 'Workspace root'}</span>
+                <span>{item.source}</span>
+                <span>{formatDocDate(item.createdAt)}</span>
+              </div>
+              {item.tags.length > 0 && (
+                <div className="database-card-tags">
+                  {item.tags.slice(0, 4).map((tag) => {
+                    const c = tagColor(tag)
+                    return (
+                      <span key={tag} className="tag-pill" style={{ background: c.bg, color: c.fg }}>
+                        #{tag}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </button>
+        ))}
+        {items.length === 0 && (
+          <div className="database-empty">
+            <div className="database-empty-title">Nothing public matched that search.</div>
+            <div className="database-empty-copy">Clear the query or add more public material to the workspace.</div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -91,7 +91,7 @@ export function buildTable({
         locked: false,
         text: '',
         fontSize,
-        fontFamily: 1,
+        fontFamily: 2,
         textAlign: 'center',
         verticalAlign: 'middle',
         baseline: fontSize,

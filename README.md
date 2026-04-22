@@ -4,12 +4,14 @@ A searchable research workspace with infinite canvas boards and spreadsheets.
 
 The app now has two access modes:
 
-- `workspace`: the full internal workspace, protected by one password
-- `share links`: read-only scoped links for a board, sheet, folder, or whole workspace, all protected by one shared visitor password
+- `owner view`: the full internal workspace
+- `visitor view`: a read-only workspace view plus scoped share links
+
+At `YOUR_DOMAIN`, everyone sees the same password gate. The password they enter determines whether they land in the owner view or the visitor view. Scoped share links still work, and they use the same visitor password.
 
 ## Stack
 
-- **Frontend**: React + Vite + Excalidraw
+- **Frontend**: React + Vite + tldraw
 - **Backend**: Flask + Python
 - **Search**: Keyword + semantic (sentence-transformers)
 - **OCR**: Tesseract
