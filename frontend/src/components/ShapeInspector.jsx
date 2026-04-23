@@ -399,8 +399,6 @@ export const ShapeInspector = track(function ShapeInspector() {
         top: `${y}px`,
         transform: `scale(${inspectorScale})`,
         transformOrigin: 'top left',
-        maxWidth: `${Math.max(180, viewport.w - INSPECTOR_SCREEN_MARGIN * 2)}px`,
-        maxHeight: `${Math.max(120, viewport.h - INSPECTOR_SCREEN_MARGIN * 2)}px`,
       }}
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}

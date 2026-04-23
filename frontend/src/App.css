@@ -848,7 +848,7 @@ html[data-mode="light"] {
   width: 340px;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   pointer-events: auto;
-  overflow-y: auto;
+  overflow: visible;
   overscroll-behavior: contain;
 }
 .shape-inspector .insp-row { display: flex; align-items: center; gap: 12px; }
@@ -994,6 +994,12 @@ html[data-mode="light"] {
 .tldraw-wrap { flex: 1; position: relative; min-height: 0; width: 100%; }
 .tldraw-wrap.sticky-placing,
 .tldraw-wrap.sticky-placing * { cursor: none !important; }
+
+/* Ensure tldraw internal containers don't clip fixed-position shape inspector */
+.tldraw-wrap .tl-container,
+.tldraw-wrap .tl-canvas {
+  overflow: visible !important;
+}
 
 /* Let our dot-grid show through tldraw's canvas background */
 .tldraw-wrap .tl-background { background-color: transparent !important; }
