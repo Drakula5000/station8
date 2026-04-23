@@ -894,7 +894,12 @@ html[data-mode="light"] {
   flex-shrink: 0;
 }
 .shape-inspector .insp-body { flex: 1; display: flex; gap: 6px; }
-.shape-inspector .insp-body-swatches { gap: 5px; flex-wrap: wrap; }
+.shape-inspector .insp-body-swatches {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+  justify-items: center;
+}
 .shape-inspector .insp-body-pills { gap: 6px; }
 .shape-inspector .insp-body-size { align-items: center; }
 
@@ -1932,6 +1937,52 @@ html[data-mode="light"] {
 }
 .tldraw-wrap .tl-theme__dark [data-tl-color='white'] .tl-note__container {
   background-color: #FFFFFF !important;
+}
+
+/* Aurora text-color overrides — text labels on non-note shapes render the
+   literal swatch the user picked instead of tldraw's dark-mode auto-inverted
+   variants (e.g. `black` defaulting to #f2f2f2). Notes are excluded; their
+   labelColor stays as tldraw's noteText so it contrasts with the colored
+   note background. */
+.tldraw-wrap .tl-theme__dark [data-tl-color='black']:not([data-shape-type='note']) .tl-text-content__wrapper {
+  color: #1d1d1d !important;
+}
+.tldraw-wrap .tl-theme__dark [data-tl-color='white']:not([data-shape-type='note']) .tl-text-content__wrapper {
+  color: #FFFFFF !important;
+}
+.tldraw-wrap .tl-theme__dark [data-tl-color='light-violet']:not([data-shape-type='note']) .tl-text-content__wrapper,
+.tldraw-wrap .tl-theme__dark [data-tl-color='yellow']:not([data-shape-type='note']) .tl-text-content__wrapper {
+  color: #C8B0F5 !important;
+}
+.tldraw-wrap .tl-theme__dark [data-tl-color='light-red']:not([data-shape-type='note']) .tl-text-content__wrapper {
+  color: #F0A8C0 !important;
+}
+.tldraw-wrap .tl-theme__dark [data-tl-color='light-blue']:not([data-shape-type='note']) .tl-text-content__wrapper,
+.tldraw-wrap .tl-theme__dark [data-tl-color='blue']:not([data-shape-type='note']) .tl-text-content__wrapper {
+  color: #90BCE8 !important;
+}
+.tldraw-wrap .tl-theme__dark [data-tl-color='light-green']:not([data-shape-type='note']) .tl-text-content__wrapper,
+.tldraw-wrap .tl-theme__dark [data-tl-color='green']:not([data-shape-type='note']) .tl-text-content__wrapper {
+  color: #88D4B0 !important;
+}
+.tldraw-wrap .tl-theme__dark [data-tl-color='orange']:not([data-shape-type='note']) .tl-text-content__wrapper {
+  color: #F0B880 !important;
+}
+.tldraw-wrap .tl-theme__dark [data-tl-color='violet']:not([data-shape-type='note']) .tl-text-content__wrapper {
+  color: #B8A0F8 !important;
+}
+.tldraw-wrap .tl-theme__dark [data-tl-color='red']:not([data-shape-type='note']) .tl-text-content__wrapper {
+  color: #e87890 !important;
+}
+.tldraw-wrap .tl-theme__dark [data-tl-color='grey']:not([data-shape-type='note']) .tl-text-content__wrapper {
+  color: #8898b0 !important;
+}
+
+/* Linked text inherits the shape's color so the picker actually changes
+   linked spans. Without this, tldraw's `.tl-rich-text a { color: var(--tl-color-primary) }`
+   wins and links always render in the theme's primary blue/violet. */
+.tldraw-wrap .tl-rich-text a {
+  color: inherit !important;
 }
 
 /* Nested list styling: proper numbering hierarchy */

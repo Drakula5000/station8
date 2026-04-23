@@ -168,33 +168,39 @@ function restoreBoardViewAfterLoad(editor, camera) {
 
 function fitBoardAfterOpen(editor) {
   // Wait for tldraw to finish rendering shapes before fitting.
-  // We poll getCurrentPageBounds() until it returns a non-empty result,
-  // then zoom to fit. This handles large boards where shapes take time to lay out.
+  // Poll until bounds are stable (same result twice in a row), then zoom to fit.
   let attempts = 0
-  const MAX_ATTEMPTS = 20
-  const INTERVAL_MS = 80
+  const MAX_ATTEMPTS = 40
+  const INTERVAL_MS = 100
+  let lastBounds = null
 
   const tryFit = () => {
     const bounds = editor.getCurrentPageBounds()
     if (bounds && bounds.width > 0 && bounds.height > 0) {
-      editor.zoomToFit({ immediate: true, inset: 96 })
-      return
+      // Wait for bounds to stabilise — same result on two consecutive polls
+      const stable = lastBounds &&
+        Math.abs(bounds.x - lastBounds.x) < 1 &&
+        Math.abs(bounds.y - lastBounds.y) < 1 &&
+        Math.abs(bounds.w - lastBounds.w) < 1 &&
+        Math.abs(bounds.h - lastBounds.h) < 1
+      if (stable) {
+        editor.zoomToFit({ immediate: true, inset: 64 })
+        return
+      }
+      lastBounds = { x: bounds.x, y: bounds.y, w: bounds.width, h: bounds.height }
     }
     attempts++
     if (attempts < MAX_ATTEMPTS) {
       window.setTimeout(tryFit, INTERVAL_MS)
-    } else {
-      // Fallback: reset to origin if content never appeared
-      editor.setCamera({ x: 0, y: 0, z: 1 }, { immediate: true })
+    } else if (lastBounds) {
+      // Bounds never fully stabilised but we have something — fit anyway
+      editor.zoomToFit({ immediate: true, inset: 64 })
     }
+    // If no bounds at all after max attempts, leave tldraw's default view
   }
 
-  // Start after two animation frames to let tldraw mount shapes
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      tryFit()
-    })
-  })
+  // Start after a short delay to let tldraw mount and render shapes
+  window.setTimeout(tryFit, 150)
 }
 
 function getNotePreviewSizePx(editor) {
@@ -1176,7 +1182,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         const savedView = loadSavedBoardView(bid, mode)
         if (savedView) {
           restoreBoardViewAfterLoad(editor, savedView)
-          clearSavedBoardView(bid, mode)
         } else {
           fitBoardAfterOpen(editor)
         }
