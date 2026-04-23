@@ -1350,8 +1350,8 @@ def _text_from_tldraw(snapshot):
             if name.strip():
                 out.append({'kind': 'frame', 'text': name.strip()})
         elif shape_type in ('image', 'video'):
-            # Extract alt text if present
-            alt_text = props.get('altText', '').strip()
+            # Extract alt text if present (stored in meta, not props)
+            alt_text = (record.get('meta') or {}).get('altText', '').strip()
             if alt_text:
                 out.append({'kind': 'alt', 'text': alt_text})
             # Extract OCR text from uploaded images

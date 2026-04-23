@@ -231,11 +231,12 @@ const ImageShapeStyles = track(function ImageShapeStyles() {
     const radius = image.props.crop?.isCircle ? '50%' : `${Number(image.meta?.imageCornerRadius ?? 0)}px`
     const borderWidth = Number(image.meta?.imageBorderWidth ?? 0)
     const borderColor = image.meta?.imageBorderColor || 'var(--s8-accent)'
-    const borderShadow = borderWidth > 0 ? `inset 0 0 0 ${borderWidth}px ${borderColor}` : 'none'
+    const outlineStyle = borderWidth > 0
+      ? `outline: ${borderWidth}px solid ${borderColor}; outline-offset: ${borderWidth}px;`
+      : 'outline: none;'
 
     return [
-      `[data-shape-id="${id}"] .tl-html-container { position: relative; border-radius: ${radius}; overflow: hidden; }`,
-      `[data-shape-id="${id}"] .tl-html-container::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: ${borderShadow}; pointer-events: none; }`,
+      `[data-shape-id="${id}"] .tl-html-container { position: relative; border-radius: ${radius}; overflow: hidden; ${outlineStyle} }`,
       `[data-shape-id="${id}"] .tl-image-container,`,
       `[data-shape-id="${id}"] .tl-image { border-radius: inherit; }`,
     ].join('\n')
@@ -304,7 +305,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
       setAltTextDraft('')
       return
     }
-    setAltTextDraft(selectedImage.props.altText || '')
+    setAltTextDraft(selectedImage.meta?.altText || '')
   }, [selectedImage])
 
   // Keep toolInfoRef in sync so TldrawCanvas can render the ghost
@@ -400,7 +401,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
     editor.updateShapes([{
       id: selectedImage.id,
       type: 'image',
-      props: { altText: altTextDraft },
+      meta: { ...selectedImage.meta, altText: altTextDraft },
     }])
     setEditingAltText(false)
   }
@@ -644,7 +645,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
             </div>
           ) : (
             <button
-              className={`fj-tool ${selectedImage.props.altText ? 'active' : ''}`}
+              className={`fj-tool ${selectedImage.meta?.altText ? 'active' : ''}`}
               onClick={() => setEditingAltText(true)}
               onPointerDown={stopToolbarPointer}
               title="Edit alt text"
