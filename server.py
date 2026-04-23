@@ -1379,18 +1379,21 @@ def upload_image():
             print(f"Supabase storage upload failed: {exc}", flush=True)
 
     ocr = _load(OCR_FILE, {})
-    ocr[filename] = _run_ocr(path)
+    # Prefer OCR text extracted in the browser (Tesseract.js) since Render's
+    # native Python runtime doesn't have the tesseract binary. Fall back to
+    # server-side _run_ocr for local dev.
+    client_ocr = (request.form.get('ocr_text') or '').strip()
+    ocr[filename] = client_ocr or _run_ocr(path)
     _save(OCR_FILE, ocr)
     return jsonify({'filename': filename, 'url': f'/uploads/{filename}'}), 201
 
 
-@app.route('/api/ocr/rebuild', methods=['POST'])
+@app.route('/api/ocr/images', methods=['GET'])
 @_studio_auth_required
-def rebuild_ocr():
-    """Re-run OCR on every image in UPLOADS_DIR (pulling from Supabase if the
-    file isn't on local disk) and persist results to ocr.json. Owner-only.
-    Intended to be clicked once after deploying a Tesseract-capable image or
-    after tuning OCR preprocessing.
+def list_ocr_images():
+    """List every uploaded image plus its current OCR status. The frontend
+    uses this to drive a client-side rescan (OCR in the browser via
+    Tesseract.js, result posted back via /api/ocr/save).
     """
     exts = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
     filenames = set()
@@ -1408,41 +1411,31 @@ def rebuild_ocr():
                 if name and os.path.splitext(name)[1].lower() in exts:
                     filenames.add(name)
         except Exception as exc:
-            print(f'Supabase list failed during OCR rebuild: {exc}', flush=True)
+            print(f'Supabase list failed: {exc}', flush=True)
 
     ocr = _load(OCR_FILE, {})
-    hits = []
-    empty = []
-    failed = []
+    items = [
+        {'filename': name, 'has_text': bool((ocr.get(name) or '').strip())}
+        for name in sorted(filenames)
+    ]
+    return jsonify({'images': items})
 
-    for name in sorted(filenames):
-        local_path = os.path.join(UPLOADS_DIR, name)
-        if not os.path.exists(local_path) and supabase:
-            try:
-                blob = supabase.storage.from_('uploads').download(name)
-                os.makedirs(UPLOADS_DIR, exist_ok=True)
-                with open(local_path, 'wb') as f:
-                    f.write(blob)
-            except Exception as exc:
-                print(f'Supabase download failed for {name}: {exc}', flush=True)
-                failed.append(name)
-                continue
-        text = _run_ocr(local_path)
-        ocr[name] = text
-        if text:
-            hits.append({'filename': name, 'chars': len(text), 'preview': text[:80]})
-        else:
-            empty.append(name)
 
+@app.route('/api/ocr/save', methods=['POST'])
+@_studio_auth_required
+def save_ocr():
+    """Upsert a single OCR entry. Called by the frontend after running
+    Tesseract.js against each image.
+    """
+    body = request.json or {}
+    filename = (body.get('filename') or '').strip()
+    text = (body.get('text') or '').strip()
+    if not filename or '/' in filename or '\\' in filename:
+        return jsonify({'error': 'bad filename'}), 400
+    ocr = _load(OCR_FILE, {})
+    ocr[filename] = text
     _save(OCR_FILE, ocr)
-
-    return jsonify({
-        'total_images': len(filenames),
-        'with_text': len(hits),
-        'empty': len(empty),
-        'failed': len(failed),
-        'samples': hits[:10],
-    })
+    return jsonify({'filename': filename, 'chars': len(text)})
 
 
 def _rewrite_board_upload_refs(renames):
