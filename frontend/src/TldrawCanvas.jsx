@@ -67,8 +67,49 @@ const STICKY_SWATCHES = {
 
 // tldraw NOTE_SIZE is hardcoded at 200 canvas units; scale it down on placement
 const NOTE_DEFAULT_SCALE = 0.6
+const MAX_DROPPED_IMAGE_VIEWPORT_FRACTION = 0.2
+const FRAME_DROPPED_IMAGE_INSET = 32
 
 const FRAME_SHAPE_UTILS = [FrameShapeUtil.configure({ showColors: true })]
+
+function getContainedDimensions(w, h, maxW, maxH) {
+  if (!(w > 0) || !(h > 0) || !(maxW > 0) || !(maxH > 0)) return null
+  const scale = Math.min(1, maxW / w, maxH / h)
+  if (scale >= 1) return null
+  return { w: w * scale, h: h * scale }
+}
+
+function getDroppedImageResize(editor, shape) {
+  if (shape.type !== 'image') return null
+
+  const width = Number(shape.props?.w ?? 0)
+  const height = Number(shape.props?.h ?? 0)
+  if (!(width > 0) || !(height > 0)) return null
+
+  const viewport = editor.getViewportPageBounds()
+  let maxW = viewport.width * MAX_DROPPED_IMAGE_VIEWPORT_FRACTION
+  let maxH = viewport.height * MAX_DROPPED_IMAGE_VIEWPORT_FRACTION
+
+  const parent = editor.getShapeParent(shape)
+  if (parent?.type === 'frame') {
+    maxW = Math.min(maxW, Math.max(1, parent.props.w - FRAME_DROPPED_IMAGE_INSET * 2))
+    maxH = Math.min(maxH, Math.max(1, parent.props.h - FRAME_DROPPED_IMAGE_INSET * 2))
+  }
+
+  const resized = getContainedDimensions(width, height, maxW, maxH)
+  if (!resized) return null
+
+  return {
+    id: shape.id,
+    type: 'image',
+    x: shape.x + (width - resized.w) / 2,
+    y: shape.y + (height - resized.h) / 2,
+    props: {
+      w: resized.w,
+      h: resized.h,
+    },
+  }
+}
 
 // Stamps data-tl-color on each shape DOM node so CSS can remap tldraw's
 // native dark-mode color palette to Aurora-appropriate values.
@@ -666,7 +707,23 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       }
     }, { source: 'user', scope: 'document' })
 
-    cleanupRef.current = () => { cleanupSave(); cleanupScale() }
+    const cleanupDroppedImages = editor.store.listen((entry) => {
+      if (loadingRef.current) return
+      const newImages = Object.values(entry.changes.added).filter(
+        r => r.typeName === 'shape' && r.type === 'image'
+      )
+      const updates = newImages
+        .map((image) => {
+          const shape = editor.getShape(image.id)
+          return shape ? getDroppedImageResize(editor, shape) : null
+        })
+        .filter(Boolean)
+      if (updates.length) {
+        editor.updateShapes(updates)
+      }
+    }, { source: 'user', scope: 'document' })
+
+    cleanupRef.current = () => { cleanupSave(); cleanupScale(); cleanupDroppedImages() }
   }, [doSave])
 
   const handleMouseMove = (e) => {
