@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import Spreadsheet from 'react-spreadsheet'
 import TldrawCanvas from './TldrawCanvas'
 import {
@@ -388,6 +388,16 @@ export default function App() {
   }, [navigate])
 
   const onFindDismiss = useCallback(() => setFindQuery(null), [])
+
+  const findShapeIdsByBoard = useMemo(() => {
+    const acc = {}
+    for (const hit of results) {
+      if (hit.kind === 'sheet' || !hit.shape_id) continue
+      if (!acc[hit.doc_id]) acc[hit.doc_id] = []
+      if (!acc[hit.doc_id].includes(hit.shape_id)) acc[hit.doc_id].push(hit.shape_id)
+    }
+    return acc
+  }, [results])
 
   const refresh = useCallback(async () => {
     if (auth.loading) return
@@ -1526,6 +1536,7 @@ export default function App() {
                   findQuery={findQuery}
                   onFindDismiss={onFindDismiss}
                   findBoards={findBoards}
+                  findShapeIds={findShapeIdsByBoard[activeId.id] || []}
                   onNavigateBoard={(boardId) => {
                     const board = boards.find(b => b.id === boardId)
                     openDocument('board', boardId, board?.folder_id)

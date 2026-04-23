@@ -388,42 +388,39 @@ function extractShapeText(shape) {
   return ''
 }
 
-const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards = [], onNavigateBoard }) {
+const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards = [], onNavigateBoard, findShapeIds = [] }) {
   const editor = useEditor()
   const [matches, setMatches] = useState([])
   const [matchIndex, setMatchIndex] = useState(0)
   const retryRef = useRef(null)
 
-  // Which board index are we on in the cross-board list?
   const boardIndex = findBoards.indexOf(boardId)
   const totalBoards = findBoards.length
   const hasPrevBoard = boardIndex > 0
   const hasNextBoard = boardIndex < totalBoards - 1
 
-  const applyGlow = useCallback((shapeId) => {
-    document.querySelectorAll('[data-find-glow]').forEach(el => {
-      el.removeAttribute('data-find-glow')
-    })
-    if (!shapeId) return
-    requestAnimationFrame(() => {
-      const el = document.querySelector(`[data-shape-id="${shapeId}"]`)
-      if (el) el.setAttribute('data-find-glow', 'true')
-    })
-  }, [])
-
   const zoomToMatch = useCallback((editor, shapeId) => {
     const bounds = editor.getShapePageBounds(shapeId)
     if (!bounds || !(bounds.width > 0)) return
-    editor.zoomToBounds(bounds, { padding: 120, animation: { duration: 350 } })
+    editor.zoomToBounds(bounds, { padding: 160, animation: { duration: 350 } })
     editor.selectNone()
-    applyGlow(shapeId)
-  }, [applyGlow])
+  }, [])
 
-  const buildMatches = useCallback((editor, q) => {
-    return editor.getCurrentPageShapes()
+  const buildMatches = useCallback((editor, q, preferredIds) => {
+    const pageShapes = editor.getCurrentPageShapes()
+    if (preferredIds && preferredIds.length > 0) {
+      const byId = new Map(pageShapes.map(s => [s.id, s]))
+      const ordered = preferredIds
+        .filter(id => byId.has(id))
+        .map(id => ({ shapeId: id }))
+      if (ordered.length > 0) return ordered
+    }
+    return pageShapes
       .filter(s => extractShapeText(s).toLowerCase().includes(q))
       .map(s => ({ shapeId: s.id }))
   }, [])
+
+  const findShapeIdsKey = findShapeIds.join('|')
 
   useEffect(() => {
     if (!editor || !query) return
@@ -431,7 +428,7 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
     if (retryRef.current) clearTimeout(retryRef.current)
 
     const tryMatch = (attempt = 0) => {
-      const found = buildMatches(editor, q)
+      const found = buildMatches(editor, q, findShapeIds)
       if (found.length > 0) {
         setMatches(found)
         setMatchIndex(0)
@@ -446,50 +443,79 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
     }
     tryMatch()
     return () => { if (retryRef.current) clearTimeout(retryRef.current) }
-  }, [editor, query, buildMatches])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, query, buildMatches, findShapeIdsKey])
 
   useEffect(() => {
     if (!editor || matches.length === 0) return
     zoomToMatch(editor, matches[matchIndex].shapeId)
   }, [editor, matches, matchIndex, zoomToMatch])
 
+  const currentShapeId = matches[matchIndex]?.shapeId || null
+  const hasMatches = matches.length > 0
+
+  // Reactive glow + dim. Runs after every render; track() re-runs on store
+  // changes (camera tweens, shape mounts), letting us restamp once tldraw
+  // finally renders the target DOM node.
+  useEffect(() => {
+    document.querySelectorAll('[data-find-glow="true"]').forEach(el => {
+      if (el.getAttribute('data-shape-id') !== currentShapeId) {
+        el.removeAttribute('data-find-glow')
+      }
+    })
+    const wrap = document.querySelector('.tldraw-wrap')
+    if (wrap) {
+      if (hasMatches && currentShapeId) wrap.setAttribute('data-find-active', 'true')
+      else wrap.removeAttribute('data-find-active')
+    }
+    if (!currentShapeId) return
+    let rafId
+    let attempts = 0
+    const stamp = () => {
+      const el = document.querySelector(`[data-shape-id="${currentShapeId}"]`)
+      if (el) {
+        if (!el.hasAttribute('data-find-glow')) el.setAttribute('data-find-glow', 'true')
+        return
+      }
+      if (attempts++ < 60) rafId = requestAnimationFrame(stamp)
+    }
+    stamp()
+    return () => { if (rafId) cancelAnimationFrame(rafId) }
+  })
+
   useEffect(() => {
     return () => {
-      document.querySelectorAll('[data-find-glow]').forEach(el => el.removeAttribute('data-find-glow'))
+      document.querySelectorAll('[data-find-glow="true"]').forEach(el => el.removeAttribute('data-find-glow'))
+      const wrap = document.querySelector('.tldraw-wrap')
+      if (wrap) wrap.removeAttribute('data-find-active')
     }
   }, [])
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape') { applyGlow(null); onDismiss() }
+      if (e.key === 'Escape') onDismiss()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [applyGlow, onDismiss])
+  }, [onDismiss])
 
   const goNext = () => {
     if (matches.length > 1) {
-      const next = (matchIndex + 1) % matches.length
-      setMatchIndex(next)
-      zoomToMatch(editor, matches[next].shapeId)
+      setMatchIndex((matchIndex + 1) % matches.length)
     } else if (hasNextBoard) {
-      applyGlow(null)
       onNavigateBoard(findBoards[boardIndex + 1])
     }
   }
 
   const goPrev = () => {
     if (matches.length > 1) {
-      const prev = (matchIndex - 1 + matches.length) % matches.length
-      setMatchIndex(prev)
-      zoomToMatch(editor, matches[prev].shapeId)
+      setMatchIndex((matchIndex - 1 + matches.length) % matches.length)
     } else if (hasPrevBoard) {
-      applyGlow(null)
       onNavigateBoard(findBoards[boardIndex - 1])
     }
   }
 
-  const handleClose = () => { applyGlow(null); onDismiss() }
+  const handleClose = () => onDismiss()
 
   // Counter: "1 of 3 · board 1/2" when multiple boards
   const shapeCounter = matches.length === 0 ? '0 of 0' : `${matchIndex + 1} of ${matches.length}`
@@ -545,25 +571,34 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
           opacity: 0.35;
           cursor: default;
         }
-        /* Glow highlight on matched shape */
-        [data-find-glow="true"] .tl-shape,
-        [data-find-glow="true"] .tl-note__container,
-        [data-find-glow="true"] .tl-html-container,
-        [data-find-glow="true"] .tl-geo {
+        /* Dim all non-matched shapes when a find is active */
+        .tldraw-wrap [data-shape-id] {
+          transition: opacity 0.2s ease, filter 0.2s ease;
+        }
+        .tldraw-wrap[data-find-active="true"] [data-shape-id]:not([data-find-glow="true"]) {
+          opacity: 0.18;
+          filter: saturate(0.4);
+        }
+        /* Pulsing outline on the matched shape wrapper itself */
+        [data-find-glow="true"] {
           outline: 3px solid var(--s8-accent) !important;
-          outline-offset: 4px !important;
-          box-shadow: 0 0 0 6px color-mix(in srgb, var(--s8-accent) 30%, transparent),
-                      0 0 20px 4px color-mix(in srgb, var(--s8-accent) 40%, transparent) !important;
-          animation: s8-find-glow-pulse 1.2s ease-in-out infinite;
+          outline-offset: 6px !important;
+          border-radius: 4px;
+          animation: s8-find-glow-pulse 1.4s ease-in-out infinite;
+          z-index: 2;
         }
         @keyframes s8-find-glow-pulse {
-          0%, 100% { 
-            box-shadow: 0 0 0 4px color-mix(in srgb, var(--s8-accent) 25%, transparent),
-                        0 0 16px 2px color-mix(in srgb, var(--s8-accent) 35%, transparent);
+          0%, 100% {
+            outline-width: 3px;
+            outline-offset: 6px;
+            filter: drop-shadow(0 0 6px color-mix(in srgb, var(--s8-accent) 55%, transparent))
+                    drop-shadow(0 0 14px color-mix(in srgb, var(--s8-accent) 35%, transparent));
           }
-          50% { 
-            box-shadow: 0 0 0 8px color-mix(in srgb, var(--s8-accent) 40%, transparent),
-                        0 0 32px 8px color-mix(in srgb, var(--s8-accent) 50%, transparent);
+          50% {
+            outline-width: 5px;
+            outline-offset: 8px;
+            filter: drop-shadow(0 0 10px color-mix(in srgb, var(--s8-accent) 75%, transparent))
+                    drop-shadow(0 0 24px color-mix(in srgb, var(--s8-accent) 55%, transparent));
           }
         }
       `}</style>
@@ -1008,7 +1043,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
   )
 })
 
-export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug, onSaveState, colorMode, findQuery, onFindDismiss, findBoards, onNavigateBoard }) {
+export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug, onSaveState, colorMode, findQuery, onFindDismiss, findBoards, onNavigateBoard, findShapeIds }) {
   const boardIdRef = useRef(boardId)
   const readOnlyRef = useRef(readOnly)
   const viewerModeRef = useRef(viewerMode)
@@ -1020,7 +1055,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   const wrapRef = useRef(null)
   const toolInfoRef = useRef({ tool: 'select', stickyColor: 'yellow' })
   const pointerRef = useRef(null)
-  const restoreViewOnLoadRef = useRef(shouldRestoreViewFromReload())
   const [ghost, setGhost] = useState(null) // { x, y, color } | null
 
   const editorRef = useRef(null)
@@ -1167,7 +1201,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         } else {
           fitBoardAfterOpen(editor)
         }
-        restoreViewOnLoadRef.current = false
       })
 
     const defaultFilesHandler = editor.externalContentHandlers.files
@@ -1293,7 +1326,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         <BrokenImageRetry />
         <ListStyles />
         <ShapeColorSync />
-        {findQuery && <FindBar query={findQuery} onDismiss={onFindDismiss} boardId={boardId} findBoards={findBoards} onNavigateBoard={onNavigateBoard} />}
+        {findQuery && <FindBar query={findQuery} onDismiss={onFindDismiss} boardId={boardId} findBoards={findBoards} onNavigateBoard={onNavigateBoard} findShapeIds={findShapeIds} />}
       </Tldraw>
       {ghost && (
         <div

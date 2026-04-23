@@ -1337,6 +1337,7 @@ def _text_from_tldraw(snapshot):
         if not isinstance(record, dict) or record.get('typeName') != 'shape':
             continue
         shape_type = record.get('type')
+        shape_id = record.get('id')
         props = record.get('props') or {}
         text = (
             _extract_rich_text(props.get('richText'))
@@ -1344,17 +1345,15 @@ def _text_from_tldraw(snapshot):
             or ''
         )
         if shape_type in ('note', 'text', 'geo', 'arrow') and text.strip():
-            out.append({'kind': 'text', 'text': text.strip()})
+            out.append({'kind': 'text', 'text': text.strip(), 'shape_id': shape_id})
         elif shape_type == 'frame':
             name = record.get('name') or props.get('name') or ''
             if name.strip():
-                out.append({'kind': 'frame', 'text': name.strip()})
+                out.append({'kind': 'frame', 'text': name.strip(), 'shape_id': shape_id})
         elif shape_type in ('image', 'video'):
-            # Extract alt text if present (stored in meta, not props)
             alt_text = (record.get('meta') or {}).get('altText', '').strip()
             if alt_text:
-                out.append({'kind': 'alt', 'text': alt_text})
-            # Extract OCR text from uploaded images
+                out.append({'kind': 'alt', 'text': alt_text, 'shape_id': shape_id})
             asset_id = props.get('assetId')
             asset = assets.get(asset_id) if asset_id else None
             src = ((asset or {}).get('props') or {}).get('src') or ''
@@ -1362,7 +1361,7 @@ def _text_from_tldraw(snapshot):
             if match:
                 ocr_text = ocr.get(match.group(1), '')
                 if ocr_text:
-                    out.append({'kind': 'ocr', 'text': ocr_text})
+                    out.append({'kind': 'ocr', 'text': ocr_text, 'shape_id': shape_id})
     return out
 
 
@@ -1392,6 +1391,7 @@ def _all_items(boards=None, sheets=None):
                 'doc_name': board['name'],
                 'kind': entry['kind'],
                 'text': entry['text'],
+                'shape_id': entry.get('shape_id'),
             }
     for sheet in sheet_items:
         data = _load(_sheet_file(sheet['id']), {'data': []})
@@ -1495,6 +1495,7 @@ def _search_payload(boards=None, sheets=None):
                     'sheet': 'spreadsheet cell',
                 }.get(item['kind'], item['kind']),
                 'score': combined,
+                'shape_id': item.get('shape_id'),
             })
     hits.sort(key=lambda hit: hit['score'], reverse=True)
     return {'hits': hits[:50]}
