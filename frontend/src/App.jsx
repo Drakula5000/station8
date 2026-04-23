@@ -177,6 +177,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
+  const [searchLoading, setSearchLoading] = useState(false)
   const [databaseView, setDatabaseView] = useState(() => {
     try {
       return window.localStorage.getItem(DATABASE_VIEW_STORAGE_KEY) || 'list'
@@ -535,6 +536,7 @@ export default function App() {
   useEffect(() => {
     if (!query.trim()) {
       setResults([])
+      setSearchLoading(false)
       return
     }
     if (!viewerMode) return
@@ -545,12 +547,14 @@ export default function App() {
       ? `${API}/api/visitor/search`
       : `${API}/api/search`
 
+    setSearchLoading(true)
     const t = setTimeout(async () => {
       const data = await fetchJson(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query }),
       }, null)
+      setSearchLoading(false)
       if (data) setResults(data.hits || [])
     }, 200)
     return () => clearTimeout(t)
@@ -1314,6 +1318,7 @@ export default function App() {
             onLogout={handleLogout}
             searchRef={homeSearchRef}
             backendStatus={backendStatus}
+            searchLoading={searchLoading}
           />
         ) : (
           <>
@@ -1681,7 +1686,9 @@ export default function App() {
           />
           <div className="hint">Text, shapes, sticky notes, sheet cells, OCR — across all boards and sheets.</div>
           <div className="results">
-            {results.map((r, i) => (
+            {searchLoading ? (
+              <div className="result-empty">Searching…</div>
+            ) : results.map((r, i) => (
               <div
                 key={i}
                 className="result"
@@ -1701,7 +1708,7 @@ export default function App() {
                 <div className="result-meta">{r.source}</div>
               </div>
             ))}
-            {query && results.length === 0 && <div className="result-empty">No hits</div>}
+            {query && !searchLoading && results.length === 0 && <div className="result-empty">No hits</div>}
           </div>
         </Modal>
       )}
@@ -1817,6 +1824,7 @@ function DatabaseHome({
   onLogout,
   searchRef,
   backendStatus,
+  searchLoading,
 }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const isReady = backendStatus === 'ready'
@@ -1899,8 +1907,17 @@ function DatabaseHome({
         ))}
         {items.length === 0 && (
           <div className="database-empty">
-            <div className="database-empty-title">Nothing public matched that search.</div>
-            <div className="database-empty-copy">Clear the query or add more public material to the workspace.</div>
+            {searchLoading ? (
+              <>
+                <div className="database-empty-title">Searching…</div>
+                <div className="database-empty-copy">Hang tight.</div>
+              </>
+            ) : query ? (
+              <>
+                <div className="database-empty-title">Nothing public matched that search.</div>
+                <div className="database-empty-copy">Clear the query or add more public material to the workspace.</div>
+              </>
+            ) : null}
           </div>
         )}
       </div>
