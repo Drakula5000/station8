@@ -208,7 +208,6 @@ export const ShapeInspector = track(function ShapeInspector() {
 
   const zoomLevel = editor.getZoomLevel()
   const viewport = editor.getViewportScreenBounds()
-  const container = editor.getContainer()
   const topLeft = editor.pageToScreen({ x: bounds.minX, y: bounds.maxY })
   const topRight = editor.pageToScreen({ x: bounds.maxX, y: bounds.maxY })
   const topCenter = editor.pageToScreen({ x: bounds.center.x, y: bounds.minY })
@@ -227,19 +226,18 @@ export const ShapeInspector = track(function ShapeInspector() {
   )
   const scaledWidth = panelSize.width * inspectorScale
   const scaledHeight = panelSize.height * inspectorScale
-  const localCenterX = centerX - viewport.x
-  const localBottomY = topLeft.y - viewport.y
-  const localTopY = topCenter.y - viewport.y
-  const maxX = Math.max(INSPECTOR_SCREEN_MARGIN, viewport.w - scaledWidth - INSPECTOR_SCREEN_MARGIN)
-  const maxY = Math.max(INSPECTOR_SCREEN_MARGIN, viewport.h - scaledHeight - INSPECTOR_SCREEN_MARGIN)
-  const x = clamp(localCenterX - scaledWidth / 2, INSPECTOR_SCREEN_MARGIN, maxX) + container.scrollLeft
-  const belowY = localBottomY + INSPECTOR_GAP
-  const aboveY = localTopY - scaledHeight - INSPECTOR_GAP
+  const minX = viewport.x + INSPECTOR_SCREEN_MARGIN
+  const maxX = Math.max(minX, viewport.x + viewport.w - scaledWidth - INSPECTOR_SCREEN_MARGIN)
+  const minY = viewport.y + INSPECTOR_SCREEN_MARGIN
+  const maxY = Math.max(minY, viewport.y + viewport.h - scaledHeight - INSPECTOR_SCREEN_MARGIN)
+  const x = clamp(centerX - scaledWidth / 2, minX, maxX)
+  const belowY = topLeft.y + INSPECTOR_GAP
+  const aboveY = topCenter.y - scaledHeight - INSPECTOR_GAP
   const y = (
-    belowY + scaledHeight <= viewport.h - INSPECTOR_SCREEN_MARGIN || aboveY < INSPECTOR_SCREEN_MARGIN
-      ? clamp(belowY, INSPECTOR_SCREEN_MARGIN, maxY)
-      : clamp(aboveY, INSPECTOR_SCREEN_MARGIN, maxY)
-  ) + container.scrollTop
+    belowY + scaledHeight <= viewport.y + viewport.h - INSPECTOR_SCREEN_MARGIN || aboveY < minY
+      ? clamp(belowY, minY, maxY)
+      : clamp(aboveY, minY, maxY)
+  )
 
   const showColor   = allShapesMatch(shapes, SHAPES_WITH_COLOR)
   const showFill    = allShapesMatch(shapes, SHAPES_WITH_FILL)
@@ -401,6 +399,8 @@ export const ShapeInspector = track(function ShapeInspector() {
         top: `${y}px`,
         transform: `scale(${inspectorScale})`,
         transformOrigin: 'top left',
+        maxWidth: `${Math.max(180, viewport.w - INSPECTOR_SCREEN_MARGIN * 2)}px`,
+        maxHeight: `${Math.max(120, viewport.h - INSPECTOR_SCREEN_MARGIN * 2)}px`,
       }}
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}

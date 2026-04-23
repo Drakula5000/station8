@@ -837,7 +837,7 @@ html[data-mode="light"] {
    for color) and positions itself via ShapeInspector.jsx using page→screen
    coord conversion. */
 .shape-inspector {
-  position: absolute;
+  position: fixed;
   z-index: 500;
   background: var(--s8-modal-bg);
   border: 1px solid var(--s8-sidebar-border);
@@ -846,8 +846,6 @@ html[data-mode="light"] {
   padding: 14px 16px;
   display: flex; flex-direction: column; gap: 12px;
   width: 340px;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 32px);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   pointer-events: auto;
   overflow-y: auto;
