@@ -1350,6 +1350,11 @@ def _text_from_tldraw(snapshot):
             if name.strip():
                 out.append({'kind': 'frame', 'text': name.strip()})
         elif shape_type in ('image', 'video'):
+            # Extract alt text if present
+            alt_text = props.get('altText', '').strip()
+            if alt_text:
+                out.append({'kind': 'alt', 'text': alt_text})
+            # Extract OCR text from uploaded images
             asset_id = props.get('assetId')
             asset = assets.get(asset_id) if asset_id else None
             src = ((asset or {}).get('props') or {}).get('src') or ''
@@ -1400,20 +1405,46 @@ def _all_items(boards=None, sheets=None):
             }
 
 
-_model = None
+_vectorizer = None
+_corpus_texts = []
+_corpus_vectors = None
 
 
-def _embed(text):
-    global _model
+def _rebuild_tfidf_index(items):
+    """Rebuild TF-IDF index from current corpus."""
+    global _vectorizer, _corpus_texts, _corpus_vectors
     try:
-        if _model is None:
-            from sentence_transformers import SentenceTransformer
-            print('Loading embedding model…', flush=True)
-            _model = SentenceTransformer('all-MiniLM-L6-v2')
-        return _model.encode(text, convert_to_numpy=True, normalize_embeddings=True)
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
+        
+        _corpus_texts = [item['text'] for item in items]
+        if not _corpus_texts:
+            return
+        
+        _vectorizer = TfidfVectorizer(
+            max_features=5000,
+            stop_words='english',
+            ngram_range=(1, 2),
+            min_df=1,
+        )
+        _corpus_vectors = _vectorizer.fit_transform(_corpus_texts)
+        print(f'TF-IDF index built: {len(_corpus_texts)} documents', flush=True)
     except Exception as exc:
-        print(f'Embedding failed: {exc}', flush=True)
-        return None
+        print(f'TF-IDF indexing failed: {exc}', flush=True)
+
+
+def _tfidf_score(query, item_index):
+    """Compute TF-IDF cosine similarity between query and indexed item."""
+    global _vectorizer, _corpus_vectors
+    try:
+        from sklearn.metrics.pairwise import cosine_similarity
+        if _vectorizer is None or _corpus_vectors is None:
+            return 0.0
+        query_vector = _vectorizer.transform([query])
+        score = cosine_similarity(query_vector, _corpus_vectors[item_index])[0][0]
+        return float(score)
+    except Exception as exc:
+        return 0.0
 
 
 def _keyword(text, query):
@@ -1438,26 +1469,18 @@ def _search_payload(boards=None, sheets=None):
     if not items:
         return {'hits': []}
 
-    try:
-        import numpy as np
-        query_vector = _embed(query)
-    except Exception:
-        query_vector = None
+    # Rebuild TF-IDF index on each search (corpus changes frequently)
+    _rebuild_tfidf_index(items)
 
     hits = []
-    for item in items:
+    for idx, item in enumerate(items):
         keyword_score = _keyword(item['text'], query)
-        semantic_score = 0.0
-        if query_vector is not None:
-            try:
-                import numpy as np
-                item_vector = _embed(item['text'])
-                if item_vector is not None:
-                    semantic_score = float(np.dot(query_vector, item_vector))
-            except Exception:
-                pass
-        combined = keyword_score * 2.0 + semantic_score
-        if keyword_score > 0 or semantic_score > 0.35:
+        tfidf_score = _tfidf_score(query, idx)
+        
+        # Combine keyword (exact match) and TF-IDF (semantic similarity)
+        combined = keyword_score * 2.0 + tfidf_score * 3.0
+        
+        if keyword_score > 0 or tfidf_score > 0.1:
             hits.append({
                 'doc_type': item['doc_type'],
                 'doc_id': item['doc_id'],
@@ -1468,6 +1491,7 @@ def _search_payload(boards=None, sheets=None):
                     'text': 'text',
                     'frame': 'section',
                     'ocr': 'OCR from image',
+                    'alt': 'image alt text',
                     'sheet': 'spreadsheet cell',
                 }.get(item['kind'], item['kind']),
                 'score': combined,
