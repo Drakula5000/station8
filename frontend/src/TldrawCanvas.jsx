@@ -399,40 +399,92 @@ const FindBar = track(function FindBar({ query, onDismiss }) {
   const editor = useEditor()
   const [matches, setMatches] = useState([])
   const [matchIndex, setMatchIndex] = useState(0)
+  const [glowId, setGlowId] = useState(null)
+  const retryRef = useRef(null)
+
+  const applyGlow = useCallback((shapeId) => {
+    // Remove previous glow
+    document.querySelectorAll('[data-find-glow]').forEach(el => {
+      el.removeAttribute('data-find-glow')
+      el.style.removeProperty('--s8-find-glow')
+    })
+    if (!shapeId) return
+    setGlowId(shapeId)
+    // Apply glow after a frame so the shape is in view
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-shape-id="${shapeId}"]`)
+      if (el) {
+        el.setAttribute('data-find-glow', 'true')
+      }
+    })
+  }, [])
 
   const zoomToMatch = useCallback((editor, shapeId) => {
     const bounds = editor.getShapePageBounds(shapeId)
     if (!bounds || !(bounds.width > 0)) return
-    editor.zoomToBounds(bounds, { padding: 100, animation: { duration: 300 } })
-    editor.select(shapeId)
+    editor.zoomToBounds(bounds, { padding: 120, animation: { duration: 350 } })
+    editor.selectNone()
+    applyGlow(shapeId)
+  }, [applyGlow])
+
+  const buildMatches = useCallback((editor, q) => {
+    const allShapes = editor.getCurrentPageShapes()
+    return allShapes
+      .filter(s => extractShapeText(s).toLowerCase().includes(q))
+      .map(s => ({ shapeId: s.id }))
   }, [])
 
   useEffect(() => {
     if (!editor || !query) return
     const q = query.toLowerCase()
-    const allShapes = editor.getCurrentPageShapes()
-    const found = allShapes
-      .filter(s => extractShapeText(s).toLowerCase().includes(q))
-      .map(s => ({ shapeId: s.id }))
-    setMatches(found)
-    setMatchIndex(0)
-  }, [editor, query])
+
+    // Clear any pending retry
+    if (retryRef.current) clearTimeout(retryRef.current)
+
+    const tryMatch = (attempt = 0) => {
+      const found = buildMatches(editor, q)
+      if (found.length > 0) {
+        setMatches(found)
+        setMatchIndex(0)
+        return
+      }
+      // Board may still be loading — retry up to 15 times (1.5s)
+      if (attempt < 15) {
+        retryRef.current = setTimeout(() => tryMatch(attempt + 1), 100)
+      } else {
+        setMatches([])
+        setMatchIndex(0)
+      }
+    }
+
+    tryMatch()
+    return () => { if (retryRef.current) clearTimeout(retryRef.current) }
+  }, [editor, query, buildMatches])
 
   useEffect(() => {
     if (!editor || matches.length === 0) return
     zoomToMatch(editor, matches[matchIndex].shapeId)
   }, [editor, matches, matchIndex, zoomToMatch])
 
+  // Clean up glow on unmount
+  useEffect(() => {
+    return () => {
+      document.querySelectorAll('[data-find-glow]').forEach(el => {
+        el.removeAttribute('data-find-glow')
+      })
+    }
+  }, [])
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') {
-        editor.selectNone()
+        applyGlow(null)
         onDismiss()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editor, onDismiss])
+  }, [applyGlow, onDismiss])
 
   const goNext = () => {
     if (matches.length <= 1) return
@@ -449,7 +501,7 @@ const FindBar = track(function FindBar({ query, onDismiss }) {
   }
 
   const handleClose = () => {
-    editor.selectNone()
+    applyGlow(null)
     onDismiss()
   }
 
@@ -504,6 +556,15 @@ const FindBar = track(function FindBar({ query, onDismiss }) {
         .find-bar-btn:disabled {
           opacity: 0.35;
           cursor: default;
+        }
+        /* Glow highlight on matched shape */
+        [data-find-glow="true"] {
+          filter: drop-shadow(0 0 12px var(--s8-accent)) drop-shadow(0 0 24px var(--s8-accent));
+          animation: s8-find-glow-pulse 1.2s ease-in-out infinite;
+        }
+        @keyframes s8-find-glow-pulse {
+          0%, 100% { filter: drop-shadow(0 0 8px var(--s8-accent)) drop-shadow(0 0 20px var(--s8-accent)); }
+          50% { filter: drop-shadow(0 0 18px var(--s8-accent)) drop-shadow(0 0 36px var(--s8-accent)); }
         }
       `}</style>
       <div className="find-bar">

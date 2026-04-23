@@ -1786,9 +1786,9 @@ export default function App() {
                       } else {
                         const board = boards.find(item => item.id === r.doc_id)
                         openDocument('board', r.doc_id, board?.folder_id)
-                        if (activeId?.type === 'board' && r.doc_id === activeId.id) {
-                          setFindQuery(query)
-                        }
+                        // Always set findQuery for board results so FindBar activates
+                        // whether we're already on this board or navigating to it
+                        setFindQuery(query)
                       }
                       setSearchOpen(false)
                     }
