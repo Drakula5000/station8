@@ -159,7 +159,11 @@ export default function App() {
   const foldersRef = useRef([])
   const [expandedFolders, setExpandedFolders] = useState({})
   const [route, setRoute] = useState(() => parseRoute())
-  const [activeId, setActiveId] = useState(null)
+  // Initialize activeId from URL immediately to avoid flash of database home on refresh
+  const [activeId, setActiveId] = useState(() => {
+    const r = parseRoute()
+    return r.doc ? r.doc : null
+  })
   const activeIdRef = useRef(null)
   const [auth, setAuth] = useState({
     loading: true,
