@@ -1236,6 +1236,75 @@ def update_sheet(sheet_id):
 
 # ── Uploads + OCR ────────────────────────────────────────────────────────────
 
+# Images render on the canvas at a few hundred pixels wide at most. Full-res
+# phone photos (4000×3000, 2–3 MB PNG) are absurd overkill and dominate the
+# board-load time on any non-fast connection. Cap the largest dimension and
+# re-compress on upload so the wire payload shrinks 5–20×.
+IMAGE_MAX_DIMENSION = 2000
+IMAGE_JPEG_QUALITY = 85
+IMAGE_WEBP_QUALITY = 85
+
+
+def _png_has_transparency(img):
+    if img.mode == 'RGBA':
+        alpha = img.getchannel('A')
+        return alpha.getextrema()[0] < 255
+    if img.mode == 'LA':
+        return True
+    if img.mode == 'P' and 'transparency' in img.info:
+        return True
+    return False
+
+
+def _optimize_image(path, allow_rename=True):
+    """Resize and recompress an image in place. Returns the final path
+    (may differ from input if we converted an opaque PNG to JPEG and
+    allow_rename is True), or None on failure. Safe to call repeatedly.
+
+    allow_rename=False keeps the filename stable — use this for existing
+    uploads already referenced by board snapshots. New uploads can rename
+    freely since the returned URL is what the client stores."""
+    try:
+        from PIL import Image, ImageOps
+    except Exception:
+        return None
+    try:
+        with Image.open(path) as img:
+            img = ImageOps.exif_transpose(img)
+            ext = os.path.splitext(path)[1].lower()
+            width, height = img.size
+            longest = max(width, height)
+            if longest > IMAGE_MAX_DIMENSION:
+                scale = IMAGE_MAX_DIMENSION / longest
+                img = img.resize((int(width * scale), int(height * scale)), Image.LANCZOS)
+
+            if ext == '.png' and allow_rename and not _png_has_transparency(img):
+                # Opaque PNG → JPEG is typically a 5–10× size win for photos.
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                new_path = os.path.splitext(path)[0] + '.jpg'
+                img.save(new_path, format='JPEG', quality=IMAGE_JPEG_QUALITY, optimize=True, progressive=True)
+                if new_path != path and os.path.exists(path):
+                    os.remove(path)
+                return new_path
+
+            if ext in ('.jpg', '.jpeg'):
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                img.save(path, format='JPEG', quality=IMAGE_JPEG_QUALITY, optimize=True, progressive=True)
+                return path
+            if ext == '.png':
+                img.save(path, format='PNG', optimize=True, compress_level=9)
+                return path
+            if ext == '.webp':
+                img.save(path, format='WEBP', quality=IMAGE_WEBP_QUALITY, method=6)
+                return path
+            return None
+    except Exception as exc:
+        print(f"Image optimize failed for {path}: {exc}", flush=True)
+        return None
+
+
 def _run_ocr(path):
     """Extract text from an image. Preprocesses (upscale → grayscale → autocontrast)
     so Tesseract handles subtitles, signage, and low-res screenshots reliably.
@@ -1290,6 +1359,12 @@ def upload_image():
     filename = str(uuid.uuid4()) + ext
     path = os.path.join(UPLOADS_DIR, filename)
     uploaded.save(path)
+
+    optimized_path = _optimize_image(path)
+    if optimized_path:
+        path = optimized_path
+        filename = os.path.basename(path)
+        ext = os.path.splitext(filename)[1].lower()
 
     # Upload to Supabase Storage
     if supabase:
@@ -1367,6 +1442,142 @@ def rebuild_ocr():
         'empty': len(empty),
         'failed': len(failed),
         'samples': hits[:10],
+    })
+
+
+def _rewrite_board_upload_refs(renames):
+    """Rewrite `/uploads/X` references inside every board snapshot according
+    to the `{old_name: new_name}` rename map. Also migrates OCR entries."""
+    if not renames:
+        return 0
+    touched_boards = 0
+    for board in _load_boards():
+        board_id = board.get('id')
+        if not board_id:
+            continue
+        data = _load(_board_file(board_id), {'snapshot': None})
+        try:
+            blob = json.dumps(data)
+        except Exception:
+            continue
+        original = blob
+        for old, new in renames.items():
+            blob = blob.replace(f'/uploads/{old}', f'/uploads/{new}')
+        if blob != original:
+            try:
+                _save(_board_file(board_id), json.loads(blob))
+                touched_boards += 1
+            except Exception as exc:
+                print(f'board {board_id} rewrite failed: {exc}', flush=True)
+    ocr = _load(OCR_FILE, {})
+    ocr_dirty = False
+    for old, new in renames.items():
+        if old in ocr:
+            ocr[new] = ocr.pop(old)
+            ocr_dirty = True
+    if ocr_dirty:
+        _save(OCR_FILE, ocr)
+    return touched_boards
+
+
+@app.route('/api/images/optimize', methods=['POST'])
+@_studio_auth_required
+def optimize_existing_images():
+    """Re-compress every image in the uploads bucket / dir with the same
+    pipeline used on upload. Owner-only. Run once after deploying the
+    optimizer to shrink images that were uploaded before compression was
+    wired in. Opaque PNGs are converted to JPEG (huge size win) and board
+    snapshots that reference them are rewritten in place."""
+    exts = {'.jpg', '.jpeg', '.png', '.webp'}
+    filenames = set()
+
+    if os.path.isdir(UPLOADS_DIR):
+        for entry in os.scandir(UPLOADS_DIR):
+            if entry.is_file() and os.path.splitext(entry.name)[1].lower() in exts:
+                filenames.add(entry.name)
+
+    if supabase:
+        try:
+            listed = supabase.storage.from_('uploads').list()
+            for item in listed or []:
+                name = item.get('name') if isinstance(item, dict) else None
+                if name and os.path.splitext(name)[1].lower() in exts:
+                    filenames.add(name)
+        except Exception as exc:
+            print(f'Supabase list failed during image optimize: {exc}', flush=True)
+
+    optimized = []
+    skipped = []
+    failed = []
+    renames = {}
+
+    for name in sorted(filenames):
+        local_path = os.path.join(UPLOADS_DIR, name)
+        if not os.path.exists(local_path) and supabase:
+            try:
+                blob = supabase.storage.from_('uploads').download(name)
+                os.makedirs(UPLOADS_DIR, exist_ok=True)
+                with open(local_path, 'wb') as f:
+                    f.write(blob)
+            except Exception as exc:
+                print(f'Supabase download failed for {name}: {exc}', flush=True)
+                failed.append(name)
+                continue
+
+        before = os.path.getsize(local_path)
+        new_path = _optimize_image(local_path, allow_rename=True)
+        if not new_path:
+            skipped.append(name)
+            continue
+
+        new_name = os.path.basename(new_path)
+        after = os.path.getsize(new_path)
+
+        if supabase:
+            new_ext = os.path.splitext(new_name)[1].lower().lstrip('.')
+            content_type = f'image/{"jpeg" if new_ext == "jpg" else new_ext}'
+            try:
+                with open(new_path, 'rb') as f:
+                    supabase.storage.from_('uploads').upload(
+                        path=new_name,
+                        file=f,
+                        file_options={'content-type': content_type, 'upsert': 'true'},
+                    )
+            except Exception as exc:
+                print(f'Supabase re-upload failed for {new_name}: {exc}', flush=True)
+                failed.append(name)
+                continue
+
+            if new_name != name:
+                try:
+                    supabase.storage.from_('uploads').remove([name])
+                except Exception as exc:
+                    print(f'Supabase old-blob delete failed for {name}: {exc}', flush=True)
+
+        with _signed_url_lock:
+            _signed_url_cache.pop(name, None)
+            _signed_url_cache.pop(new_name, None)
+
+        if new_name != name:
+            renames[name] = new_name
+        optimized.append({'filename': name, 'new_filename': new_name, 'before': before, 'after': after})
+
+    touched_boards = _rewrite_board_upload_refs(renames)
+
+    total_before = sum(item['before'] for item in optimized)
+    total_after = sum(item['after'] for item in optimized)
+
+    return jsonify({
+        'total_images': len(filenames),
+        'optimized': len(optimized),
+        'renamed': len(renames),
+        'boards_rewritten': touched_boards,
+        'skipped': len(skipped),
+        'failed': len(failed),
+        'bytes_before': total_before,
+        'bytes_after': total_after,
+        'bytes_saved': total_before - total_after,
+        'samples': optimized[:10],
     })
 
 

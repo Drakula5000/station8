@@ -50,6 +50,11 @@ ResearchHub.app/
 # Private folder
 private/
 
+# Local Supabase backups + ops secrets
+backups/
+ops/.backup-env
+ops/.env*
+
 # Internal docs and mockups (not for public repo)
 docs/
 mockups/
