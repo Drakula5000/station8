@@ -558,13 +558,25 @@ const FindBar = track(function FindBar({ query, onDismiss }) {
           cursor: default;
         }
         /* Glow highlight on matched shape */
-        [data-find-glow="true"] {
-          filter: drop-shadow(0 0 12px var(--s8-accent)) drop-shadow(0 0 24px var(--s8-accent));
+        [data-find-glow="true"] .tl-shape,
+        [data-find-glow="true"] .tl-note__container,
+        [data-find-glow="true"] .tl-html-container,
+        [data-find-glow="true"] .tl-geo {
+          outline: 3px solid var(--s8-accent) !important;
+          outline-offset: 4px !important;
+          box-shadow: 0 0 0 6px color-mix(in srgb, var(--s8-accent) 30%, transparent),
+                      0 0 20px 4px color-mix(in srgb, var(--s8-accent) 40%, transparent) !important;
           animation: s8-find-glow-pulse 1.2s ease-in-out infinite;
         }
         @keyframes s8-find-glow-pulse {
-          0%, 100% { filter: drop-shadow(0 0 8px var(--s8-accent)) drop-shadow(0 0 20px var(--s8-accent)); }
-          50% { filter: drop-shadow(0 0 18px var(--s8-accent)) drop-shadow(0 0 36px var(--s8-accent)); }
+          0%, 100% { 
+            box-shadow: 0 0 0 4px color-mix(in srgb, var(--s8-accent) 25%, transparent),
+                        0 0 16px 2px color-mix(in srgb, var(--s8-accent) 35%, transparent);
+          }
+          50% { 
+            box-shadow: 0 0 0 8px color-mix(in srgb, var(--s8-accent) 40%, transparent),
+                        0 0 32px 8px color-mix(in srgb, var(--s8-accent) 50%, transparent);
+          }
         }
       `}</style>
       <div className="find-bar">
@@ -594,7 +606,45 @@ const FindBar = track(function FindBar({ query, onDismiss }) {
   )
 })
 
-const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
+// Watches for broken image elements inside tldraw shapes and retries loading
+// them with exponential backoff. Handles Render cold-start failures where
+// /uploads/ returns 404 or 500 while the server is waking up.
+const BrokenImageRetry = track(function BrokenImageRetry() {
+  const editor = useEditor()
+  const shapes = editor.getCurrentPageShapes().filter(s => s.type === 'image')
+
+  useEffect(() => {
+    if (shapes.length === 0) return
+    const timers = []
+
+    shapes.forEach(shape => {
+      const el = document.querySelector(`[data-shape-id="${shape.id}"] img`)
+      if (!el || el.complete && el.naturalWidth > 0) return
+      // Image is broken or not loaded — set up retry
+      const retry = (attempt = 0) => {
+        if (!el || el.naturalWidth > 0) return
+        const delay = Math.min(1000 * Math.pow(2, attempt), 16000)
+        const t = setTimeout(() => {
+          if (el.naturalWidth > 0) return
+          const src = el.src
+          el.src = ''
+          requestAnimationFrame(() => { el.src = src })
+          if (attempt < 5) retry(attempt + 1)
+        }, delay)
+        timers.push(t)
+      }
+      if (el.complete && el.naturalWidth === 0) {
+        retry(0)
+      } else {
+        el.addEventListener('error', () => retry(0), { once: true })
+      }
+    })
+
+    return () => timers.forEach(clearTimeout)
+  })
+
+  return null
+})
   const editor = useEditor()
   const [stickyPickerOpen, setStickyPickerOpen] = useState(false)
   const [sectionPickerOpen, setSectionPickerOpen] = useState(false)
@@ -1251,6 +1301,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         {!readOnly && <ShapeInspector />}
         <FrameCornerStyles />
         <ImageShapeStyles />
+        <BrokenImageRetry />
         <ListStyles />
         <ShapeColorSync />
         {findQuery && <FindBar query={findQuery} onDismiss={onFindDismiss} />}
