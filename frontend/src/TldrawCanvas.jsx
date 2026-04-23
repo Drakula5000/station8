@@ -68,6 +68,7 @@ const STICKY_SWATCHES = {
 // tldraw NOTE_SIZE is hardcoded at 200 canvas units; scale it down on placement
 const NOTE_DEFAULT_SCALE = 0.6
 const MAX_DROPPED_IMAGE_VIEWPORT_FRACTION = 0.2
+const MAX_DROPPED_IMAGE_FRAME_FRACTION = 0.2
 const FRAME_DROPPED_IMAGE_INSET = 32
 
 const FRAME_SHAPE_UTILS = [FrameShapeUtil.configure({ showColors: true })]
@@ -92,8 +93,10 @@ function getDroppedImageResize(editor, shape) {
 
   const parent = editor.getShapeParent(shape)
   if (parent?.type === 'frame') {
-    maxW = Math.min(maxW, Math.max(1, parent.props.w - FRAME_DROPPED_IMAGE_INSET * 2))
-    maxH = Math.min(maxH, Math.max(1, parent.props.h - FRAME_DROPPED_IMAGE_INSET * 2))
+    const frameInnerW = Math.max(1, parent.props.w - FRAME_DROPPED_IMAGE_INSET * 2)
+    const frameInnerH = Math.max(1, parent.props.h - FRAME_DROPPED_IMAGE_INSET * 2)
+    maxW = Math.min(maxW, frameInnerW * MAX_DROPPED_IMAGE_FRAME_FRACTION)
+    maxH = Math.min(maxH, frameInnerH * MAX_DROPPED_IMAGE_FRAME_FRACTION)
   }
 
   const resized = getContainedDimensions(width, height, maxW, maxH)
