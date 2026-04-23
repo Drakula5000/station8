@@ -167,18 +167,32 @@ function restoreBoardViewAfterLoad(editor, camera) {
 }
 
 function fitBoardAfterOpen(editor) {
-  const fit = () => {
-    if (editor.getCurrentPageBounds()) {
+  // Wait for tldraw to finish rendering shapes before fitting.
+  // We poll getCurrentPageBounds() until it returns a non-empty result,
+  // then zoom to fit. This handles large boards where shapes take time to lay out.
+  let attempts = 0
+  const MAX_ATTEMPTS = 20
+  const INTERVAL_MS = 80
+
+  const tryFit = () => {
+    const bounds = editor.getCurrentPageBounds()
+    if (bounds && bounds.width > 0 && bounds.height > 0) {
       editor.zoomToFit({ immediate: true, inset: 96 })
+      return
+    }
+    attempts++
+    if (attempts < MAX_ATTEMPTS) {
+      window.setTimeout(tryFit, INTERVAL_MS)
     } else {
+      // Fallback: reset to origin if content never appeared
       editor.setCamera({ x: 0, y: 0, z: 1 }, { immediate: true })
     }
   }
 
+  // Start after two animation frames to let tldraw mount shapes
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      fit()
-      window.setTimeout(fit, 80)
+      tryFit()
     })
   })
 }
