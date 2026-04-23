@@ -1837,3 +1837,25 @@ html[data-mode="light"] {
 .tldraw-wrap .tl-theme__dark [data-tl-color='white'] .tl-note__container {
   background-color: #FFFFFF !important;
 }
+
+/* Nested list styling: proper numbering hierarchy */
+/* Bullet lists: •, ◦, ▪ at each level */
+.tldraw-wrap ul { list-style-type: disc; }
+.tldraw-wrap ul ul { list-style-type: circle; }
+.tldraw-wrap ul ul ul { list-style-type: square; }
+.tldraw-wrap ul ul ul ul { list-style-type: disc; }
+
+/* Ordered lists: 1 → a → i → 1 */
+.tldraw-wrap ol { list-style-type: decimal; }
+.tldraw-wrap ol ol { list-style-type: lower-alpha; }
+.tldraw-wrap ol ol ol { list-style-type: lower-roman; }
+.tldraw-wrap ol ol ol ol { list-style-type: decimal; }
+
+/* Indentation for nested lists */
+.tldraw-wrap ul ul,
+.tldraw-wrap ul ol,
+.tldraw-wrap ol ul,
+.tldraw-wrap ol ol {
+  margin-left: 1.5em;
+  padding-left: 0;
+}

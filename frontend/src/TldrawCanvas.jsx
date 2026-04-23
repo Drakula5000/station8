@@ -244,6 +244,31 @@ const ImageShapeStyles = track(function ImageShapeStyles() {
   return <style>{css}</style>
 })
 
+const ListStyles = track(function ListStyles() {
+  const editor = useEditor()
+  const shapesWithLists = editor.getCurrentPageShapes().filter((s) => {
+    return (s.type === 'note' || s.type === 'text') && s.meta?.listStyle
+  })
+  if (shapesWithLists.length === 0) return null
+
+  const css = shapesWithLists.map((shape) => {
+    const id = shape.id
+    const listStyle = shape.meta.listStyle
+    if (listStyle === 'roman') {
+      // Roman: I, II, III → a, b, c → i, ii, iii → 1, 2, 3
+      return [
+        `[data-shape-id="${id}"] ol { list-style-type: upper-roman !important; }`,
+        `[data-shape-id="${id}"] ol ol { list-style-type: lower-alpha !important; }`,
+        `[data-shape-id="${id}"] ol ol ol { list-style-type: lower-roman !important; }`,
+        `[data-shape-id="${id}"] ol ol ol ol { list-style-type: decimal !important; }`,
+      ].join('\n')
+    }
+    return ''
+  }).filter(Boolean).join('\n')
+
+  return css ? <style>{css}</style> : null
+})
+
 const SECTION_SWATCHES = {
   violet: { bg: '#ede8ff', stroke: '#7c5ce8', tl: 'violet' },   // aurora accent
   teal:   { bg: '#d8f5f0', stroke: '#15c4b0', tl: 'green' },    // aurora teal
@@ -732,10 +757,14 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         return
       }
 
-      if (e.key !== 'Backspace' && e.key !== 'Delete') return
       // Prevent the browser from interpreting macOS Delete / Backspace as history navigation
-      // while a board is open. Tldraw still receives the event and deletes selected shapes.
-      e.preventDefault()
+      // while a board is open, but only when NOT in an editable field (where Delete should work normally)
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        // Don't prevent default if we're typing in an editable element
+        if (!isEditableTarget(e.target)) {
+          e.preventDefault()
+        }
+      }
     }
 
     window.addEventListener('keydown', onKeyDown)
@@ -866,6 +895,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         {!readOnly && <ShapeInspector />}
         <FrameCornerStyles />
         <ImageShapeStyles />
+        <ListStyles />
         <ShapeColorSync />
       </Tldraw>
       {ghost && (

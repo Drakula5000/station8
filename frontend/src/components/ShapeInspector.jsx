@@ -57,6 +57,13 @@ const ALIGNS = [
   { id: 'end',    label: '⟶', title: 'Right' },
 ]
 
+const LIST_TYPES = [
+  { id: 'none', label: '—', title: 'No list' },
+  { id: 'bullet', label: '•', title: 'Bullet list' },
+  { id: 'ordered', label: '1.', title: 'Numbered list' },
+  { id: 'roman', label: 'I.', title: 'Roman numeral list' },
+]
+
 const CORNER_OPTIONS = [
   { id: 0,  cls: 'corner-swatch-0',  title: 'Sharp' },
   { id: 8,  cls: 'corner-swatch-8',  title: 'Soft' },
@@ -90,6 +97,7 @@ const SHAPES_WITH_ALIGN   = new Set(['note', 'geo', 'text'])
 const SHAPES_WITH_CORNERS = new Set(['frame'])
 const SHAPES_WITH_IMAGE_STYLING = new Set(['image'])
 const SHAPES_WITH_FREEFORM_TEXT_SIZE = new Set(['text'])
+const SHAPES_WITH_LISTS = new Set(['note', 'text'])
 
 function allShapesMatch(shapes, set) {
   return shapes.length > 0 && shapes.every((s) => set.has(s.type))
@@ -162,6 +170,72 @@ function getNearestSizePreset(sizePx) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max)
+}
+
+// Detect the active list type from the richText JSON and shape meta
+function getListTypeFromShape(shape) {
+  const richText = shape.props?.richText
+  if (!richText?.content) return 'none'
+  const firstBlock = richText.content[0]
+  if (!firstBlock) return 'none'
+  if (firstBlock.type === 'bulletList') return 'bullet'
+  if (firstBlock.type === 'orderedList') {
+    // Check shape meta for list style
+    if (shape.meta?.listStyle === 'roman') return 'roman'
+    return 'ordered'
+  }
+  return 'none'
+}
+
+// Get shared list type across all selected shapes (undefined = mixed)
+function getSharedListType(shapes) {
+  if (shapes.length === 0) return 'none'
+  const first = getListTypeFromShape(shapes[0])
+  return shapes.every(s => getListTypeFromShape(s) === first) ? first : undefined
+}
+
+// Convert a richText doc's paragraphs into a bulletList or orderedList node,
+// or unwrap back to plain paragraphs.
+function convertRichTextToList(richText, listType) {
+  const doc = richText ?? { type: 'doc', content: [{ type: 'paragraph' }] }
+  const content = doc.content ?? []
+
+  if (listType === 'none') {
+    // Unwrap: flatten all listItem > paragraph content back to paragraphs
+    const paragraphs = []
+    for (const block of content) {
+      if (block.type === 'bulletList' || block.type === 'orderedList') {
+        for (const item of block.content ?? []) {
+          for (const para of item.content ?? []) {
+            paragraphs.push(para)
+          }
+        }
+      } else {
+        paragraphs.push(block)
+      }
+    }
+    return { ...doc, content: paragraphs.length > 0 ? paragraphs : [{ type: 'paragraph' }] }
+  }
+
+  // Wrap: collect all top-level paragraphs into listItems
+  const listItems = []
+  for (const block of content) {
+    if (block.type === 'bulletList' || block.type === 'orderedList') {
+      // Re-wrap existing list items under new list type
+      for (const item of block.content ?? []) {
+        listItems.push(item)
+      }
+    } else {
+      listItems.push({ type: 'listItem', content: [block] })
+    }
+  }
+  
+  const listNode = {
+    type: listType === 'bullet' ? 'bulletList' : 'orderedList',
+    content: listItems.length > 0 ? listItems : [{ type: 'listItem', content: [{ type: 'paragraph' }] }],
+  }
+  
+  return { ...doc, content: [listNode] }
 }
 
 export const ShapeInspector = track(function ShapeInspector() {
@@ -248,6 +322,7 @@ export const ShapeInspector = track(function ShapeInspector() {
   const showGeoCorners = allCorneredGeoShapes(shapes)
   const showImageStyling = allShapesMatch(shapes, SHAPES_WITH_IMAGE_STYLING)
   const showTextSizeInput = allShapesMatch(shapes, SHAPES_WITH_FREEFORM_TEXT_SIZE)
+  const showLists = allShapesMatch(shapes, SHAPES_WITH_LISTS)
 
   const activeColor = sharedStyle(editor, DefaultColorStyle)
   const activeFillStyle = sharedStyle(editor, DefaultFillStyle)
@@ -281,6 +356,7 @@ export const ShapeInspector = track(function ShapeInspector() {
     (s) => Number(getGeoFillOpacity(s)) === Number(getGeoFillOpacity(shapes[0]))
   ) ? Number(getGeoFillOpacity(shapes[0])) : undefined
   const activeSizeButton = showTextSizeInput ? getPresetSizeId(activeTextSizePx) : activeSize
+  const activeListType = showLists ? getSharedListType(shapes) : 'none'
 
   const applyColor  = (tl) => editor.setStyleForSelectedShapes(DefaultColorStyle, tl)
   const applyFillColor = (color) => editor.run(() => {
@@ -389,6 +465,21 @@ export const ShapeInspector = track(function ShapeInspector() {
   const applyImageBorderColor = (color) => editor.updateShapes(
     shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, imageBorderColor: color } }))
   )
+  const applyListType = (listType) => {
+    editor.updateShapes(
+      shapes.map(s => ({
+        id: s.id,
+        type: s.type,
+        props: {
+          richText: convertRichTextToList(s.props?.richText, listType),
+        },
+        meta: {
+          ...s.meta,
+          listStyle: listType === 'roman' ? 'roman' : listType === 'ordered' ? 'decimal' : null,
+        },
+      }))
+    )
+  }
 
   return (
     <div
@@ -530,6 +621,23 @@ export const ShapeInspector = track(function ShapeInspector() {
                 title={a.title}
                 type="button"
               >{a.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showLists && (
+        <div className="insp-row">
+          <div className="insp-label">List</div>
+          <div className="insp-body">
+            {LIST_TYPES.map((list) => (
+              <button
+                key={list.id}
+                className={`insp-btn ${activeListType === list.id ? 'active' : ''}`}
+                onClick={() => applyListType(list.id)}
+                title={list.title}
+                type="button"
+              >{list.label}</button>
             ))}
           </div>
         </div>
