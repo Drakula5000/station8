@@ -249,13 +249,18 @@ export default function App() {
     let cancelled = false
     const ping = async () => {
       try {
-        const res = await fetch(`${API}/api/auth/status`, { credentials: 'include' })
+        // Ping the workspace endpoint — only resolves when the full app is ready
+        const res = await fetch(`${API}/api/visitor/workspace`, { credentials: 'include' })
         if (!cancelled && res.ok) {
-          setBackendStatus('ready')
-          backendReadyRef.current = true
-        } else if (!cancelled) {
-          setTimeout(ping, 3000)
+          const data = await res.json()
+          // Only mark ready if we got a real workspace response
+          if (data && !cancelled) {
+            setBackendStatus('ready')
+            backendReadyRef.current = true
+            return
+          }
         }
+        if (!cancelled) setTimeout(ping, 3000)
       } catch {
         if (!cancelled) setTimeout(ping, 3000)
       }
@@ -533,6 +538,7 @@ export default function App() {
       return
     }
     if (!viewerMode) return
+    if (backendStatus !== 'ready') return
     const url = viewerMode === 'share'
       ? `${API}/api/share/${route.shareToken}/search`
       : viewerMode === 'visitor'
