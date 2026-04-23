@@ -455,7 +455,7 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
         setMatchIndex(0)
         return
       }
-      if (attempt < 15) {
+      if (attempt < 30) {
         retryRef.current = setTimeout(() => tryMatch(attempt + 1), 100)
       } else {
         setMatches([])

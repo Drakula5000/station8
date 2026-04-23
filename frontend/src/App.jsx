@@ -730,6 +730,15 @@ export default function App() {
         credentials: 'include',
       })
       if (!res.ok) throw new Error('logout failed')
+      // Clear all saved board views so next login starts with fit-to-content
+      try {
+        const keysToRemove = []
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const k = sessionStorage.key(i)
+          if (k && k.startsWith('s8.boardView.')) keysToRemove.push(k)
+        }
+        keysToRemove.forEach(k => sessionStorage.removeItem(k))
+      } catch { /* ignore */ }
       setBoards([])
       setSheets([])
       setFolders([])
@@ -945,23 +954,37 @@ export default function App() {
   const hasWorkspaceItems = rootFolders.some(folder => !tagFilter || folderHasVisibleContent(folder.id)) || rootDocs.length > 0
 
   const databaseItems = query.trim()
-    ? results.map((hit, index) => {
-      const doc = hit.kind === 'sheet'
-        ? sheets.find(item => item.id === hit.doc_id)
-        : boards.find(item => item.id === hit.doc_id)
-      if (!doc) return null
-      return {
-        key: `${hit.doc_id}-${index}`,
-        type: hit.kind === 'sheet' ? 'sheet' : 'board',
-        docId: hit.doc_id,
-        name: hit.doc_name,
-        snippet: hit.snippet,
-        source: hit.source,
-        createdAt: doc.created_at,
-        folderPath: buildFolderPath(doc.folder_id, folderById),
-        tags: doc.tags || [],
+    ? (() => {
+      // Deduplicate by doc_id — keep the highest-scoring hit per doc,
+      // but collect all snippets/sources to show the best one
+      const seen = new Map()
+      for (const hit of results) {
+        const doc = hit.kind === 'sheet'
+          ? sheets.find(item => item.id === hit.doc_id)
+          : boards.find(item => item.id === hit.doc_id)
+        if (!doc) continue
+        if (!seen.has(hit.doc_id)) {
+          seen.set(hit.doc_id, {
+            key: hit.doc_id,
+            type: hit.kind === 'sheet' ? 'sheet' : 'board',
+            docId: hit.doc_id,
+            name: hit.doc_name,
+            snippet: hit.snippet,
+            source: hit.source,
+            score: hit.score,
+            createdAt: doc.created_at,
+            folderPath: buildFolderPath(doc.folder_id, folderById),
+            tags: doc.tags || [],
+          })
+        }
+        // If this hit has a better snippet (higher score), use it
+        else if (hit.score > seen.get(hit.doc_id).score) {
+          const existing = seen.get(hit.doc_id)
+          seen.set(hit.doc_id, { ...existing, snippet: hit.snippet, source: hit.source, score: hit.score })
+        }
       }
-    }).filter(Boolean)
+      return [...seen.values()]
+    })()
     : sortDocs([
       ...boards.map(board => ({ ...board, type: 'board' })),
       ...sheets.map(sheet => ({ ...sheet, type: 'sheet' })),
