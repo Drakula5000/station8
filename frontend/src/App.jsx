@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import Spreadsheet from 'react-spreadsheet'
 import TldrawCanvas from './TldrawCanvas'
+import { applyTldrawPalette } from './themePalettes'
 import { ThemePicker, BOARD_THEMES, VISITOR_RANDOM_POOL } from './components/ThemePicker'
 import {
   BoardIcon, SheetIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon,
@@ -31,9 +32,10 @@ function applyHtmlTheme(themeId) {
 }
 
 /**
- * Session-scoped random theme for visitor database/auth views. Picks once per
- * tab and persists in sessionStorage so navigation stays stable; closing the
- * tab rerolls on next visit.
+ * Session-scoped random theme for auth / loading / visitor database views.
+ * Picks once per tab, persists in sessionStorage so navigation stays stable;
+ * closing the tab rerolls on next visit. Owners pass through the auth page
+ * too, so this applies universally pre-login.
  */
 function getVisitorSessionTheme() {
   try {
@@ -45,6 +47,19 @@ function getVisitorSessionTheme() {
   } catch {
     return DEFAULT_BOARD_THEME
   }
+}
+
+// Apply the session theme on module load — before React mounts — so the
+// auth / loading screens never render a single frame of Aurora before the
+// real theme takes over. Also mutate the tldraw palette so the first
+// <TldrawCanvas> mount gets correct shape hexes. The React effect below
+// refines both once the auth + active-board state settles.
+if (typeof document !== 'undefined') {
+  try {
+    const initial = getVisitorSessionTheme()
+    applyHtmlTheme(initial)
+    applyTldrawPalette(initial)
+  } catch { /* pre-render environments have no document */ }
 }
 const DEFAULT_SHEET = [
   [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
@@ -336,21 +351,25 @@ export default function App() {
     : null
 
   // ── Per-board theming ──
-  // visitors get a stable per-tab random theme for auth + database-home;
-  // owners get each board's stored theme (or the default) when a board is open.
-  const visitorSessionTheme = useMemo(
-    () => (readOnly ? getVisitorSessionTheme() : null),
-    [readOnly]
-  )
+  // Board open (owner or visitor): the board's theme wins.
+  // Owner workspace (logged in, no board open): default to Glass.
+  // Everyone else — auth, loading, visitor database home, share links without
+  // an active board — gets the session-random theme so no screen falls back
+  // to plain Aurora.
+  const sessionTheme = useMemo(() => getVisitorSessionTheme(), [])
   const activeBoardTheme = activeBoard?.theme || null
   const effectiveTheme = useMemo(() => {
     if (activeBoard) return activeBoardTheme || DEFAULT_BOARD_THEME
-    if (readOnly) return visitorSessionTheme
-    return null
-  }, [activeBoard, activeBoardTheme, readOnly, visitorSessionTheme])
+    if (viewerMode === 'owner') return DEFAULT_BOARD_THEME
+    return sessionTheme
+  }, [activeBoard, activeBoardTheme, viewerMode, sessionTheme])
 
   useEffect(() => {
     applyHtmlTheme(effectiveTheme)
+    // Mutate tldraw's global DefaultColorThemePalette so every shape (note,
+    // frame, arrow, line, draw, geo, text) paints with this theme's hexes.
+    // The <TldrawCanvas> keys on effectiveTheme below, so shapes re-render.
+    applyTldrawPalette(effectiveTheme)
   }, [effectiveTheme])
 
   const updateActiveBoardTheme = useCallback(async (themeId) => {
@@ -1112,6 +1131,22 @@ export default function App() {
     }, 3000)
   }
 
+  const [ocrRebuilding, setOcrRebuilding] = useState(false)
+  const rebuildImageSearch = async () => {
+    if (ocrRebuilding) return
+    setOcrRebuilding(true)
+    try {
+      const res = await fetch(`${API}/api/ocr/rebuild`, { method: 'POST', credentials: 'include' })
+      if (!res.ok) throw new Error('rebuild failed')
+      const data = await res.json()
+      showError(`Re-scanned ${data.total_images} images · ${data.with_text} with text, ${data.empty} blank`)
+    } catch {
+      showError('Could not rescan images right now.')
+    } finally {
+      setOcrRebuilding(false)
+    }
+  }
+
   const clearDragState = () => {
     dragItemRef.current = null
     setDragItem(null)
@@ -1444,6 +1479,15 @@ export default function App() {
           <div className="sidebar-footer">
             <button
               className="sidebar-mode-btn"
+              onClick={rebuildImageSearch}
+              disabled={ocrRebuilding}
+              title="Re-read text from every uploaded image. Run after deploying or if image search is missing words."
+              type="button"
+            >
+              {ocrRebuilding ? '◐ Rescanning images…' : '◑ Rescan image text'}
+            </button>
+            <button
+              className="sidebar-mode-btn"
               onClick={() => setColorMode(m => m === 'dark' ? 'light' : 'dark')}
               title={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               type="button"
@@ -1623,7 +1667,7 @@ export default function App() {
             <div className="work-area">
               {activeId?.type === 'board' && (
                 <TldrawCanvas
-                  key={activeId.id}
+                  key={`${activeId.id}:${effectiveTheme}`}
                   boardId={activeId.id}
                   readOnly={readOnly}
                   viewerMode={viewerMode}
