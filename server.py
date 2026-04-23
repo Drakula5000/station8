@@ -1237,13 +1237,42 @@ def update_sheet(sheet_id):
 # ── Uploads + OCR ────────────────────────────────────────────────────────────
 
 def _run_ocr(path):
+    """Extract text from an image. Preprocesses (upscale → grayscale → autocontrast)
+    so Tesseract handles subtitles, signage, and low-res screenshots reliably.
+    Runs LSTM engine at two page-segmentation modes and keeps the richer result.
+    """
     try:
         import pytesseract
-        from PIL import Image
-        text = pytesseract.image_to_string(Image.open(path))
-        return re.sub(r'\s+', ' ', text).strip()
+        from PIL import Image, ImageOps
+
+        img = Image.open(path)
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+
+        # Upscale small images so small / video-overlay text hits Tesseract's sweet spot
+        target_w = 2000
+        if img.width < target_w:
+            scale = target_w / img.width
+            img = img.resize((int(img.width * scale), int(img.height * scale)), Image.LANCZOS)
+
+        gray = ImageOps.grayscale(img)
+        enhanced = ImageOps.autocontrast(gray, cutoff=2)
+
+        # PSM 3 = auto page segmentation; PSM 11 = sparse scattered text (signage, subtitles).
+        # Run both, keep the richer result.
+        results = []
+        for psm in (3, 11):
+            try:
+                text = pytesseract.image_to_string(enhanced, config=f'--oem 1 --psm {psm}')
+                text = re.sub(r'\s+', ' ', text).strip()
+                results.append(text)
+            except Exception:
+                continue
+        if not results:
+            return ''
+        return max(results, key=len)
     except Exception as exc:
-        print(f'OCR failed: {exc}', flush=True)
+        print(f'OCR failed on {path}: {exc}', flush=True)
         return ''
 
 
@@ -1278,6 +1307,67 @@ def upload_image():
     ocr[filename] = _run_ocr(path)
     _save(OCR_FILE, ocr)
     return jsonify({'filename': filename, 'url': f'/uploads/{filename}'}), 201
+
+
+@app.route('/api/ocr/rebuild', methods=['POST'])
+@_studio_auth_required
+def rebuild_ocr():
+    """Re-run OCR on every image in UPLOADS_DIR (pulling from Supabase if the
+    file isn't on local disk) and persist results to ocr.json. Owner-only.
+    Intended to be clicked once after deploying a Tesseract-capable image or
+    after tuning OCR preprocessing.
+    """
+    exts = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+    filenames = set()
+
+    if os.path.isdir(UPLOADS_DIR):
+        for entry in os.scandir(UPLOADS_DIR):
+            if entry.is_file() and os.path.splitext(entry.name)[1].lower() in exts:
+                filenames.add(entry.name)
+
+    if supabase:
+        try:
+            listed = supabase.storage.from_('uploads').list()
+            for item in listed or []:
+                name = item.get('name') if isinstance(item, dict) else None
+                if name and os.path.splitext(name)[1].lower() in exts:
+                    filenames.add(name)
+        except Exception as exc:
+            print(f'Supabase list failed during OCR rebuild: {exc}', flush=True)
+
+    ocr = _load(OCR_FILE, {})
+    hits = []
+    empty = []
+    failed = []
+
+    for name in sorted(filenames):
+        local_path = os.path.join(UPLOADS_DIR, name)
+        if not os.path.exists(local_path) and supabase:
+            try:
+                blob = supabase.storage.from_('uploads').download(name)
+                os.makedirs(UPLOADS_DIR, exist_ok=True)
+                with open(local_path, 'wb') as f:
+                    f.write(blob)
+            except Exception as exc:
+                print(f'Supabase download failed for {name}: {exc}', flush=True)
+                failed.append(name)
+                continue
+        text = _run_ocr(local_path)
+        ocr[name] = text
+        if text:
+            hits.append({'filename': name, 'chars': len(text), 'preview': text[:80]})
+        else:
+            empty.append(name)
+
+    _save(OCR_FILE, ocr)
+
+    return jsonify({
+        'total_images': len(filenames),
+        'with_text': len(hits),
+        'empty': len(empty),
+        'failed': len(failed),
+        'samples': hits[:10],
+    })
 
 
 # Cache Supabase signed URLs so we don't generate a fresh one on every image
