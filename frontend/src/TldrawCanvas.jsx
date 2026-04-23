@@ -645,6 +645,8 @@ const BrokenImageRetry = track(function BrokenImageRetry() {
 
   return null
 })
+
+const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
   const editor = useEditor()
   const [stickyPickerOpen, setStickyPickerOpen] = useState(false)
   const [sectionPickerOpen, setSectionPickerOpen] = useState(false)
