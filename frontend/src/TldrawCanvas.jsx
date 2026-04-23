@@ -65,13 +65,18 @@ const STICKY_SWATCHES = {
   purple: { bg: '#B8A0F8', tl: 'violet' },
 }
 
-// tldraw NOTE_SIZE is hardcoded at 200 canvas units; scale it down on placement
-const NOTE_DEFAULT_SCALE = 0.6
+// tldraw NOTE_SIZE is hardcoded at 200 canvas units. Use dynamic size mode so
+// newly placed notes stay a consistent on-screen size across zoom levels.
+const NOTE_PREVIEW_SIZE = 200
 const MAX_DROPPED_IMAGE_VIEWPORT_FRACTION = 0.2
 const MAX_DROPPED_IMAGE_FRAME_FRACTION = 0.2
 const FRAME_DROPPED_IMAGE_INSET = 32
 
 const FRAME_SHAPE_UTILS = [FrameShapeUtil.configure({ showColors: true })]
+
+function getNotePreviewSizePx(editor) {
+  return NOTE_PREVIEW_SIZE * editor.getResizeScaleFactor() * editor.getZoomLevel()
+}
 
 function getContainedDimensions(w, h, maxW, maxH) {
   if (!(w > 0) || !(h > 0) || !(maxW > 0) || !(maxH > 0)) return null
@@ -129,6 +134,13 @@ const ShapeColorSync = track(function ShapeColorSync() {
         el.setAttribute('data-tl-color', color)
       } else {
         el.removeAttribute('data-tl-color')
+      }
+
+      const size = shape.props?.size
+      if (typeof size === 'string') {
+        el.setAttribute('data-s8-size', size)
+      } else {
+        el.removeAttribute('data-s8-size')
       }
 
       if (shape.type === 'geo') {
@@ -242,7 +254,6 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
   if (toolInfoRef) {
     toolInfoRef.current.tool = currentTool
     toolInfoRef.current.stickyColor = lastStickyColor
-    toolInfoRef.current.zoom = editor.getZoomLevel()
   }
 
   useEffect(() => {
@@ -595,6 +606,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   const cleanupRef = useRef(null)
   const wrapRef = useRef(null)
   const toolInfoRef = useRef({ tool: 'select', stickyColor: 'yellow' })
+  const pointerRef = useRef(null)
   const [ghost, setGhost] = useState(null) // { x, y, color } | null
 
   const editorRef = useRef(null)
@@ -634,14 +646,55 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       editorRef.current.user.updateUserPreferences({
         colorScheme: colorMode === 'light' ? 'light' : 'dark',
         isSnapMode: true,
+        isDynamicSizeMode: true,
       })
     }
   }, [colorMode])
 
+  const updateGhost = useCallback((clientX, clientY) => {
+    if (toolInfoRef.current.tool !== 'note') {
+      setGhost(null)
+      return
+    }
+    const rect = wrapRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setGhost({
+      x: clientX - rect.left,
+      y: clientY - rect.top,
+      color: toolInfoRef.current.stickyColor,
+    })
+  }, [])
+
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (e.key !== 'Backspace' && e.key !== 'Delete') return
       if (isEditableTarget(e.target)) return
+
+      const key = e.key.toLowerCase()
+      const hasAccel = e.metaKey || e.ctrlKey
+
+      if (!readOnly && hasAccel && key === 'z') {
+        e.preventDefault()
+        const editor = editorRef.current
+        if (!editor) return
+        editor.focus()
+        if (e.shiftKey) {
+          editor.redo()
+        } else {
+          editor.undo()
+        }
+        return
+      }
+
+      if (!readOnly && hasAccel && key === 'y') {
+        e.preventDefault()
+        const editor = editorRef.current
+        if (!editor) return
+        editor.focus()
+        editor.redo()
+        return
+      }
+
+      if (e.key !== 'Backspace' && e.key !== 'Delete') return
       // Prevent the browser from interpreting macOS Delete / Backspace as history navigation
       // while a board is open. Tldraw still receives the event and deletes selected shapes.
       e.preventDefault()
@@ -649,7 +702,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [readOnly])
 
   useEffect(() => () => {
     cleanupRef.current?.()
@@ -670,6 +723,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     editor.user.updateUserPreferences({
       colorScheme: colorModeRef.current === 'light' ? 'light' : 'dark',
       isSnapMode: true,
+      isDynamicSizeMode: true,
     })
     const bid = boardIdRef.current
     const ro = readOnlyRef.current
@@ -705,17 +759,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       { scope: 'document' }
     )
 
-    // Scale down newly placed notes; changes.added only fires for new shapes, not our own updateShape, so no loop
-    const cleanupScale = editor.store.listen((entry) => {
-      if (loadingRef.current) return
-      const newNotes = Object.values(entry.changes.added).filter(
-        r => r.typeName === 'shape' && r.type === 'note'
-      )
-      for (const note of newNotes) {
-        editor.updateShape({ id: note.id, type: 'note', props: { scale: NOTE_DEFAULT_SCALE } })
-      }
-    }, { source: 'user', scope: 'document' })
-
     const cleanupDroppedImages = editor.store.listen((entry) => {
       if (loadingRef.current) return
       const newImages = Object.values(entry.changes.added).filter(
@@ -732,35 +775,37 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       }
     }, { source: 'user', scope: 'document' })
 
-    cleanupRef.current = () => { cleanupSave(); cleanupScale(); cleanupDroppedImages() }
+    cleanupRef.current = () => {
+      cleanupSave()
+      cleanupDroppedImages()
+    }
   }, [doSave])
 
   const handleMouseMove = (e) => {
-    if (toolInfoRef.current.tool !== 'note') {
-      if (ghost) setGhost(null)
-      return
-    }
-    const rect = wrapRef.current?.getBoundingClientRect()
-    if (!rect) return
-    setGhost({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-      color: toolInfoRef.current.stickyColor,
-      zoom: toolInfoRef.current.zoom || 1,
-    })
+    pointerRef.current = { clientX: e.clientX, clientY: e.clientY }
+    updateGhost(e.clientX, e.clientY)
   }
 
-  const handleMouseLeave = () => setGhost(null)
+  const handleMouseLeave = () => {
+    pointerRef.current = null
+    setGhost(null)
+  }
 
   const handleWheelCapture = useCallback(() => {
     const editor = editorRef.current
     if (editor && !editor.getInstanceState().isFocused) {
       editor.focus()
     }
-  }, [])
+    requestAnimationFrame(() => {
+      const pointer = pointerRef.current
+      if (!pointer) return
+      updateGhost(pointer.clientX, pointer.clientY)
+    })
+  }, [updateGhost])
 
-  const NOTE_CANVAS_SIZE = 200
-  const ghostPx = ghost ? NOTE_CANVAS_SIZE * NOTE_DEFAULT_SCALE * ghost.zoom : 0
+  const ghostPx = ghost && editorRef.current
+    ? getNotePreviewSizePx(editorRef.current)
+    : 0
   const ghostBg = ghost ? (STICKY_SWATCHES[ghost.color]?.bg || '#C8B0F5') : null
 
   return (
