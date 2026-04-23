@@ -1344,7 +1344,13 @@ export default function App() {
             onDatabaseViewChange={setDatabaseView}
             items={databaseItems}
             tagColor={tagColor}
-            onOpenItem={openDocument}
+            onOpenItem={(type, docId) => {
+              openDocument(type, docId)
+              // If opening a board from a search result, trigger FindBar
+              if (type === 'board' && query.trim()) {
+                setFindQuery(query)
+              }
+            }}
             onLogout={handleLogout}
             searchRef={homeSearchRef}
             backendStatus={backendStatus}
