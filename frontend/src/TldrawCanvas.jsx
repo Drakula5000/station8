@@ -648,7 +648,7 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
         .find-overlay-label {
           position: absolute;
           top: -11px;
-          right: 10px;
+          left: 10px;
           padding: 2px 8px;
           background: var(--s8-accent);
           color: #fff;
