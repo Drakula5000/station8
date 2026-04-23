@@ -5,6 +5,8 @@ import os
 import re
 import secrets
 import shutil
+import threading
+import time
 import uuid
 from datetime import datetime
 from functools import wraps
@@ -351,6 +353,10 @@ def _parse_tags(raw):
     return []
 
 
+VALID_THEMES = {'aurora', 'glass', 'hud', 'abyss', 'archive', 'prism'}
+DEFAULT_BOARD_THEME = 'glass'
+
+
 def _normalize_doc(item, folders):
     doc = dict(item or {})
     doc['folder_id'] = _normalize_folder_id(doc.get('folder_id'), folders)
@@ -359,14 +365,22 @@ def _normalize_doc(item, folders):
     return doc
 
 
+def _normalize_board(board, folders):
+    doc = _normalize_doc(board, folders)
+    theme = doc.get('theme')
+    if theme not in VALID_THEMES:
+        doc['theme'] = DEFAULT_BOARD_THEME
+    return doc
+
+
 def _load_boards():
     folders = _get_workspace().get('folders', [])
-    return [_normalize_doc(board, folders) for board in _load(BOARDS_FILE, [])]
+    return [_normalize_board(board, folders) for board in _load(BOARDS_FILE, [])]
 
 
 def _save_boards(boards):
     folders = _get_workspace().get('folders', [])
-    _save(BOARDS_FILE, [_normalize_doc(board, folders) for board in boards])
+    _save(BOARDS_FILE, [_normalize_board(board, folders) for board in boards])
 
 
 def _load_sheets():
@@ -1049,11 +1063,13 @@ def create_board():
     data = request.json or {}
     name = (data.get('name') or 'Untitled').strip() or 'Untitled'
     folders = _get_workspace().get('folders', [])
+    requested_theme = data.get('theme') if data.get('theme') in VALID_THEMES else DEFAULT_BOARD_THEME
     board = {
         'id': str(uuid.uuid4())[:8],
         'name': name,
         'tags': _parse_tags(data.get('tags')),
         'folder_id': _normalize_folder_id(data.get('folder_id'), folders),
+        'theme': requested_theme,
         'created_at': datetime.now().isoformat(),
     }
     boards = _load_boards()
@@ -1080,6 +1096,10 @@ def patch_board(board_id):
             board['folder_id'] = _normalize_folder_id(data.get('folder_id'), folders)
         if 'private' in data:
             board['private'] = True if data['private'] is True else (False if data['private'] is False else None)
+        if 'theme' in data:
+            theme = data.get('theme')
+            if theme in VALID_THEMES:
+                board['theme'] = theme
         _save_boards(boards)
         return jsonify(board)
     return jsonify({'error': 'Not found'}), 404
@@ -1260,19 +1280,54 @@ def upload_image():
     return jsonify({'filename': filename, 'url': f'/uploads/{filename}'}), 201
 
 
+# Cache Supabase signed URLs so we don't generate a fresh one on every image
+# request. Boards often hold dozens of images; without caching, each refresh
+# fans out N serial Supabase round-trips through the slow Render free tier
+# backend. URLs are valid for SIGNED_URL_EXPIRY_SECONDS; we reuse them for
+# SIGNED_URL_REUSE_SECONDS (shorter window leaves buffer before expiry).
+SIGNED_URL_EXPIRY_SECONDS = 3600
+SIGNED_URL_REUSE_SECONDS = 3000
+_signed_url_cache = {}
+_signed_url_lock = threading.Lock()
+
+
+def _get_cached_signed_url(filename):
+    now = time.time()
+    with _signed_url_lock:
+        entry = _signed_url_cache.get(filename)
+        if entry and entry[1] > now:
+            return entry[0]
+    try:
+        result = supabase.storage.from_('uploads').create_signed_url(filename, SIGNED_URL_EXPIRY_SECONDS)
+    except Exception as exc:
+        print(f"Supabase signed URL failed for {filename}: {exc}", flush=True)
+        return None
+    url = result.get('signedURL') if isinstance(result, dict) else None
+    if not url:
+        return None
+    with _signed_url_lock:
+        _signed_url_cache[filename] = (url, now + SIGNED_URL_REUSE_SECONDS)
+    return url
+
+
 @app.route('/uploads/<filename>')
 def serve_upload(filename):
     if not (_is_studio_authed() or _is_visitor_authed()):
         return jsonify({'error': 'Not authorized'}), 401
 
     if supabase:
-        try:
-            signed_url = supabase.storage.from_('uploads').create_signed_url(filename, 3600)
-            return redirect(signed_url['signedURL'])
-        except Exception as exc:
-            print(f"Supabase signed URL failed for {filename}: {exc}", flush=True)
+        url = _get_cached_signed_url(filename)
+        if url:
+            resp = redirect(url)
+            # Let the browser cache the 302 so subsequent loads skip the Flask
+            # hop entirely. `private` keeps shared proxies out since the URL
+            # is authenticated on our side.
+            resp.headers['Cache-Control'] = f'private, max-age={SIGNED_URL_REUSE_SECONDS}'
+            return resp
 
-    return send_from_directory(UPLOADS_DIR, filename)
+    response = send_from_directory(UPLOADS_DIR, filename)
+    response.headers['Cache-Control'] = f'private, max-age={SIGNED_URL_REUSE_SECONDS}'
+    return response
 
 
 # ── Search ───────────────────────────────────────────────────────────────────
