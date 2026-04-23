@@ -1787,6 +1787,14 @@ html[data-mode="light"] {
   fill-opacity: var(--s8-geo-fill-opacity) !important;
 }
 
+/* Keep non-frame small strokes aligned with the frame border weight. */
+.tldraw-wrap [data-shape-type='geo'][data-s8-size='s'] > svg [stroke],
+.tldraw-wrap [data-shape-type='line'][data-s8-size='s'] > svg [stroke],
+.tldraw-wrap [data-shape-type='arrow'][data-s8-size='s'] > svg [stroke],
+.tldraw-wrap [data-shape-type='draw'][data-s8-size='s'] > svg [stroke] {
+  stroke-width: calc(1px * var(--tl-scale)) !important;
+}
+
 /* Note backgrounds — dark mode: mirror the Aurora swatch palette exactly */
 .tldraw-wrap .tl-theme__dark [data-tl-color='light-violet'] .tl-note__container,
 .tldraw-wrap .tl-theme__dark [data-tl-color='yellow'] .tl-note__container {

@@ -66,7 +66,7 @@ const CORNER_OPTIONS = [
 
 const IMAGE_BORDER_OPTIONS = [
   { id: 0, label: 'Off', title: 'No border' },
-  { id: 1.5, label: 'Thin', title: 'Thin border' },
+  { id: 1, label: 'Thin', title: 'Thin border' },
   { id: 4, label: 'Bold', title: 'Bold border' },
 ]
 
