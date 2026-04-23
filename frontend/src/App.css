@@ -284,6 +284,336 @@ html[data-theme="prism"] {
   --s8-radius-lg:      6px;
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+   THEME CANVAS BACKGROUNDS — override .canvas-wrap + .auth-shell per theme
+   so every surface that uses the dot grid gets the right vibe.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Glass — aurora blobs behind a subtle dot grid */
+html[data-theme="glass"] .canvas-wrap,
+html[data-theme="glass"] .auth-shell,
+html[data-theme="glass"] .database-home {
+  background-image:
+    radial-gradient(ellipse 60% 50% at 12% 8%, rgba(124, 230, 255, 0.18), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 92% 92%, rgba(188, 140, 255, 0.20), transparent 60%),
+    radial-gradient(ellipse 50% 30% at 58% 42%, rgba(255, 140, 200, 0.09), transparent 60%),
+    radial-gradient(circle, var(--s8-canvas-dot) 1px, transparent 1.2px);
+  background-size: auto, auto, auto, 32px 32px;
+  background-attachment: fixed, fixed, fixed, local;
+}
+
+/* HUD — wide amber grid + faint scanline */
+html[data-theme="hud"] .canvas-wrap,
+html[data-theme="hud"] .auth-shell,
+html[data-theme="hud"] .database-home {
+  background-image:
+    linear-gradient(rgba(255, 165, 40, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 165, 40, 0.035) 1px, transparent 1px);
+  background-size: 80px 80px, 80px 80px;
+}
+html[data-theme="hud"] .canvas-wrap::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  z-index: 1; opacity: 0.7;
+  background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(255, 165, 40, 0.015) 3px 4px);
+  mix-blend-mode: screen;
+}
+
+/* Abyss — deep-water glow blobs, no grid */
+html[data-theme="abyss"] .canvas-wrap,
+html[data-theme="abyss"] .auth-shell,
+html[data-theme="abyss"] .database-home {
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% 110%, rgba(58, 245, 184, 0.18), transparent 70%),
+    radial-gradient(ellipse 70% 50% at 82% 12%, rgba(160, 122, 255, 0.14), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 15% 58%, rgba(58, 245, 184, 0.06), transparent 70%);
+  background-size: auto;
+}
+
+/* Archive — no pattern, paper-archive flatness */
+html[data-theme="archive"] .canvas-wrap,
+html[data-theme="archive"] .auth-shell,
+html[data-theme="archive"] .database-home {
+  background-image: none;
+}
+
+/* Prism — rainbow horizontal grid + prism glows */
+html[data-theme="prism"] .canvas-wrap,
+html[data-theme="prism"] .auth-shell,
+html[data-theme="prism"] .database-home {
+  background-image:
+    radial-gradient(ellipse 60% 50% at 18% 100%, rgba(96, 240, 255, 0.16), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 88% 8%, rgba(255, 92, 224, 0.18), transparent 60%),
+    repeating-linear-gradient(0deg, transparent 0 79px, rgba(255, 92, 224, 0.05) 79px 80px);
+  background-size: auto;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   CHROME SURFACES — backdrop-filter for glass/abyss/prism (frosted look),
+   hard edges for hud/archive. These are structural overrides the tokens
+   alone can't express.
+   ──────────────────────────────────────────────────────────────────────── */
+
+html[data-theme="glass"] .sidebar,
+html[data-theme="abyss"] .sidebar,
+html[data-theme="prism"] .sidebar {
+  backdrop-filter: blur(26px) saturate(160%);
+  -webkit-backdrop-filter: blur(26px) saturate(160%);
+}
+
+/* Prism: iridescent right-edge on sidebar — ::after keeps the sidebar's
+   translucent bg intact while painting a gradient line at the edge. */
+html[data-theme="prism"] .sidebar { position: relative; }
+html[data-theme="prism"] .sidebar::after {
+  content: ""; position: absolute; top: 0; right: 0; bottom: 0;
+  width: 1px; pointer-events: none;
+  background: linear-gradient(180deg,
+    #60F0FF 0%, #A07AFF 30%, #FF5CE0 60%, #FFA040 85%, transparent 100%);
+  opacity: 0.7;
+}
+
+/* Archive: stark 1px rules everywhere, no blurs, uppercase tendency */
+html[data-theme="archive"] .sidebar-brand {
+  font-family: 'Crimson Pro', 'EB Garamond', serif;
+  font-size: 20px;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  font-weight: 400;
+}
+html[data-theme="archive"] .auth-title {
+  font-family: 'Crimson Pro', 'EB Garamond', serif;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+}
+
+/* Abyss: serif italic for brand + auth title */
+html[data-theme="abyss"] .sidebar-brand {
+  font-family: 'Crimson Pro', 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 18px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-weight: 400;
+}
+html[data-theme="abyss"] .auth-title {
+  font-family: 'Crimson Pro', 'EB Garamond', serif;
+  font-style: italic;
+  font-weight: 300;
+}
+
+/* Prism: gradient-clipped brand */
+html[data-theme="prism"] .sidebar-brand,
+html[data-theme="prism"] .auth-kicker {
+  background: linear-gradient(90deg, #60F0FF, #FF5CE0);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+/* All themes: frosted pill + toolbar backdrops where applicable */
+html[data-theme="glass"] .pill,
+html[data-theme="abyss"] .pill,
+html[data-theme="prism"] .pill,
+html[data-theme="glass"] .tlui-menu-zone,
+html[data-theme="abyss"] .tlui-menu-zone,
+html[data-theme="prism"] .tlui-menu-zone,
+html[data-theme="glass"] .fj-toolbar,
+html[data-theme="abyss"] .fj-toolbar,
+html[data-theme="prism"] .fj-toolbar {
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   CANVAS SHAPE FILTERS — per-theme global drop-shadows + stroke overrides
+   scoped by html[data-theme=X] .tl-shape-*
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Abyss: bioluminescent blooms — uniform per shape type */
+html[data-theme="abyss"] .tl-shape-note  { filter: drop-shadow(0 0 14px rgba(58, 245, 184, 0.28)); }
+html[data-theme="abyss"] .tl-shape-frame { filter: drop-shadow(0 0 18px rgba(58, 245, 184, 0.10)); }
+html[data-theme="abyss"] .tl-shape-arrow { filter: drop-shadow(0 0 10px rgba(58, 245, 184, 0.45)); }
+html[data-theme="abyss"] .tl-shape-line  { filter: drop-shadow(0 0 8px rgba(58, 245, 184, 0.45)); }
+html[data-theme="abyss"] .tl-shape-draw  { filter: drop-shadow(0 0 8px rgba(58, 245, 184, 0.40)); }
+html[data-theme="abyss"] .tl-shape-geo   { filter: drop-shadow(0 0 12px rgba(58, 245, 184, 0.20)); }
+
+/* Prism: iridescent gradient strokes on arrows + frame borders
+   (shared <defs> is injected once at document level — see App.jsx) */
+html[data-theme="prism"] .tl-shape-arrow path,
+html[data-theme="prism"] .tl-shape-line path {
+  stroke: url(#s8-prism-stroke);
+}
+html[data-theme="prism"] .tl-shape-frame .tl-frame__body {
+  stroke: url(#s8-prism-stroke);
+  stroke-width: 1.5;
+}
+
+/* HUD: amber stroke emphasis on frames (replaces tldraw's default) */
+html[data-theme="hud"] .tl-shape-frame .tl-frame__body {
+  stroke: rgba(255, 165, 40, 0.55);
+  stroke-width: 1;
+}
+
+/* Archive: 1px cream frame borders */
+html[data-theme="archive"] .tl-shape-frame .tl-frame__body {
+  stroke: #2D2B24;
+  stroke-width: 1;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   FRAME HEADING LABELS — per-theme font / case / color
+   tldraw renders frame title as HTML .tl-frame-heading; we can override
+   text styling without touching the shape util.
+   ──────────────────────────────────────────────────────────────────────── */
+html[data-theme="glass"] .tl-frame-heading {
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--s8-accent);
+}
+html[data-theme="hud"] .tl-frame-heading {
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #FFA528;
+}
+html[data-theme="abyss"] .tl-frame-heading {
+  font-family: 'Crimson Pro', 'EB Garamond', serif;
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: #3AF5B8;
+}
+html[data-theme="archive"] .tl-frame-heading {
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #8A8678;
+}
+html[data-theme="prism"] .tl-frame-heading {
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  background: linear-gradient(90deg, #60F0FF, #FF5CE0);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   THEME PICKER — swatch + caret button lives in the pill; popover drops below.
+   ──────────────────────────────────────────────────────────────────────── */
+.theme-picker-root {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.theme-picker-trigger {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 7px 3px 4px;
+  border: none; background: transparent; cursor: pointer;
+  border-radius: 8px;
+  color: var(--s8-text-mid);
+  transition: background 0.12s, color 0.12s;
+}
+.theme-picker-trigger:hover { background: var(--s8-hover); color: var(--s8-text); }
+.theme-picker-trigger:disabled { cursor: not-allowed; opacity: 0.5; }
+.theme-picker-trigger-dot {
+  width: 14px; height: 14px; border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.25),
+    0 0 0 2px var(--s8-pill-bg);
+}
+.theme-picker-trigger-caret { display: flex; }
+
+.theme-picker-popover {
+  position: absolute; top: calc(100% + 8px); left: 0;
+  width: 300px; z-index: 200;
+  background: var(--s8-modal-bg);
+  border: 1px solid var(--s8-pill-border);
+  border-radius: 14px;
+  box-shadow: var(--s8-shadow-modal);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  overflow: hidden;
+  font-family: inherit;
+}
+.theme-picker-popover-head {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--s8-sidebar-border);
+  font-family: 'Space Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--s8-text-mid);
+}
+.theme-picker-popover-body {
+  padding: 4px;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.theme-picker-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--s8-text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.theme-picker-row:hover { background: var(--s8-hover); }
+.theme-picker-row.is-active { background: var(--s8-accent-dim); }
+.theme-picker-row.is-active .theme-picker-row-name { color: var(--s8-accent); }
+.theme-picker-row-dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.theme-picker-row-text { min-width: 0; }
+.theme-picker-row-name {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 13px; font-weight: 600;
+  letter-spacing: -0.01em; line-height: 1.2;
+}
+.theme-picker-row-tag {
+  font-family: 'Space Mono', monospace;
+  font-size: 8px;
+  letter-spacing: 0.2em;
+  opacity: 0.6;
+  font-weight: 400;
+}
+.theme-picker-row-desc {
+  display: block;
+  font-family: 'Space Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--s8-text-dim);
+  margin-top: 2px;
+}
+.theme-picker-row-check {
+  color: var(--s8-accent);
+  display: flex;
+  opacity: 0;
+}
+.theme-picker-row.is-active .theme-picker-row-check { opacity: 1; }
+.theme-picker-popover-foot {
+  padding: 8px 14px;
+  border-top: 1px solid var(--s8-sidebar-border);
+  font-family: 'Space Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--s8-text-dim);
+}
+
 /* ── App layout ── */
 .app {
   --s8-sidebar-w: 232px;

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import Spreadsheet from 'react-spreadsheet'
 import TldrawCanvas from './TldrawCanvas'
+import { ThemePicker, BOARD_THEMES, VISITOR_RANDOM_POOL } from './components/ThemePicker'
 import {
   BoardIcon, SheetIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon,
   SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon,
@@ -11,6 +12,40 @@ const API = import.meta.env.VITE_API_URL || ''
 const ROOT_FOLDER = '__root__'
 const SIDEBAR_STORAGE_KEY = 'researchHub.sidebarCollapsed'
 const DATABASE_VIEW_STORAGE_KEY = 'researchHub.databaseView'
+const VISITOR_THEME_SESSION_KEY = 's8.visitor.dbTheme'
+const VALID_THEME_IDS = new Set(BOARD_THEMES.map(t => t.id))
+const DEFAULT_BOARD_THEME = 'glass'
+
+/**
+ * Apply a theme by setting <html data-theme="…"> globally. Aurora clears the
+ * attribute (aurora's tokens live on html[data-mode], so absence of data-theme
+ * falls through to them).
+ */
+function applyHtmlTheme(themeId) {
+  const root = document.documentElement
+  if (!themeId || themeId === 'aurora') {
+    root.removeAttribute('data-theme')
+  } else if (VALID_THEME_IDS.has(themeId)) {
+    root.setAttribute('data-theme', themeId)
+  }
+}
+
+/**
+ * Session-scoped random theme for visitor database/auth views. Picks once per
+ * tab and persists in sessionStorage so navigation stays stable; closing the
+ * tab rerolls on next visit.
+ */
+function getVisitorSessionTheme() {
+  try {
+    const existing = window.sessionStorage.getItem(VISITOR_THEME_SESSION_KEY)
+    if (existing && VALID_THEME_IDS.has(existing)) return existing
+    const pick = VISITOR_RANDOM_POOL[Math.floor(Math.random() * VISITOR_RANDOM_POOL.length)]
+    window.sessionStorage.setItem(VISITOR_THEME_SESSION_KEY, pick)
+    return pick
+  } catch {
+    return DEFAULT_BOARD_THEME
+  }
+}
 const DEFAULT_SHEET = [
   [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
   [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
@@ -299,6 +334,43 @@ export default function App() {
   const deleteImpact = deleteTarget?.type === 'folder'
     ? summarizeFolderDelete(deleteTarget, folders, boards, sheets)
     : null
+
+  // ── Per-board theming ──
+  // visitors get a stable per-tab random theme for auth + database-home;
+  // owners get each board's stored theme (or the default) when a board is open.
+  const visitorSessionTheme = useMemo(
+    () => (readOnly ? getVisitorSessionTheme() : null),
+    [readOnly]
+  )
+  const activeBoardTheme = activeBoard?.theme || null
+  const effectiveTheme = useMemo(() => {
+    if (activeBoard) return activeBoardTheme || DEFAULT_BOARD_THEME
+    if (readOnly) return visitorSessionTheme
+    return null
+  }, [activeBoard, activeBoardTheme, readOnly, visitorSessionTheme])
+
+  useEffect(() => {
+    applyHtmlTheme(effectiveTheme)
+  }, [effectiveTheme])
+
+  const updateActiveBoardTheme = useCallback(async (themeId) => {
+    if (!activeBoard || !VALID_THEME_IDS.has(themeId)) return
+    const boardId = activeBoard.id
+    const prev = activeBoard.theme
+    setBoards(bs => bs.map(b => b.id === boardId ? { ...b, theme: themeId } : b))
+    try {
+      const res = await fetch(`${API}/api/boards/${boardId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: themeId }),
+      })
+      if (!res.ok) throw new Error(`theme PATCH ${res.status}`)
+    } catch (err) {
+      console.warn('Theme save failed, rolling back', err)
+      setBoards(bs => bs.map(b => b.id === boardId ? { ...b, theme: prev } : b))
+    }
+  }, [activeBoard])
 
   useEffect(() => {
     activeIdRef.current = activeId
@@ -1279,6 +1351,22 @@ export default function App() {
 
   return (
     <div className={`app${sidebarCollapsed ? ' sidebar-collapsed' : ''}${readOnly ? ' app-viewer' : ''}`}>
+      {/* Shared SVG <defs> for theme paint-servers — one copy, referenced by
+          CSS `stroke: url(#…)` overrides per theme. Kept off-screen. */}
+      <svg
+        aria-hidden="true"
+        width="0"
+        height="0"
+        style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }}
+      >
+        <defs>
+          <linearGradient id="s8-prism-stroke" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#60F0FF" />
+            <stop offset="50%" stopColor="#A07AFF" />
+            <stop offset="100%" stopColor="#FF5CE0" />
+          </linearGradient>
+        </defs>
+      </svg>
       {showSidebar && (
         <aside className="sidebar" id="workspace-sidebar" aria-hidden={sidebarCollapsed}>
           <div className="sidebar-head">
@@ -1411,6 +1499,15 @@ export default function App() {
                   >
                     <SidebarExpandIcon />
                   </button>
+                  {activeDocType === 'board' && (
+                    <>
+                      <div className="pill-sep" />
+                      <ThemePicker
+                        value={activeBoard?.theme || DEFAULT_BOARD_THEME}
+                        onChange={updateActiveBoardTheme}
+                      />
+                    </>
+                  )}
                   <div className="pill-sep" />
                   <button
                     className="pill-title-btn"
