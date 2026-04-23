@@ -232,7 +232,7 @@ const ImageShapeStyles = track(function ImageShapeStyles() {
     const borderWidth = Number(image.meta?.imageBorderWidth ?? 0)
     const borderColor = image.meta?.imageBorderColor || 'var(--s8-accent)'
     const outlineStyle = borderWidth > 0
-      ? `outline: ${borderWidth}px solid ${borderColor}; outline-offset: ${borderWidth}px;`
+      ? `outline: ${borderWidth}px solid ${borderColor}; outline-offset: 0;`
       : 'outline: none;'
 
     return [
@@ -758,14 +758,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         return
       }
 
-      // Prevent the browser from interpreting macOS Delete / Backspace as history navigation
-      // while a board is open, but only when NOT in an editable field (where Delete should work normally)
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        // Don't prevent default if we're typing in an editable element
-        if (!isEditableTarget(e.target)) {
-          e.preventDefault()
-        }
-      }
     }
 
     window.addEventListener('keydown', onKeyDown)
