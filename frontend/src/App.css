@@ -1031,9 +1031,11 @@ html[data-mode="light"] {
 .tldraw-wrap.sticky-placing,
 .tldraw-wrap.sticky-placing * { cursor: none !important; }
 
-/* Ensure tldraw internal containers don't clip fixed-position shape inspector */
-.tldraw-wrap .tl-container,
-.tldraw-wrap .tl-canvas {
+/* Ensure tldraw internal containers don't clip fixed-position shape inspector.
+   NOTE: .tl-canvas must NOT be overflow:visible — that breaks canvas repainting
+   during drag/resize and leaves ghost trail artifacts. Only .tl-container needs
+   overflow:visible so the ShapeInspector (position:fixed) isn't clipped. */
+.tldraw-wrap .tl-container {
   overflow: visible !important;
 }
 
