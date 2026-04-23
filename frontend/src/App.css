@@ -539,6 +539,11 @@ html[data-mode="light"] {
   background: var(--s8-input-bg);
   border: 1px solid var(--s8-input-border);
   box-shadow: var(--s8-shadow-menu);
+  transition: opacity 0.3s ease;
+}
+
+.database-search--loading {
+  opacity: 0.6;
 }
 
 .database-search svg {
@@ -555,6 +560,37 @@ html[data-mode="light"] {
   color: var(--s8-text);
   outline: none;
   font-family: inherit;
+}
+
+.database-search input:disabled {
+  cursor: default;
+  color: var(--s8-text-mid);
+}
+
+.database-search-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--s8-text-mid);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-family: 'tldraw_mono', ui-monospace, monospace;
+  letter-spacing: 0.04em;
+}
+
+.database-search-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--s8-accent);
+  animation: s8-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes s8-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(0.7); }
 }
 
 .database-toggle {

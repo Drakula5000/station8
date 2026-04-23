@@ -233,6 +233,33 @@ export default function App() {
   }, [colorMode])
 
   const [titleMenuOpen, setTitleMenuOpen] = useState(false)
+  // Backend wake-up state for visitor/share mode
+  const [backendStatus, setBackendStatus] = useState('checking') // 'checking' | 'ready'
+  const backendReadyRef = useRef(false)
+
+  useEffect(() => {
+    if (!readOnly) {
+      setBackendStatus('ready')
+      backendReadyRef.current = true
+      return
+    }
+    let cancelled = false
+    const ping = async () => {
+      try {
+        const res = await fetch(`${API}/api/auth/status`, { credentials: 'include' })
+        if (!cancelled && res.ok) {
+          setBackendStatus('ready')
+          backendReadyRef.current = true
+        } else if (!cancelled) {
+          setTimeout(ping, 3000)
+        }
+      } catch {
+        if (!cancelled) setTimeout(ping, 3000)
+      }
+    }
+    ping()
+    return () => { cancelled = true }
+  }, [readOnly])
 
   useEffect(() => {
     if (!titleMenuOpen) return
@@ -1279,6 +1306,7 @@ export default function App() {
             onOpenItem={openDocument}
             onLogout={handleLogout}
             searchRef={homeSearchRef}
+            backendStatus={backendStatus}
           />
         ) : (
           <>
@@ -1781,19 +1809,44 @@ function DatabaseHome({
   onOpenItem,
   onLogout,
   searchRef,
+  backendStatus,
 }) {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const isReady = backendStatus === 'ready'
+
+  useEffect(() => {
+    if (isReady) return
+    const t = setInterval(() => setElapsedSeconds(s => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [isReady])
+
+  const statusMessage = isReady
+    ? null
+    : elapsedSeconds < 15
+    ? 'Waking up…'
+    : elapsedSeconds < 35
+    ? 'Almost there…'
+    : 'Taking a little longer than usual…'
+
   return (
     <div className="database-home">
       <div className="database-topbar">
         <span className="database-brand">STATION 8</span>
-        <label className="database-search">
+        <label className={`database-search ${!isReady ? 'database-search--loading' : ''}`}>
           <SearchIcon />
           <input
             ref={searchRef}
             value={query}
-            onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="Search every public note, board, sheet, and OCR fragment…"
+            onChange={(e) => isReady && onQueryChange(e.target.value)}
+            placeholder={isReady ? 'Search every public note, board, sheet, and OCR fragment…' : 'Search will be ready shortly…'}
+            disabled={!isReady}
           />
+          {!isReady && (
+            <span className="database-search-status">
+              <span className="database-search-dot" />
+              {statusMessage}
+            </span>
+          )}
         </label>
         <div className="database-toggle" role="tablist" aria-label="Database layout">
           <button className={databaseView === 'list' ? 'active' : ''} onClick={() => onDatabaseViewChange('list')} type="button">List</button>
