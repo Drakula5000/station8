@@ -386,36 +386,40 @@ function walkRichText(node) {
 function extractShapeText(shape) {
   if (!shape) return ''
   const type = shape.type
-  if (type === 'note' || type === 'text') {
-    return walkRichText(shape.props?.richText) || shape.props?.text || ''
+  // All text-bearing shapes — richText takes priority, fall back to text prop
+  const richText = shape.props?.richText
+  if (richText) {
+    const extracted = walkRichText(richText)
+    if (extracted.trim()) return extracted
   }
-  if (type === 'image') {
-    return shape.meta?.altText || ''
-  }
-  return shape.props?.text || ''
+  if (shape.props?.text) return shape.props.text
+  // Image alt text
+  if (type === 'image') return shape.meta?.altText || ''
+  // Frame name
+  if (type === 'frame') return shape.props?.name || ''
+  return ''
 }
 
-const FindBar = track(function FindBar({ query, onDismiss }) {
+const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards = [], onNavigateBoard }) {
   const editor = useEditor()
   const [matches, setMatches] = useState([])
   const [matchIndex, setMatchIndex] = useState(0)
-  const [glowId, setGlowId] = useState(null)
   const retryRef = useRef(null)
 
+  // Which board index are we on in the cross-board list?
+  const boardIndex = findBoards.indexOf(boardId)
+  const totalBoards = findBoards.length
+  const hasPrevBoard = boardIndex > 0
+  const hasNextBoard = boardIndex < totalBoards - 1
+
   const applyGlow = useCallback((shapeId) => {
-    // Remove previous glow
     document.querySelectorAll('[data-find-glow]').forEach(el => {
       el.removeAttribute('data-find-glow')
-      el.style.removeProperty('--s8-find-glow')
     })
     if (!shapeId) return
-    setGlowId(shapeId)
-    // Apply glow after a frame so the shape is in view
     requestAnimationFrame(() => {
       const el = document.querySelector(`[data-shape-id="${shapeId}"]`)
-      if (el) {
-        el.setAttribute('data-find-glow', 'true')
-      }
+      if (el) el.setAttribute('data-find-glow', 'true')
     })
   }, [])
 
@@ -428,8 +432,7 @@ const FindBar = track(function FindBar({ query, onDismiss }) {
   }, [applyGlow])
 
   const buildMatches = useCallback((editor, q) => {
-    const allShapes = editor.getCurrentPageShapes()
-    return allShapes
+    return editor.getCurrentPageShapes()
       .filter(s => extractShapeText(s).toLowerCase().includes(q))
       .map(s => ({ shapeId: s.id }))
   }, [])
@@ -437,8 +440,6 @@ const FindBar = track(function FindBar({ query, onDismiss }) {
   useEffect(() => {
     if (!editor || !query) return
     const q = query.toLowerCase()
-
-    // Clear any pending retry
     if (retryRef.current) clearTimeout(retryRef.current)
 
     const tryMatch = (attempt = 0) => {
@@ -448,7 +449,6 @@ const FindBar = track(function FindBar({ query, onDismiss }) {
         setMatchIndex(0)
         return
       }
-      // Board may still be loading — retry up to 15 times (1.5s)
       if (attempt < 15) {
         retryRef.current = setTimeout(() => tryMatch(attempt + 1), 100)
       } else {
@@ -456,7 +456,6 @@ const FindBar = track(function FindBar({ query, onDismiss }) {
         setMatchIndex(0)
       }
     }
-
     tryMatch()
     return () => { if (retryRef.current) clearTimeout(retryRef.current) }
   }, [editor, query, buildMatches])
@@ -466,50 +465,51 @@ const FindBar = track(function FindBar({ query, onDismiss }) {
     zoomToMatch(editor, matches[matchIndex].shapeId)
   }, [editor, matches, matchIndex, zoomToMatch])
 
-  // Clean up glow on unmount
   useEffect(() => {
     return () => {
-      document.querySelectorAll('[data-find-glow]').forEach(el => {
-        el.removeAttribute('data-find-glow')
-      })
+      document.querySelectorAll('[data-find-glow]').forEach(el => el.removeAttribute('data-find-glow'))
     }
   }, [])
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape') {
-        applyGlow(null)
-        onDismiss()
-      }
+      if (e.key === 'Escape') { applyGlow(null); onDismiss() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [applyGlow, onDismiss])
 
   const goNext = () => {
-    if (matches.length <= 1) return
-    const next = (matchIndex + 1) % matches.length
-    setMatchIndex(next)
-    zoomToMatch(editor, matches[next].shapeId)
+    if (matches.length > 1) {
+      const next = (matchIndex + 1) % matches.length
+      setMatchIndex(next)
+      zoomToMatch(editor, matches[next].shapeId)
+    } else if (hasNextBoard) {
+      applyGlow(null)
+      onNavigateBoard(findBoards[boardIndex + 1])
+    }
   }
 
-  const goprev = () => {
-    if (matches.length <= 1) return
-    const prev = (matchIndex - 1 + matches.length) % matches.length
-    setMatchIndex(prev)
-    zoomToMatch(editor, matches[prev].shapeId)
+  const goPrev = () => {
+    if (matches.length > 1) {
+      const prev = (matchIndex - 1 + matches.length) % matches.length
+      setMatchIndex(prev)
+      zoomToMatch(editor, matches[prev].shapeId)
+    } else if (hasPrevBoard) {
+      applyGlow(null)
+      onNavigateBoard(findBoards[boardIndex - 1])
+    }
   }
 
-  const handleClose = () => {
-    applyGlow(null)
-    onDismiss()
-  }
+  const handleClose = () => { applyGlow(null); onDismiss() }
 
-  const counter = matches.length === 0
-    ? '0 of 0'
-    : `${matchIndex + 1} of ${matches.length}`
+  // Counter: "1 of 3 · board 1/2" when multiple boards
+  const shapeCounter = matches.length === 0 ? '0 of 0' : `${matchIndex + 1} of ${matches.length}`
+  const boardCounter = totalBoards > 1 ? ` · board ${boardIndex + 1}/${totalBoards}` : ''
+  const counter = shapeCounter + boardCounter
 
-  const navDisabled = matches.length <= 1
+  const prevDisabled = matches.length <= 1 && !hasPrevBoard
+  const nextDisabled = matches.length <= 1 && !hasNextBoard
 
   return (
     <>
@@ -584,14 +584,14 @@ const FindBar = track(function FindBar({ query, onDismiss }) {
         <button
           className="find-bar-btn"
           onClick={goNext}
-          disabled={navDisabled}
+          disabled={nextDisabled}
           title="Next match"
           type="button"
         >↓</button>
         <button
           className="find-bar-btn"
-          onClick={goprev}
-          disabled={navDisabled}
+          onClick={goPrev}
+          disabled={prevDisabled}
           title="Previous match"
           type="button"
         >↑</button>
@@ -1020,7 +1020,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
   )
 })
 
-export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug, onSaveState, colorMode, findQuery, onFindDismiss }) {
+export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug, onSaveState, colorMode, findQuery, onFindDismiss, findBoards, onNavigateBoard }) {
   const boardIdRef = useRef(boardId)
   const readOnlyRef = useRef(readOnly)
   const viewerModeRef = useRef(viewerMode)
@@ -1306,7 +1306,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         <BrokenImageRetry />
         <ListStyles />
         <ShapeColorSync />
-        {findQuery && <FindBar query={findQuery} onDismiss={onFindDismiss} />}
+        {findQuery && <FindBar query={findQuery} onDismiss={onFindDismiss} boardId={boardId} findBoards={findBoards} onNavigateBoard={onNavigateBoard} />}
       </Tldraw>
       {ghost && (
         <div

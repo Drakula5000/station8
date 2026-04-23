@@ -180,6 +180,7 @@ export default function App() {
   const [authError, setAuthError] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [findQuery, setFindQuery] = useState(null) // string | null — triggers FindBar in TldrawCanvas
+  const [findBoards, setFindBoards] = useState([]) // ordered board IDs that matched the search
   const [searchScope, setSearchScope] = useState(null) // { boardId, boardName } | null
   const [crossBoardPending, setCrossBoardPending] = useState(null) // { docId, docName, folderId, kind } | null
   const [query, setQuery] = useState('')
@@ -1349,6 +1350,13 @@ export default function App() {
               // If opening a board from a search result, trigger FindBar
               if (type === 'board' && query.trim()) {
                 setFindQuery(query)
+                // Collect all unique board IDs from results in order
+                const boardIds = [...new Set(
+                  results
+                    .filter(r => r.kind !== 'sheet')
+                    .map(r => r.doc_id)
+                )]
+                setFindBoards(boardIds)
               }
             }}
             onLogout={handleLogout}
@@ -1494,6 +1502,11 @@ export default function App() {
                   colorMode={colorMode}
                   findQuery={findQuery}
                   onFindDismiss={onFindDismiss}
+                  findBoards={findBoards}
+                  onNavigateBoard={(boardId) => {
+                    const board = boards.find(b => b.id === boardId)
+                    openDocument('board', boardId, board?.folder_id)
+                  }}
                 />
               )}
               {activeId?.type === 'sheet' && (
@@ -1795,6 +1808,10 @@ export default function App() {
                         // Always set findQuery for board results so FindBar activates
                         // whether we're already on this board or navigating to it
                         setFindQuery(query)
+                        const boardIds = [...new Set(
+                          results.filter(r2 => r2.kind !== 'sheet').map(r2 => r2.doc_id)
+                        )]
+                        setFindBoards(boardIds)
                       }
                       setSearchOpen(false)
                     }
