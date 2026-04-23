@@ -807,6 +807,27 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       .catch(err => console.error('board load failed', err))
       .finally(() => { loadingRef.current = false })
 
+    const defaultFilesHandler = editor.externalContentHandlers.files
+    editor.registerExternalContentHandler('files', async (externalContent) => {
+      const { files, point } = externalContent
+      const mediaFiles = files.filter((file) => file.type.startsWith('image/') || file.type.startsWith('video/'))
+      const otherFiles = files.filter((file) => !file.type.startsWith('image/') && !file.type.startsWith('video/'))
+
+      if (mediaFiles.length && defaultFilesHandler) {
+        const originalZoomToSelection = editor.zoomToSelection
+        editor.zoomToSelection = () => editor
+        try {
+          await defaultFilesHandler({ ...externalContent, files: mediaFiles, point })
+        } finally {
+          editor.zoomToSelection = originalZoomToSelection
+        }
+      }
+
+      if (otherFiles.length && defaultFilesHandler) {
+        await defaultFilesHandler({ ...externalContent, files: otherFiles })
+      }
+    })
+
     const cleanupSave = editor.store.listen(
       () => {
         if (loadingRef.current || readOnlyRef.current) return
@@ -838,6 +859,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     cleanupRef.current = () => {
       cleanupSave()
       cleanupDroppedImages()
+      editor.registerExternalContentHandler('files', defaultFilesHandler)
     }
   }, [doSave])
 
