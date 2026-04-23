@@ -18,6 +18,19 @@ import { ShapeInspector } from './components/ShapeInspector'
 
 const API = import.meta.env.VITE_API_URL || ''
 
+// Direct-resolved Supabase signed URLs for `/uploads/<name>` references,
+// populated from the board-load response. Lets images load straight from the
+// Supabase CDN instead of bouncing every request through the slow Render
+// backend. Module-scoped so the static assetStore can read it.
+const signedUploadUrls = new Map()
+
+export function setSignedUploadUrls(map) {
+  if (!map) return
+  for (const [name, url] of Object.entries(map)) {
+    if (url) signedUploadUrls.set(name, url)
+  }
+}
+
 // Send uploads through our Flask endpoint so /api/upload can OCR the image and
 // index it in data/ocr.json. Without this tldraw stores images as inline data
 // URLs, which are huge in the snapshot and invisible to server-side search.
@@ -37,6 +50,11 @@ const assetStore = {
   resolve(asset) {
     const src = asset.props.src || null
     if (!src) return null
+    if (src.startsWith('/uploads/')) {
+      const filename = src.slice('/uploads/'.length)
+      const signed = signedUploadUrls.get(filename)
+      if (signed) return signed
+    }
     if (src.startsWith('/')) return `${API}${src}`
     return src
   },
@@ -1258,6 +1276,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
+        if (data?.asset_urls) setSignedUploadUrls(data.asset_urls)
         if (data?.snapshot?.store) {
           editor.store.loadStoreSnapshot(data.snapshot)
         }

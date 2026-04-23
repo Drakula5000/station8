@@ -1025,7 +1025,7 @@ def share_board(token, board_id):
         return error
     if not _share_allows_board(share, board_id):
         return jsonify({'error': 'Not found'}), 404
-    return jsonify(_load(_board_file(board_id), {'snapshot': None}))
+    return jsonify(_board_payload_with_assets(board_id))
 
 
 @app.route('/api/share/<token>/sheet/<sheet_id>', methods=['GET'])
@@ -1119,7 +1119,7 @@ def delete_board(board_id):
 @app.route('/api/boards/<board_id>', methods=['GET'])
 @_studio_auth_required
 def get_board(board_id):
-    return jsonify(_load(_board_file(board_id), {'snapshot': None}))
+    return jsonify(_board_payload_with_assets(board_id))
 
 
 @app.route('/api/visitor/boards/<board_id>', methods=['GET'])
@@ -1129,7 +1129,7 @@ def get_visitor_board(board_id):
     board = next((b for b in _load_boards() if b['id'] == board_id), None)
     if not board or not _doc_is_visitor_visible(board, folders):
         return jsonify({'error': 'Not found'}), 404
-    return jsonify(_load(_board_file(board_id), {'snapshot': None}))
+    return jsonify(_board_payload_with_assets(board_id))
 
 
 @app.route('/api/boards/<board_id>', methods=['PUT'])
@@ -1308,6 +1308,43 @@ def _get_cached_signed_url(filename):
     with _signed_url_lock:
         _signed_url_cache[filename] = (url, now + SIGNED_URL_REUSE_SECONDS)
     return url
+
+
+_UPLOAD_REF_RE = re.compile(r'/uploads/([a-z0-9\-]+\.[a-z0-9]+)', flags=re.IGNORECASE)
+
+
+def _extract_upload_filenames(snapshot):
+    if not snapshot:
+        return []
+    try:
+        blob = json.dumps(snapshot)
+    except Exception:
+        return []
+    return list({m.group(1) for m in _UPLOAD_REF_RE.finditer(blob)})
+
+
+def _asset_urls_for_snapshot(snapshot):
+    """Return {filename: signed_url} for every /uploads/X referenced in the
+    snapshot. Lets the frontend render images direct from Supabase instead of
+    bouncing each request through Flask (one redirect per image adds up fast
+    on Render free tier)."""
+    if not supabase:
+        return {}
+    filenames = _extract_upload_filenames(snapshot)
+    if not filenames:
+        return {}
+    urls = {}
+    for name in filenames:
+        url = _get_cached_signed_url(name)
+        if url:
+            urls[name] = url
+    return urls
+
+
+def _board_payload_with_assets(board_id):
+    data = _load(_board_file(board_id), {'snapshot': None})
+    data['asset_urls'] = _asset_urls_for_snapshot(data.get('snapshot'))
+    return data
 
 
 @app.route('/uploads/<filename>')
