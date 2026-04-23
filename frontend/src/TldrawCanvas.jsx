@@ -525,92 +525,155 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
   const prevDisabled = matches.length <= 1 && !hasPrevBoard
   const nextDisabled = matches.length <= 1 && !hasNextBoard
 
+  // Compute overlay marker geometry (viewport-relative, via pageToScreen)
+  let overlayStyle = null
+  let overlayLabel = shapeCounter
+  if (currentShapeId && editor) {
+    const bounds = editor.getShapePageBounds(currentShapeId)
+    if (bounds) {
+      const tl = editor.pageToScreen({ x: bounds.minX, y: bounds.minY })
+      const br = editor.pageToScreen({ x: bounds.maxX, y: bounds.maxY })
+      overlayStyle = {
+        left: `${tl.x}px`,
+        top: `${tl.y}px`,
+        width: `${br.x - tl.x}px`,
+        height: `${br.y - tl.y}px`,
+      }
+    }
+  }
+
   return (
     <>
       <style>{`
+        /* Top-center find bar, glass style matching the pill */
         .find-bar {
           position: fixed;
-          bottom: 80px;
+          top: 14px;
           left: 50%;
           transform: translateX(-50%);
-          z-index: 500;
+          z-index: 520;
           display: flex;
           align-items: center;
-          gap: 6px;
-          padding: 6px 10px;
-          background: var(--s8-bg);
+          gap: 10px;
+          padding: 6px 8px 6px 14px;
+          background: color-mix(in srgb, var(--s8-bg) 80%, transparent);
+          backdrop-filter: blur(20px) saturate(1.2);
+          -webkit-backdrop-filter: blur(20px) saturate(1.2);
           color: var(--s8-text);
-          border: 1px solid var(--s8-input-border);
-          box-shadow: var(--s8-shadow-menu);
-          border-radius: 8px;
-          font-size: 13px;
+          border: 1px solid var(--s8-accent-border);
+          box-shadow: var(--s8-shadow-pill);
+          border-radius: 999px;
+          font-size: 12px;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+          letter-spacing: 0.01em;
           white-space: nowrap;
           pointer-events: all;
         }
+        .find-bar-label {
+          font-size: 10px;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          color: var(--s8-text-mid);
+          font-weight: 600;
+        }
+        .find-bar-query {
+          font-family: 'Space Mono', monospace;
+          font-size: 12px;
+          color: var(--s8-text);
+          max-width: 180px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
         .find-bar-counter {
-          min-width: 52px;
-          text-align: center;
-          opacity: 0.75;
+          font-variant-numeric: tabular-nums;
+          opacity: 0.7;
+          padding: 0 6px;
+          border-left: 1px solid var(--s8-accent-border);
+          border-right: 1px solid var(--s8-accent-border);
         }
         .find-bar-btn {
-          background: none;
+          background: transparent;
           border: none;
           cursor: pointer;
           color: var(--s8-text);
-          padding: 2px 6px;
-          border-radius: 4px;
-          font-size: 14px;
+          padding: 4px 8px;
+          border-radius: 999px;
+          font-size: 13px;
           line-height: 1;
           transition: background 0.12s, color 0.12s;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 24px;
+          height: 24px;
         }
         .find-bar-btn:hover:not(:disabled) {
+          background: var(--s8-accent-dim);
+          color: var(--s8-accent);
+        }
+        .find-bar-btn.find-bar-close {
           background: var(--s8-accent);
+          color: #fff;
+          margin-left: 2px;
+        }
+        .find-bar-btn.find-bar-close:hover {
+          background: color-mix(in srgb, var(--s8-accent) 85%, white);
           color: #fff;
         }
         .find-bar-btn:disabled {
-          opacity: 0.35;
+          opacity: 0.3;
           cursor: default;
         }
-        /* Dim all non-matched shapes when a find is active */
+
+        /* Dim all non-matched shapes when a find is active (match kept bright via data-find-glow) */
         .tldraw-wrap [data-shape-id] {
-          transition: opacity 0.2s ease, filter 0.2s ease;
+          transition: opacity 0.25s ease, filter 0.25s ease;
         }
         .tldraw-wrap[data-find-active="true"] [data-shape-id]:not([data-find-glow="true"]) {
-          opacity: 0.18;
-          filter: saturate(0.4);
+          opacity: 0.2;
+          filter: saturate(0.45);
         }
-        /* Pulsing outline on the matched shape wrapper itself */
-        [data-find-glow="true"] {
-          outline: 3px solid var(--s8-accent) !important;
-          outline-offset: 6px !important;
-          border-radius: 4px;
-          animation: s8-find-glow-pulse 1.4s ease-in-out infinite;
-          z-index: 2;
+
+        /* Overlay marker — lives in fixed-position layer above canvas, no clipping */
+        .find-overlay {
+          position: fixed;
+          z-index: 510;
+          pointer-events: none;
+          border: 1.5px solid var(--s8-accent);
+          border-radius: 3px;
+          box-shadow:
+            0 0 0 4px color-mix(in srgb, var(--s8-accent) 12%, transparent),
+            0 0 28px 4px color-mix(in srgb, var(--s8-accent) 35%, transparent);
         }
-        @keyframes s8-find-glow-pulse {
-          0%, 100% {
-            outline-width: 3px;
-            outline-offset: 6px;
-            filter: drop-shadow(0 0 6px color-mix(in srgb, var(--s8-accent) 55%, transparent))
-                    drop-shadow(0 0 14px color-mix(in srgb, var(--s8-accent) 35%, transparent));
-          }
-          50% {
-            outline-width: 5px;
-            outline-offset: 8px;
-            filter: drop-shadow(0 0 10px color-mix(in srgb, var(--s8-accent) 75%, transparent))
-                    drop-shadow(0 0 24px color-mix(in srgb, var(--s8-accent) 55%, transparent));
-          }
+        .find-overlay-label {
+          position: absolute;
+          top: -11px;
+          right: 10px;
+          padding: 2px 8px;
+          background: var(--s8-accent);
+          color: #fff;
+          font-family: 'Inter', -apple-system, sans-serif;
+          font-size: 10px;
+          font-weight: 600;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          border-radius: 999px;
+          white-space: nowrap;
+          box-shadow: var(--s8-shadow-pill);
+          font-variant-numeric: tabular-nums;
         }
       `}</style>
+
+      {overlayStyle && (
+        <div className="find-overlay" style={overlayStyle}>
+          <span className="find-overlay-label">{overlayLabel}</span>
+        </div>
+      )}
+
       <div className="find-bar">
+        <span className="find-bar-label">Find</span>
+        <span className="find-bar-query">{query}</span>
         <span className="find-bar-counter">{counter}</span>
-        <button
-          className="find-bar-btn"
-          onClick={goNext}
-          disabled={nextDisabled}
-          title="Next match"
-          type="button"
-        >↓</button>
         <button
           className="find-bar-btn"
           onClick={goPrev}
@@ -620,8 +683,15 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
         >↑</button>
         <button
           className="find-bar-btn"
+          onClick={goNext}
+          disabled={nextDisabled}
+          title="Next match"
+          type="button"
+        >↓</button>
+        <button
+          className="find-bar-btn find-bar-close"
           onClick={handleClose}
-          title="Close"
+          title="Clear find (Esc)"
           type="button"
         >✕</button>
       </div>
