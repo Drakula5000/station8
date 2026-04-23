@@ -232,7 +232,7 @@ const ImageShapeStyles = track(function ImageShapeStyles() {
     const borderWidth = Number(image.meta?.imageBorderWidth ?? 0)
     const borderColor = image.meta?.imageBorderColor || 'var(--s8-accent)'
     const outlineStyle = borderWidth > 0
-      ? `outline: ${borderWidth}px solid ${borderColor}; outline-offset: 0;`
+      ? `outline: ${borderWidth}px solid ${borderColor}; outline-offset: 0; will-change: transform;`
       : 'outline: none;'
 
     return [
@@ -863,6 +863,13 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     })
   }, [updateGhost])
 
+  const handlePointerDownCapture = useCallback(() => {
+    const editor = editorRef.current
+    if (editor && !editor.getInstanceState().isFocused) {
+      editor.focus()
+    }
+  }, [])
+
   const ghostPx = ghost && editorRef.current
     ? getNotePreviewSizePx(editorRef.current)
     : 0
@@ -874,6 +881,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       ref={wrapRef}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
+      onPointerDownCapture={handlePointerDownCapture}
       onWheelCapture={handleWheelCapture}
     >
       <Tldraw
