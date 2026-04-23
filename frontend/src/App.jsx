@@ -237,6 +237,9 @@ export default function App() {
   const [backendStatus, setBackendStatus] = useState('checking') // 'checking' | 'ready'
   const backendReadyRef = useRef(false)
 
+  const viewerMode = route.shareToken ? 'share' : auth.access
+  const readOnly = viewerMode === 'visitor' || viewerMode === 'share'
+
   useEffect(() => {
     if (!readOnly) {
       setBackendStatus('ready')
@@ -270,8 +273,6 @@ export default function App() {
     return () => document.removeEventListener('mousedown', close)
   }, [titleMenuOpen])
 
-  const viewerMode = route.shareToken ? 'share' : auth.access
-  const readOnly = viewerMode === 'visitor' || viewerMode === 'share'
   const ownerMode = viewerMode === 'owner'
   const showSidebar = ownerMode
 
