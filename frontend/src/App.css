@@ -1012,6 +1012,7 @@ html[data-mode="light"] {
   --tl-color-text-3:          var(--s8-text-mid);
   --tl-color-selected:        var(--s8-accent);
   --tl-color-primary:         var(--s8-accent);
+  --tl-color-snap:            var(--s8-accent2);
   --tl-color-focus:           var(--s8-accent-border);
   --tl-color-grid:            var(--s8-canvas-dot);
   --tl-shadow-2:              var(--s8-shadow-pill);

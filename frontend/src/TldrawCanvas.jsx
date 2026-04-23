@@ -631,7 +631,10 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
 
   useEffect(() => {
     if (editorRef.current) {
-      editorRef.current.user.updateUserPreferences({ colorScheme: colorMode === 'light' ? 'light' : 'dark' })
+      editorRef.current.user.updateUserPreferences({
+        colorScheme: colorMode === 'light' ? 'light' : 'dark',
+        isSnapMode: true,
+      })
     }
   }, [colorMode])
 
@@ -664,7 +667,10 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
 
   const handleMount = useCallback((editor) => {
     editorRef.current = editor
-    editor.user.updateUserPreferences({ colorScheme: colorModeRef.current === 'light' ? 'light' : 'dark' })
+    editor.user.updateUserPreferences({
+      colorScheme: colorModeRef.current === 'light' ? 'light' : 'dark',
+      isSnapMode: true,
+    })
     const bid = boardIdRef.current
     const ro = readOnlyRef.current
     const mode = viewerModeRef.current
@@ -769,6 +775,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         components={TLDRAW_COMPONENTS}
         onMount={handleMount}
         assets={assetStore}
+        options={{ snapThreshold: 10 }}
         shapeUtils={FRAME_SHAPE_UTILS}
       >
         {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} />}
