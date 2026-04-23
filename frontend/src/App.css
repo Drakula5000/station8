@@ -1145,7 +1145,7 @@ html[data-theme="prism"] .tl-frame-heading {
 
 .database-toggle button.active {
   background: var(--s8-accent);
-  color: var(--s8-card-bg);
+  color: var(--s8-on-accent);
 }
 
 .database-results {
@@ -1448,7 +1448,7 @@ html[data-theme="prism"] .tl-frame-heading {
   display: inline-flex; align-items: center; justify-content: center;
 }
 .shape-inspector .insp-btn:hover { background: var(--s8-hover); border-color: var(--s8-sidebar-border); }
-.shape-inspector .insp-btn.active { background: var(--s8-accent); color: var(--s8-card-bg); border-color: var(--s8-accent); }
+.shape-inspector .insp-btn.active { background: var(--s8-accent); color: var(--s8-on-accent); border-color: var(--s8-accent); }
 .shape-inspector .insp-number {
   width: 66px;
   height: 32px;
@@ -1541,7 +1541,7 @@ html[data-theme="prism"] .tl-frame-heading {
   box-shadow: 0 6px 12px rgba(15,23,42,0.14);
 }
 .share-btn {
-  background: var(--s8-accent); color: var(--s8-card-bg);
+  background: var(--s8-accent); color: var(--s8-on-accent);
   border: none; border-radius: 6px;
   padding: 7px 14px; font-size: 12px; cursor: pointer;
 }
@@ -1631,7 +1631,7 @@ html[data-theme="prism"] .tl-frame-heading {
 
 .error-toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-  background: var(--s8-danger); color: var(--s8-card-bg);
+  background: var(--s8-danger); color: var(--s8-on-accent);
   padding: 10px 20px; border-radius: 8px;
   font-size: 13px; font-weight: 500;
   z-index: 9999;
@@ -1737,7 +1737,7 @@ html[data-theme="prism"] .tl-frame-heading {
 .fj-mini-btn:hover { background: var(--s8-active); }
 .fj-mini-btn.active {
   background: var(--s8-accent);
-  color: var(--s8-card-bg);
+  color: var(--s8-on-accent);
   border-color: var(--s8-accent);
 }
 
@@ -1929,7 +1929,7 @@ html[data-theme="prism"] .tl-frame-heading {
 .empty-main .big { font-size: 18px; font-weight: 600; margin-bottom: 4px; text-align: center; }
 .empty-main .small { font-size: 13px; color: var(--s8-text-mid); text-align: center; }
 .empty-main .cta {
-  background: var(--s8-accent); color: var(--s8-card-bg); border: none;
+  background: var(--s8-accent); color: var(--s8-on-accent); border: none;
   border-radius: 8px; padding: 9px 16px; font-size: 13px; cursor: pointer;
 }
 .empty-main .cta:hover { background: var(--s8-accent); opacity: 0.85; }
@@ -1941,7 +1941,7 @@ html[data-theme="prism"] .tl-frame-heading {
 .no-board-inner .big { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
 .no-board-inner .small { font-size: 13px; color: var(--s8-text-mid); margin-bottom: 16px; }
 .no-board-inner .cta {
-  background: var(--s8-accent); color: var(--s8-card-bg); border: none; border-radius: 8px;
+  background: var(--s8-accent); color: var(--s8-on-accent); border: none; border-radius: 8px;
   padding: 10px 22px; font-size: 13px; font-weight: 500; cursor: pointer;
 }
 .no-board-inner .cta:hover { opacity: 0.85; }
@@ -2073,7 +2073,7 @@ html[data-theme="prism"] .tl-frame-heading {
 .btn-ghost:hover { background: var(--s8-hover); color: var(--s8-text); }
 
 .btn-primary {
-  background: var(--s8-accent); color: var(--s8-card-bg);
+  background: var(--s8-accent); color: var(--s8-on-accent);
   border: none; border-radius: 6px;
   padding: 8px 18px; font-size: 13px; font-weight: 500;
   cursor: pointer;
