@@ -72,6 +72,7 @@ const NOTE_PREVIEW_SIZE = 200
 const MAX_DROPPED_IMAGE_VIEWPORT_FRACTION = 0.2
 const MAX_DROPPED_IMAGE_FRAME_FRACTION = 0.2
 const FRAME_DROPPED_IMAGE_INSET = 32
+const BOARD_VIEW_STORAGE_PREFIX = 's8.boardView.'
 
 const FRAME_SHAPE_UTILS = [FrameShapeUtil.configure({ showColors: true })]
 const FIGMA_REORDER_SHORTCUTS = {
@@ -103,6 +104,66 @@ const TLDRAW_UI_OVERRIDES = {
       },
     }
   },
+}
+
+function getBoardViewStorageKey(boardId) {
+  return `${BOARD_VIEW_STORAGE_PREFIX}${boardId}`
+}
+
+function shouldRestoreViewFromReload() {
+  if (typeof window === 'undefined' || typeof performance === 'undefined') return false
+  const navEntry = performance.getEntriesByType?.('navigation')?.[0]
+  if (navEntry && typeof navEntry.type === 'string') {
+    return navEntry.type === 'reload'
+  }
+  return performance.navigation?.type === 1
+}
+
+function loadSavedBoardView(boardId) {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.sessionStorage.getItem(getBoardViewStorageKey(boardId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (
+      typeof parsed?.x !== 'number' ||
+      typeof parsed?.y !== 'number' ||
+      typeof parsed?.z !== 'number'
+    ) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function saveBoardView(boardId, camera) {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem(getBoardViewStorageKey(boardId), JSON.stringify({
+      x: camera.x,
+      y: camera.y,
+      z: camera.z,
+    }))
+  } catch {
+    // Ignore storage failures; view persistence is a convenience only.
+  }
+}
+
+function clearSavedBoardView(boardId) {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.removeItem(getBoardViewStorageKey(boardId))
+  } catch {
+    // Ignore storage failures; view persistence is a convenience only.
+  }
+}
+
+function restoreBoardViewAfterLoad(editor, camera) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      editor.setCamera(camera, { immediate: true })
+    })
+  })
 }
 
 function getNotePreviewSizePx(editor) {
@@ -671,6 +732,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   const wrapRef = useRef(null)
   const toolInfoRef = useRef({ tool: 'select', stickyColor: 'yellow' })
   const pointerRef = useRef(null)
+  const restoreViewOnLoadRef = useRef(shouldRestoreViewFromReload())
   const [ghost, setGhost] = useState(null) // { x, y, color } | null
 
   const editorRef = useRef(null)
@@ -805,7 +867,17 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         }
       })
       .catch(err => console.error('board load failed', err))
-      .finally(() => { loadingRef.current = false })
+      .finally(() => {
+        loadingRef.current = false
+        if (restoreViewOnLoadRef.current) {
+          const savedView = loadSavedBoardView(bid)
+          if (savedView) {
+            restoreBoardViewAfterLoad(editor, savedView)
+            clearSavedBoardView(bid)
+          }
+          restoreViewOnLoadRef.current = false
+        }
+      })
 
     const defaultFilesHandler = editor.externalContentHandlers.files
     editor.registerExternalContentHandler('files', async (externalContent) => {
@@ -856,9 +928,18 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       }
     }, { source: 'user', scope: 'document' })
 
+    const persistCurrentView = () => {
+      saveBoardView(bid, editor.getCamera())
+    }
+
+    window.addEventListener('beforeunload', persistCurrentView)
+    window.addEventListener('pagehide', persistCurrentView)
+
     cleanupRef.current = () => {
       cleanupSave()
       cleanupDroppedImages()
+      window.removeEventListener('beforeunload', persistCurrentView)
+      window.removeEventListener('pagehide', persistCurrentView)
       editor.registerExternalContentHandler('files', defaultFilesHandler)
     }
   }, [doSave])
