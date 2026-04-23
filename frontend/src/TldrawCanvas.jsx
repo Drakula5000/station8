@@ -1081,6 +1081,10 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       saveTimerRef.current = null
       doSave()
     }
+    // Persist camera position so it can be restored on next open
+    if (editorRef.current && boardId) {
+      saveBoardView(boardId, editorRef.current.getCamera())
+    }
   }, [doSave])
 
   const colorModeRef = useRef(colorMode)
@@ -1117,16 +1121,14 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       .catch(err => console.error('board load failed', err))
       .finally(() => {
         loadingRef.current = false
-        if (restoreViewOnLoadRef.current) {
-          const savedView = loadSavedBoardView(bid)
-          if (savedView) {
-            restoreBoardViewAfterLoad(editor, savedView)
-            clearSavedBoardView(bid)
-          }
-          restoreViewOnLoadRef.current = false
+        const savedView = loadSavedBoardView(bid)
+        if (savedView) {
+          restoreBoardViewAfterLoad(editor, savedView)
+          clearSavedBoardView(bid)
         } else {
           fitBoardAfterOpen(editor)
         }
+        restoreViewOnLoadRef.current = false
       })
 
     const defaultFilesHandler = editor.externalContentHandlers.files
