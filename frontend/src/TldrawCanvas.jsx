@@ -106,8 +106,8 @@ const TLDRAW_UI_OVERRIDES = {
   },
 }
 
-function getBoardViewStorageKey(boardId) {
-  return `${BOARD_VIEW_STORAGE_PREFIX}${boardId}`
+function getBoardViewStorageKey(boardId, role) {
+  return `${BOARD_VIEW_STORAGE_PREFIX}${role ? role + '.' : ''}${boardId}`
 }
 
 function shouldRestoreViewFromReload() {
@@ -119,10 +119,10 @@ function shouldRestoreViewFromReload() {
   return performance.navigation?.type === 1
 }
 
-function loadSavedBoardView(boardId) {
+function loadSavedBoardView(boardId, role) {
   if (typeof window === 'undefined') return null
   try {
-    const raw = window.sessionStorage.getItem(getBoardViewStorageKey(boardId))
+    const raw = window.sessionStorage.getItem(getBoardViewStorageKey(boardId, role))
     if (!raw) return null
     const parsed = JSON.parse(raw)
     if (
@@ -136,10 +136,10 @@ function loadSavedBoardView(boardId) {
   }
 }
 
-function saveBoardView(boardId, camera) {
+function saveBoardView(boardId, camera, role) {
   if (typeof window === 'undefined') return
   try {
-    window.sessionStorage.setItem(getBoardViewStorageKey(boardId), JSON.stringify({
+    window.sessionStorage.setItem(getBoardViewStorageKey(boardId, role), JSON.stringify({
       x: camera.x,
       y: camera.y,
       z: camera.z,
@@ -149,10 +149,10 @@ function saveBoardView(boardId, camera) {
   }
 }
 
-function clearSavedBoardView(boardId) {
+function clearSavedBoardView(boardId, role) {
   if (typeof window === 'undefined') return
   try {
-    window.sessionStorage.removeItem(getBoardViewStorageKey(boardId))
+    window.sessionStorage.removeItem(getBoardViewStorageKey(boardId, role))
   } catch {
     // Ignore storage failures; view persistence is a convenience only.
   }
@@ -1133,9 +1133,9 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       saveTimerRef.current = null
       doSave()
     }
-    // Persist camera position so it can be restored on next open (owner only)
-    if (editorRef.current && boardId && !readOnlyRef.current) {
-      saveBoardView(boardId, editorRef.current.getCamera())
+    // Persist camera position so it can be restored on next open
+    if (editorRef.current && boardId) {
+      saveBoardView(boardId, editorRef.current.getCamera(), viewerModeRef.current)
     }
   }, [doSave])
 
@@ -1173,10 +1173,10 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       .catch(err => console.error('board load failed', err))
       .finally(() => {
         loadingRef.current = false
-        const savedView = loadSavedBoardView(bid)
+        const savedView = loadSavedBoardView(bid, mode)
         if (savedView) {
           restoreBoardViewAfterLoad(editor, savedView)
-          clearSavedBoardView(bid)
+          clearSavedBoardView(bid, mode)
         } else {
           fitBoardAfterOpen(editor)
         }
@@ -1233,7 +1233,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     }, { source: 'user', scope: 'document' })
 
     const persistCurrentView = () => {
-      if (!ro) saveBoardView(bid, editor.getCamera())
+      saveBoardView(bid, editor.getCamera(), mode)
     }
 
     window.addEventListener('beforeunload', persistCurrentView)
