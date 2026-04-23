@@ -110,15 +110,6 @@ function getBoardViewStorageKey(boardId, role) {
   return `${BOARD_VIEW_STORAGE_PREFIX}${role ? role + '.' : ''}${boardId}`
 }
 
-function shouldRestoreViewFromReload() {
-  if (typeof window === 'undefined' || typeof performance === 'undefined') return false
-  const navEntry = performance.getEntriesByType?.('navigation')?.[0]
-  if (navEntry && typeof navEntry.type === 'string') {
-    return navEntry.type === 'reload'
-  }
-  return performance.navigation?.type === 1
-}
-
 function loadSavedBoardView(boardId, role) {
   if (typeof window === 'undefined') return null
   try {
@@ -144,15 +135,6 @@ function saveBoardView(boardId, camera, role) {
       y: camera.y,
       z: camera.z,
     }))
-  } catch {
-    // Ignore storage failures; view persistence is a convenience only.
-  }
-}
-
-function clearSavedBoardView(boardId, role) {
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.removeItem(getBoardViewStorageKey(boardId, role))
   } catch {
     // Ignore storage failures; view persistence is a convenience only.
   }
