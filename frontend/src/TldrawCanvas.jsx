@@ -1131,8 +1131,8 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       saveTimerRef.current = null
       doSave()
     }
-    // Persist camera position so it can be restored on next open
-    if (editorRef.current && boardId) {
+    // Persist camera position so it can be restored on next open (owner only)
+    if (editorRef.current && boardId && !readOnlyRef.current) {
       saveBoardView(boardId, editorRef.current.getCamera())
     }
   }, [doSave])
@@ -1231,7 +1231,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     }, { source: 'user', scope: 'document' })
 
     const persistCurrentView = () => {
-      saveBoardView(bid, editor.getCamera())
+      if (!ro) saveBoardView(bid, editor.getCamera())
     }
 
     window.addEventListener('beforeunload', persistCurrentView)
