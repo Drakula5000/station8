@@ -1132,18 +1132,49 @@ export default function App() {
   }
 
   const [ocrRebuilding, setOcrRebuilding] = useState(false)
+  const [ocrProgress, setOcrProgress] = useState(null) // { done, total } | null
   const rebuildImageSearch = async () => {
     if (ocrRebuilding) return
     setOcrRebuilding(true)
+    setOcrProgress(null)
     try {
-      const res = await fetch(`${API}/api/ocr/rebuild`, { method: 'POST', credentials: 'include' })
-      if (!res.ok) throw new Error('rebuild failed')
-      const data = await res.json()
-      showError(`Re-scanned ${data.total_images} images · ${data.with_text} with text, ${data.empty} blank`)
+      const { ocrImage } = await import('./ocr')
+      const listRes = await fetch(`${API}/api/ocr/images`, { credentials: 'include' })
+      if (!listRes.ok) throw new Error('list failed')
+      const { images = [] } = await listRes.json()
+      if (images.length === 0) {
+        showError('No uploaded images to scan.')
+        return
+      }
+      let withText = 0
+      let blank = 0
+      for (let i = 0; i < images.length; i++) {
+        setOcrProgress({ done: i, total: images.length })
+        const { filename } = images[i]
+        try {
+          const imgRes = await fetch(`${API}/uploads/${filename}`, { credentials: 'include' })
+          if (!imgRes.ok) throw new Error('fetch failed')
+          const blob = await imgRes.blob()
+          const text = await ocrImage(blob)
+          await fetch(`${API}/api/ocr/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ filename, text }),
+          })
+          if (text) withText++
+          else blank++
+        } catch {
+          blank++
+        }
+      }
+      setOcrProgress({ done: images.length, total: images.length })
+      showError(`Rescanned ${images.length} images · ${withText} with text, ${blank} blank`)
     } catch {
       showError('Could not rescan images right now.')
     } finally {
       setOcrRebuilding(false)
+      setTimeout(() => setOcrProgress(null), 2000)
     }
   }
 
@@ -1484,7 +1515,11 @@ export default function App() {
               title="Re-read text from every uploaded image. Run after deploying or if image search is missing words."
               type="button"
             >
-              {ocrRebuilding ? '◐ Rescanning images…' : '◑ Rescan image text'}
+              {ocrRebuilding
+                ? ocrProgress
+                  ? `◐ Scanning ${ocrProgress.done}/${ocrProgress.total}…`
+                  : '◐ Loading scanner…'
+                : '◑ Rescan image text'}
             </button>
             <button
               className="sidebar-mode-btn"

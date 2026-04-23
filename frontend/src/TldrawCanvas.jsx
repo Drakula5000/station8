@@ -15,6 +15,7 @@ import {
   FjEllipseIcon, FjDiamondIcon, FjRectIcon, FjLineIcon, FjChevronDownIcon,
 } from './icons'
 import { ShapeInspector } from './components/ShapeInspector'
+import { ocrImage } from './ocr'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -31,13 +32,16 @@ export function setSignedUploadUrls(map) {
   }
 }
 
-// Send uploads through our Flask endpoint so /api/upload can OCR the image and
-// index it in data/ocr.json. Without this tldraw stores images as inline data
-// URLs, which are huge in the snapshot and invisible to server-side search.
+// Send uploads through our Flask endpoint so they're indexed for search. OCR
+// runs in the browser (Tesseract.js) because Render's Python native runtime
+// can't install the tesseract binary; the extracted text rides along as a
+// form field. Without this tldraw would store images as inline data URLs.
 const assetStore = {
   async upload(_asset, file) {
+    const ocrText = await ocrImage(file)
     const body = new FormData()
     body.append('file', file)
+    body.append('ocr_text', ocrText)
     const res = await fetch(`${API}/api/upload`, {
       method: 'POST',
       credentials: 'include',
