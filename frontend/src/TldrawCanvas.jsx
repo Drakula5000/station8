@@ -4,6 +4,7 @@ import {
   useEditor,
   track,
   DefaultColorStyle,
+  DefaultDashStyle,
   GeoShapeGeoStyle,
   FrameShapeUtil,
   TldrawUiButtonIcon,
@@ -190,7 +191,8 @@ const ImageShapeStyles = track(function ImageShapeStyles() {
   const editor = useEditor()
   const images = editor.getCurrentPageShapes().filter((s) => {
     if (s.type !== 'image') return false
-    return Number(s.meta?.imageCornerRadius ?? 0) > 0 || Number(s.meta?.imageBorderWidth ?? 0) > 0
+    const hasExplicitCorners = Object.prototype.hasOwnProperty.call(s.meta ?? {}, 'imageCornerRadius')
+    return hasExplicitCorners || Number(s.meta?.imageBorderWidth ?? 0) > 0
   })
   if (images.length === 0) return null
 
@@ -374,6 +376,12 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
       editor.setCurrentTool('line')
     } else {
       try { editor.setStyleForNextShapes(GeoShapeGeoStyle, shape) } catch { /* no-op */ }
+      try {
+        editor.setStyleForNextShapes(
+          DefaultDashStyle,
+          shape === 'rectangle' || shape === 'diamond' ? 'solid' : 'draw'
+        )
+      } catch { /* no-op */ }
       editor.setCurrentTool('geo')
     }
     closeAll()

@@ -846,8 +846,12 @@ html[data-mode="light"] {
   padding: 14px 16px;
   display: flex; flex-direction: column; gap: 12px;
   width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   pointer-events: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .shape-inspector .insp-row { display: flex; align-items: center; gap: 12px; }
 .shape-inspector .insp-label {

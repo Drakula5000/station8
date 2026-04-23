@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { track, useEditor, DefaultColorStyle, DefaultFillStyle, DefaultFontStyle, DefaultSizeStyle, DefaultHorizontalAlignStyle } from 'tldraw'
+import { useEffect, useRef, useState } from 'react'
+import { track, useEditor, DefaultColorStyle, DefaultFillStyle, DefaultFontStyle, DefaultSizeStyle, DefaultHorizontalAlignStyle, DefaultDashStyle } from 'tldraw'
 import { FjDraftIcon, FjDataIcon, FjAnalysisIcon, FjInsightIcon } from '../icons'
 
 // Aurora palette — must stay in sync with STICKY_SWATCHES in TldrawCanvas.jsx.
@@ -64,11 +64,21 @@ const CORNER_OPTIONS = [
   { id: 32, cls: 'corner-swatch-32', title: 'Pill' },
 ]
 
+const RECTANGLE_CORNER_OPTIONS = [
+  { id: 'sharp', cls: 'corner-swatch-0', title: 'Sharp' },
+  { id: 'round', cls: 'corner-swatch-8', title: 'Rounded' },
+]
+
 const IMAGE_BORDER_OPTIONS = [
   { id: 0, label: 'Off', title: 'No border' },
   { id: 1, label: 'Thin', title: 'Thin border' },
   { id: 4, label: 'Bold', title: 'Bold border' },
 ]
+
+const INSPECTOR_SCREEN_MARGIN = 16
+const INSPECTOR_GAP = 14
+const MIN_INSPECTOR_SCALE = 0.62
+const MAX_INSPECTOR_SCALE = 1
 
 // Which control rows apply to which shape types.
 // Keep conservative — show a control only when ALL selected shapes support it.
@@ -83,6 +93,13 @@ const SHAPES_WITH_FREEFORM_TEXT_SIZE = new Set(['text'])
 
 function allShapesMatch(shapes, set) {
   return shapes.length > 0 && shapes.every((s) => set.has(s.type))
+}
+
+function allCorneredGeoShapes(shapes) {
+  const roundedGeoShapes = new Set(['ellipse', 'oval', 'cloud', 'heart'])
+  return shapes.length > 0 && shapes.every(
+    (shape) => shape.type === 'geo' && !roundedGeoShapes.has(shape.props?.geo)
+  )
 }
 
 // Pluck a shared style value across a selection. Returns undefined when
@@ -143,9 +160,15 @@ function getNearestSizePreset(sizePx) {
   })
 }
 
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max)
+}
+
 export const ShapeInspector = track(function ShapeInspector() {
   const editor = useEditor()
+  const inspectorRef = useRef(null)
   const [textSizeDraft, setTextSizeDraft] = useState('')
+  const [panelSize, setPanelSize] = useState({ width: 340, height: 0 })
 
   const shapes = editor.getSelectedShapes()
   const activeTextSizePx = getSharedTextSizePx(shapes)
@@ -153,6 +176,26 @@ export const ShapeInspector = track(function ShapeInspector() {
   useEffect(() => {
     setTextSizeDraft(activeTextSizePx === undefined ? '' : formatSizePx(activeTextSizePx))
   }, [activeTextSizePx])
+
+  useEffect(() => {
+    const panel = inspectorRef.current
+    if (!panel) return undefined
+
+    const syncPanelSize = () => {
+      const nextWidth = panel.offsetWidth
+      const nextHeight = panel.offsetHeight
+      setPanelSize((current) => (
+        current.width === nextWidth && current.height === nextHeight
+          ? current
+          : { width: nextWidth, height: nextHeight }
+      ))
+    }
+
+    syncPanelSize()
+    const observer = new ResizeObserver(syncPanelSize)
+    observer.observe(panel)
+    return () => observer.disconnect()
+  }, [])
 
   if (shapes.length === 0) return null
 
@@ -163,9 +206,40 @@ export const ShapeInspector = track(function ShapeInspector() {
   const bounds = editor.getSelectionRotatedPageBounds()
   if (!bounds) return null
 
+  const zoomLevel = editor.getZoomLevel()
+  const viewport = editor.getViewportScreenBounds()
+  const container = editor.getContainer()
   const topLeft = editor.pageToScreen({ x: bounds.minX, y: bounds.maxY })
   const topRight = editor.pageToScreen({ x: bounds.maxX, y: bounds.maxY })
+  const topCenter = editor.pageToScreen({ x: bounds.center.x, y: bounds.minY })
   const centerX = (topLeft.x + topRight.x) / 2
+  const zoomScale = clamp(1 / Math.max(1, Math.sqrt(zoomLevel)), MIN_INSPECTOR_SCALE, MAX_INSPECTOR_SCALE)
+  const widthScale = panelSize.width > 0
+    ? Math.min(MAX_INSPECTOR_SCALE, (viewport.w - INSPECTOR_SCREEN_MARGIN * 2) / panelSize.width)
+    : MAX_INSPECTOR_SCALE
+  const heightScale = panelSize.height > 0
+    ? Math.min(MAX_INSPECTOR_SCALE, (viewport.h - INSPECTOR_SCREEN_MARGIN * 2) / panelSize.height)
+    : MAX_INSPECTOR_SCALE
+  const inspectorScale = clamp(
+    Math.min(zoomScale, widthScale, heightScale),
+    MIN_INSPECTOR_SCALE,
+    MAX_INSPECTOR_SCALE
+  )
+  const scaledWidth = panelSize.width * inspectorScale
+  const scaledHeight = panelSize.height * inspectorScale
+  const localCenterX = centerX - viewport.x
+  const localBottomY = topLeft.y - viewport.y
+  const localTopY = topCenter.y - viewport.y
+  const maxX = Math.max(INSPECTOR_SCREEN_MARGIN, viewport.w - scaledWidth - INSPECTOR_SCREEN_MARGIN)
+  const maxY = Math.max(INSPECTOR_SCREEN_MARGIN, viewport.h - scaledHeight - INSPECTOR_SCREEN_MARGIN)
+  const x = clamp(localCenterX - scaledWidth / 2, INSPECTOR_SCREEN_MARGIN, maxX) + container.scrollLeft
+  const belowY = localBottomY + INSPECTOR_GAP
+  const aboveY = localTopY - scaledHeight - INSPECTOR_GAP
+  const y = (
+    belowY + scaledHeight <= viewport.h - INSPECTOR_SCREEN_MARGIN || aboveY < INSPECTOR_SCREEN_MARGIN
+      ? clamp(belowY, INSPECTOR_SCREEN_MARGIN, maxY)
+      : clamp(aboveY, INSPECTOR_SCREEN_MARGIN, maxY)
+  ) + container.scrollTop
 
   const showColor   = allShapesMatch(shapes, SHAPES_WITH_COLOR)
   const showFill    = allShapesMatch(shapes, SHAPES_WITH_FILL)
@@ -173,17 +247,26 @@ export const ShapeInspector = track(function ShapeInspector() {
   const showSize    = allShapesMatch(shapes, SHAPES_WITH_SIZE)
   const showAlign   = allShapesMatch(shapes, SHAPES_WITH_ALIGN)
   const showCorners = allShapesMatch(shapes, SHAPES_WITH_CORNERS)
+  const showGeoCorners = allCorneredGeoShapes(shapes)
   const showImageStyling = allShapesMatch(shapes, SHAPES_WITH_IMAGE_STYLING)
   const showTextSizeInput = allShapesMatch(shapes, SHAPES_WITH_FREEFORM_TEXT_SIZE)
 
   const activeColor = sharedStyle(editor, DefaultColorStyle)
   const activeFillStyle = sharedStyle(editor, DefaultFillStyle)
+  const activeDash = sharedStyle(editor, DefaultDashStyle)
   const activeFont  = sharedStyle(editor, DefaultFontStyle)
   const activeSize  = sharedStyle(editor, DefaultSizeStyle)
   const activeAlign = sharedStyle(editor, DefaultHorizontalAlignStyle)
   const activeCorner = showCorners && shapes.every(
     s => Number(s.meta?.cornerRadius ?? 0) === Number(shapes[0].meta?.cornerRadius ?? 0)
   ) ? Number(shapes[0].meta?.cornerRadius ?? 0) : undefined
+  const activeGeoCorner = showGeoCorners
+    ? activeDash === 'draw'
+      ? 'round'
+      : activeDash === undefined
+        ? undefined
+        : 'sharp'
+    : undefined
   const activeImageCorner = showImageStyling && shapes.every(
     s => Number(s.meta?.imageCornerRadius ?? 0) === Number(shapes[0].meta?.imageCornerRadius ?? 0)
   ) ? Number(shapes[0].meta?.imageCornerRadius ?? 0) : undefined
@@ -295,6 +378,10 @@ export const ShapeInspector = track(function ShapeInspector() {
   const applyCorner = (rx) => editor.updateShapes(
     shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, cornerRadius: rx } }))
   )
+  const applyGeoCorner = (cornerStyle) => editor.setStyleForSelectedShapes(
+    DefaultDashStyle,
+    cornerStyle === 'round' ? 'draw' : 'solid'
+  )
   const applyImageCorner = (rx) => editor.updateShapes(
     shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, imageCornerRadius: rx } }))
   )
@@ -307,11 +394,13 @@ export const ShapeInspector = track(function ShapeInspector() {
 
   return (
     <div
+      ref={inspectorRef}
       className="shape-inspector"
       style={{
-        left: `${centerX}px`,
-        top: `${topLeft.y + 14}px`,
-        transform: 'translateX(-50%)',
+        left: `${x}px`,
+        top: `${y}px`,
+        transform: `scale(${inspectorScale})`,
+        transformOrigin: 'top left',
       }}
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
@@ -460,6 +549,23 @@ export const ShapeInspector = track(function ShapeInspector() {
                 title={c.title}
                 type="button"
               ><span className={`corner-swatch ${c.cls}`} /></button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showGeoCorners && (
+        <div className="insp-row">
+          <div className="insp-label">Corners</div>
+          <div className="insp-body">
+            {RECTANGLE_CORNER_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                className={`insp-btn ${activeGeoCorner === option.id ? 'active' : ''}`}
+                onClick={() => applyGeoCorner(option.id)}
+                title={option.title}
+                type="button"
+              ><span className={`corner-swatch ${option.cls}`} /></button>
             ))}
           </div>
         </div>
