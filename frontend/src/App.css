@@ -1634,6 +1634,64 @@ html[data-mode="light"] {
 .modal-search .search-input:focus { border-bottom-color: var(--s8-accent-border); }
 .hint { font-size: 11px; color: var(--s8-text-mid); margin-top: 8px; }
 
+/* Scope pill row */
+.search-scope-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.search-scope-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 10px;
+  border-radius: 100px;
+  background: var(--s8-accent-dim);
+  border: 1px solid var(--s8-accent-border);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--s8-accent);
+  max-width: 280px;
+}
+.search-scope-pill-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-scope-pill-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--s8-accent);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0;
+  opacity: 0.7;
+  transition: opacity 0.1s;
+  flex-shrink: 0;
+}
+.search-scope-pill-clear:hover { opacity: 1; }
+
+/* "Search all boards" link */
+.search-all-link {
+  display: block;
+  border: none;
+  background: transparent;
+  color: var(--s8-text-mid);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 4px 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.1s;
+}
+.search-all-link:hover { color: var(--s8-accent); }
+
 .results { margin-top: 12px; max-height: 420px; overflow-y: auto; }
 .result {
   padding: 10px 12px; border-radius: 8px;
@@ -1896,4 +1954,31 @@ html[data-mode="light"] {
 .tldraw-wrap ol ol {
   margin-left: 1.5em;
   padding-left: 0;
+}
+
+/* ── Cross-board confirmation card ── */
+.cross-board-confirm {
+  padding: 20px 4px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cross-board-confirm-heading {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--s8-text);
+}
+
+.cross-board-confirm-sub {
+  font-size: 13px;
+  color: var(--s8-text-mid);
+  margin-bottom: 4px;
+}
+
+.cross-board-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
 }

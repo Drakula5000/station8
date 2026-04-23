@@ -179,6 +179,9 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState(null) // string | null — triggers FindBar in TldrawCanvas
+  const [searchScope, setSearchScope] = useState(null) // { boardId, boardName } | null
+  const [crossBoardPending, setCrossBoardPending] = useState(null) // { docId, docName, folderId, kind } | null
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
@@ -383,6 +386,8 @@ export default function App() {
     navigate(null)
   }, [navigate])
 
+  const onFindDismiss = useCallback(() => setFindQuery(null), [])
+
   const refresh = useCallback(async () => {
     if (auth.loading) return
     if (!auth.authenticated && !route.shareToken) return
@@ -521,10 +526,19 @@ export default function App() {
           homeSearchRef.current?.focus()
           return
         }
+        if (activeId?.type === 'board') {
+          const board = boards.find(b => b.id === activeId.id)
+          setSearchScope(board ? { boardId: board.id, boardName: board.name } : null)
+        } else {
+          setSearchScope(null)
+        }
+        setFindQuery(null)
         setSearchOpen(true)
       }
       if (e.key === 'Escape') {
         setSearchOpen(false)
+        setSearchScope(null)
+        setCrossBoardPending(null)
         setNewBoardOpen(false)
         setNewSheetOpen(false)
         setNewFolderOpen(false)
@@ -559,10 +573,13 @@ export default function App() {
         body: JSON.stringify({ query }),
       }, null)
       setSearchLoading(false)
-      if (data) setResults(data.hits || [])
+      if (data) {
+        const hits = data.hits || []
+        setResults(searchScope ? hits.filter(h => h.doc_id === searchScope.boardId) : hits)
+      }
     }, 200)
     return () => clearTimeout(t)
-  }, [query, route.shareToken, viewerMode])
+  }, [query, route.shareToken, viewerMode, searchScope])
 
   const openNewBoardModal = () => {
     setNewBoardName('')
@@ -1287,7 +1304,16 @@ export default function App() {
           )}
 
           <div className="sb-section-row"><div className="sb-section">Search</div></div>
-          <button className="search-btn" onClick={() => setSearchOpen(true)} type="button">
+          <button className="search-btn" onClick={() => {
+            if (activeId?.type === 'board') {
+              const board = boards.find(b => b.id === activeId.id)
+              setSearchScope(board ? { boardId: board.id, boardName: board.name } : null)
+            } else {
+              setSearchScope(null)
+            }
+            setFindQuery(null)
+            setSearchOpen(true)
+          }} type="button">
             <span className="search-btn-label"><SearchIcon /> Search</span>
             <span className="kbd">⌘F</span>
           </button>
@@ -1460,6 +1486,8 @@ export default function App() {
                   shareSlug={route.shareToken}
                   onSaveState={setSaveState}
                   colorMode={colorMode}
+                  findQuery={findQuery}
+                  onFindDismiss={onFindDismiss}
                 />
               )}
               {activeId?.type === 'sheet' && (
@@ -1680,40 +1708,100 @@ export default function App() {
       )}
 
       {searchOpen && (
-        <Modal onClose={() => setSearchOpen(false)} wide>
+        <Modal onClose={() => { setSearchOpen(false); setSearchScope(null); setCrossBoardPending(null) }} wide>
+          {searchScope && (
+            <div className="search-scope-row">
+              <div className="search-scope-pill">
+                <span className="search-scope-pill-name">{searchScope.boardName}</span>
+                <button
+                  className="search-scope-pill-clear"
+                  aria-label="Remove scope"
+                  onClick={() => setSearchScope(null)}
+                  type="button"
+                >✕</button>
+              </div>
+            </div>
+          )}
           <input
             autoFocus
             className="search-input"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search across everything…"
+            placeholder={searchScope ? 'Search in this board…' : 'Search across everything…'}
           />
+          {searchScope && (
+            <button
+              className="search-all-link"
+              onClick={() => setSearchScope(null)}
+              type="button"
+            >Search all boards</button>
+          )}
           <div className="hint">Text, shapes, sticky notes, sheet cells, OCR — across all boards and sheets.</div>
-          <div className="results">
-            {searchLoading ? (
-              <div className="result-empty">Searching…</div>
-            ) : results.map((r, i) => (
-              <div
-                key={i}
-                className="result"
-                onClick={() => {
-                  if (r.kind === 'sheet') {
-                    const sheet = sheets.find(item => item.id === r.doc_id)
-                    openDocument('sheet', r.doc_id, sheet?.folder_id)
-                  } else {
-                    const board = boards.find(item => item.id === r.doc_id)
-                    openDocument('board', r.doc_id, board?.folder_id)
-                  }
-                  setSearchOpen(false)
-                }}
-              >
-                <div className="result-title">{r.doc_name}</div>
-                <div className="result-snippet">{r.snippet}</div>
-                <div className="result-meta">{r.source}</div>
+          {crossBoardPending ? (
+            <div className="cross-board-confirm">
+              <div className="cross-board-confirm-heading">Navigate to "{crossBoardPending.docName}"?</div>
+              <div className="cross-board-confirm-sub">This will leave your current board.</div>
+              <div className="cross-board-confirm-actions">
+                <button
+                  className="btn-ghost"
+                  onClick={() => setCrossBoardPending(null)}
+                  type="button"
+                >Cancel</button>
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    openDocument(crossBoardPending.kind, crossBoardPending.docId, crossBoardPending.folderId)
+                    setSearchOpen(false)
+                    setCrossBoardPending(null)
+                  }}
+                  type="button"
+                >Go</button>
               </div>
-            ))}
-            {query && !searchLoading && results.length === 0 && <div className="result-empty">No hits</div>}
-          </div>
+            </div>
+          ) : (
+            <div className="results">
+              {searchLoading ? (
+                <div className="result-empty">Searching…</div>
+              ) : results.map((r, i) => (
+                <div
+                  key={i}
+                  className="result"
+                  onClick={() => {
+                    if (activeId?.type === 'board' && r.doc_id !== activeId.id) {
+                      // Cross-board navigation — show confirmation first
+                      const folderId = r.kind === 'sheet'
+                        ? sheets.find(item => item.id === r.doc_id)?.folder_id ?? null
+                        : boards.find(item => item.id === r.doc_id)?.folder_id ?? null
+                      setCrossBoardPending({
+                        docId: r.doc_id,
+                        docName: r.doc_name,
+                        folderId,
+                        kind: r.kind === 'sheet' ? 'sheet' : 'board',
+                      })
+                    } else {
+                      // Same board, or activeId is null (database home) — navigate directly
+                      if (r.kind === 'sheet') {
+                        const sheet = sheets.find(item => item.id === r.doc_id)
+                        openDocument('sheet', r.doc_id, sheet?.folder_id)
+                      } else {
+                        const board = boards.find(item => item.id === r.doc_id)
+                        openDocument('board', r.doc_id, board?.folder_id)
+                        if (activeId?.type === 'board' && r.doc_id === activeId.id) {
+                          setFindQuery(query)
+                        }
+                      }
+                      setSearchOpen(false)
+                    }
+                  }}
+                >
+                  <div className="result-title">{r.doc_name}</div>
+                  <div className="result-snippet">{r.snippet}</div>
+                  <div className="result-meta">{r.source}</div>
+                </div>
+              ))}
+              {query && !searchLoading && results.length === 0 && <div className="result-empty">No hits</div>}
+            </div>
+          )}
         </Modal>
       )}
 

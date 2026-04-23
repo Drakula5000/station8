@@ -166,6 +166,23 @@ function restoreBoardViewAfterLoad(editor, camera) {
   })
 }
 
+function fitBoardAfterOpen(editor) {
+  const fit = () => {
+    if (editor.getCurrentPageBounds()) {
+      editor.zoomToFit({ immediate: true, inset: 96 })
+    } else {
+      editor.setCamera({ x: 0, y: 0, z: 1 }, { immediate: true })
+    }
+  }
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      fit()
+      window.setTimeout(fit, 80)
+    })
+  })
+}
+
 function getNotePreviewSizePx(editor) {
   return NOTE_PREVIEW_SIZE * editor.getResizeScaleFactor() * editor.getZoomLevel()
 }
@@ -345,6 +362,162 @@ function isEditableTarget(target) {
   const tag = target.tagName
   return target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
 }
+
+function walkRichText(node) {
+  if (!node || typeof node !== 'object') return ''
+  if (node.type === 'text') return node.text || ''
+  return (node.content || []).map(walkRichText).join(' ')
+}
+
+function extractShapeText(shape) {
+  if (!shape) return ''
+  const type = shape.type
+  if (type === 'note' || type === 'text') {
+    return walkRichText(shape.props?.richText) || shape.props?.text || ''
+  }
+  if (type === 'image') {
+    return shape.meta?.altText || ''
+  }
+  return shape.props?.text || ''
+}
+
+const FindBar = track(function FindBar({ query, onDismiss }) {
+  const editor = useEditor()
+  const [matches, setMatches] = useState([])
+  const [matchIndex, setMatchIndex] = useState(0)
+
+  const zoomToMatch = useCallback((editor, shapeId) => {
+    const bounds = editor.getShapePageBounds(shapeId)
+    if (!bounds || !(bounds.width > 0)) return
+    editor.zoomToBounds(bounds, { padding: 100, animation: { duration: 300 } })
+    editor.select(shapeId)
+  }, [])
+
+  useEffect(() => {
+    if (!editor || !query) return
+    const q = query.toLowerCase()
+    const allShapes = editor.getCurrentPageShapes()
+    const found = allShapes
+      .filter(s => extractShapeText(s).toLowerCase().includes(q))
+      .map(s => ({ shapeId: s.id }))
+    setMatches(found)
+    setMatchIndex(0)
+  }, [editor, query])
+
+  useEffect(() => {
+    if (!editor || matches.length === 0) return
+    zoomToMatch(editor, matches[matchIndex].shapeId)
+  }, [editor, matches, matchIndex, zoomToMatch])
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        editor.selectNone()
+        onDismiss()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editor, onDismiss])
+
+  const goNext = () => {
+    if (matches.length <= 1) return
+    const next = (matchIndex + 1) % matches.length
+    setMatchIndex(next)
+    zoomToMatch(editor, matches[next].shapeId)
+  }
+
+  const goprev = () => {
+    if (matches.length <= 1) return
+    const prev = (matchIndex - 1 + matches.length) % matches.length
+    setMatchIndex(prev)
+    zoomToMatch(editor, matches[prev].shapeId)
+  }
+
+  const handleClose = () => {
+    editor.selectNone()
+    onDismiss()
+  }
+
+  const counter = matches.length === 0
+    ? '0 of 0'
+    : `${matchIndex + 1} of ${matches.length}`
+
+  const navDisabled = matches.length <= 1
+
+  return (
+    <>
+      <style>{`
+        .find-bar {
+          position: fixed;
+          bottom: 80px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 500;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 10px;
+          background: var(--s8-bg);
+          color: var(--s8-text);
+          border: 1px solid var(--s8-input-border);
+          box-shadow: var(--s8-shadow-menu);
+          border-radius: 8px;
+          font-size: 13px;
+          white-space: nowrap;
+          pointer-events: all;
+        }
+        .find-bar-counter {
+          min-width: 52px;
+          text-align: center;
+          opacity: 0.75;
+        }
+        .find-bar-btn {
+          background: none;
+          border: none;
+          cursor: pointer;
+          color: var(--s8-text);
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 14px;
+          line-height: 1;
+          transition: background 0.12s, color 0.12s;
+        }
+        .find-bar-btn:hover:not(:disabled) {
+          background: var(--s8-accent);
+          color: #fff;
+        }
+        .find-bar-btn:disabled {
+          opacity: 0.35;
+          cursor: default;
+        }
+      `}</style>
+      <div className="find-bar">
+        <span className="find-bar-counter">{counter}</span>
+        <button
+          className="find-bar-btn"
+          onClick={goNext}
+          disabled={navDisabled}
+          title="Next match"
+          type="button"
+        >↓</button>
+        <button
+          className="find-bar-btn"
+          onClick={goprev}
+          disabled={navDisabled}
+          title="Previous match"
+          type="button"
+        >↑</button>
+        <button
+          className="find-bar-btn"
+          onClick={handleClose}
+          title="Close"
+          type="button"
+        >✕</button>
+      </div>
+    </>
+  )
+})
 
 const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
   const editor = useEditor()
@@ -720,7 +893,7 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
   )
 })
 
-export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug, onSaveState, colorMode }) {
+export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug, onSaveState, colorMode, findQuery, onFindDismiss }) {
   const boardIdRef = useRef(boardId)
   const readOnlyRef = useRef(readOnly)
   const viewerModeRef = useRef(viewerMode)
@@ -876,6 +1049,8 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
             clearSavedBoardView(bid)
           }
           restoreViewOnLoadRef.current = false
+        } else {
+          fitBoardAfterOpen(editor)
         }
       })
 
@@ -1001,6 +1176,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         <ImageShapeStyles />
         <ListStyles />
         <ShapeColorSync />
+        {findQuery && <FindBar query={findQuery} onDismiss={onFindDismiss} />}
       </Tldraw>
       {ghost && (
         <div
