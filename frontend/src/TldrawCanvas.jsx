@@ -74,6 +74,36 @@ const MAX_DROPPED_IMAGE_FRAME_FRACTION = 0.2
 const FRAME_DROPPED_IMAGE_INSET = 32
 
 const FRAME_SHAPE_UTILS = [FrameShapeUtil.configure({ showColors: true })]
+const FIGMA_REORDER_SHORTCUTS = {
+  bringForward: 'cmd+],ctrl+]',
+  bringToFront: 'cmd+alt+],ctrl+shift+]',
+  sendBackward: 'cmd+[,ctrl+[',
+  sendToBack: 'cmd+alt+[,ctrl+shift+[',
+}
+
+const TLDRAW_UI_OVERRIDES = {
+  actions(_editor, actions) {
+    return {
+      ...actions,
+      'bring-forward': {
+        ...actions['bring-forward'],
+        kbd: FIGMA_REORDER_SHORTCUTS.bringForward,
+      },
+      'bring-to-front': {
+        ...actions['bring-to-front'],
+        kbd: FIGMA_REORDER_SHORTCUTS.bringToFront,
+      },
+      'send-backward': {
+        ...actions['send-backward'],
+        kbd: FIGMA_REORDER_SHORTCUTS.sendBackward,
+      },
+      'send-to-back': {
+        ...actions['send-to-back'],
+        kbd: FIGMA_REORDER_SHORTCUTS.sendToBack,
+      },
+    }
+  },
+}
 
 function getNotePreviewSizePx(editor) {
   return NOTE_PREVIEW_SIZE * editor.getResizeScaleFactor() * editor.getZoomLevel()
@@ -829,6 +859,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         onMount={handleMount}
         assets={assetStore}
         options={{ snapThreshold: 10 }}
+        overrides={TLDRAW_UI_OVERRIDES}
         shapeUtils={FRAME_SHAPE_UTILS}
       >
         {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} />}
