@@ -347,67 +347,18 @@ html[data-theme="prism"] .database-home {
   background-size: auto;
 }
 
-/* ────────────────────────────────────────────────────────────────────────
-   CHROME SURFACES — backdrop-filter for glass/abyss/prism (frosted look),
-   hard edges for hud/archive. These are structural overrides the tokens
-   alone can't express.
-   ──────────────────────────────────────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════════════════
+   CHROME OVERRIDES — each theme's structural + typographic identity that
+   pure token swaps can't express. Organized by theme for maintainability.
+   ════════════════════════════════════════════════════════════════════════ */
 
+/* Frosted backdrop on sidebar / pill / toolbar for depth-forward themes */
 html[data-theme="glass"] .sidebar,
 html[data-theme="abyss"] .sidebar,
 html[data-theme="prism"] .sidebar {
   backdrop-filter: blur(26px) saturate(160%);
   -webkit-backdrop-filter: blur(26px) saturate(160%);
 }
-
-/* Prism: iridescent right-edge on sidebar — ::after keeps the sidebar's
-   translucent bg intact while painting a gradient line at the edge. */
-html[data-theme="prism"] .sidebar { position: relative; }
-html[data-theme="prism"] .sidebar::after {
-  content: ""; position: absolute; top: 0; right: 0; bottom: 0;
-  width: 1px; pointer-events: none;
-  background: linear-gradient(180deg,
-    #60F0FF 0%, #A07AFF 30%, #FF5CE0 60%, #FFA040 85%, transparent 100%);
-  opacity: 0.7;
-}
-
-/* Archive: stark 1px rules everywhere, no blurs, uppercase tendency */
-html[data-theme="archive"] .sidebar-brand {
-  font-family: 'Crimson Pro', 'EB Garamond', serif;
-  font-size: 20px;
-  text-transform: none;
-  letter-spacing: -0.01em;
-  font-weight: 400;
-}
-html[data-theme="archive"] .auth-title {
-  font-family: 'Crimson Pro', 'EB Garamond', serif;
-  font-weight: 300;
-  letter-spacing: -0.02em;
-}
-
-/* Abyss: serif italic for brand + auth title */
-html[data-theme="abyss"] .sidebar-brand {
-  font-family: 'Crimson Pro', 'EB Garamond', serif;
-  font-style: italic;
-  font-size: 18px;
-  text-transform: none;
-  letter-spacing: 0.02em;
-  font-weight: 400;
-}
-html[data-theme="abyss"] .auth-title {
-  font-family: 'Crimson Pro', 'EB Garamond', serif;
-  font-style: italic;
-  font-weight: 300;
-}
-
-/* Prism: gradient-clipped brand */
-html[data-theme="prism"] .sidebar-brand,
-html[data-theme="prism"] .auth-kicker {
-  background: linear-gradient(90deg, #60F0FF, #FF5CE0);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-
-/* All themes: frosted pill + toolbar backdrops where applicable */
 html[data-theme="glass"] .pill,
 html[data-theme="abyss"] .pill,
 html[data-theme="prism"] .pill,
@@ -421,20 +372,345 @@ html[data-theme="prism"] .fj-toolbar {
   -webkit-backdrop-filter: blur(22px) saturate(160%);
 }
 
+/* ─── II · HUD / Command Deck ──────────────────────────────────────────── */
+/* Sidebar brand: Space Mono with // prefix */
+html[data-theme="hud"] .sidebar-brand::before {
+  content: "// ";
+  color: var(--s8-text-mid);
+  font-weight: 400;
+}
+/* Pill title wrapped in [ ] brackets */
+html[data-theme="hud"] .pill-title-text::before {
+  content: "[ ";
+  color: var(--s8-accent);
+  font-family: 'Space Mono', monospace;
+  font-weight: 400;
+  margin-right: 2px;
+}
+html[data-theme="hud"] .pill-title-text::after {
+  content: " ]";
+  color: var(--s8-accent);
+  font-family: 'Space Mono', monospace;
+  font-weight: 400;
+  margin-left: 2px;
+}
+html[data-theme="hud"] .pill-title-text {
+  font-family: 'Space Mono', monospace;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+/* Frame heading prefixed with ▸ */
+html[data-theme="hud"] .tl-frame-heading::before {
+  content: "▸ ";
+  opacity: 0.8;
+}
+/* Dashed arrows/lines in amber */
+html[data-theme="hud"] [data-shape-type="arrow"] path[stroke]:not([stroke="transparent"]),
+html[data-theme="hud"] [data-shape-type="line"] path[stroke]:not([stroke="transparent"]) {
+  stroke-dasharray: 6 3;
+}
+/* HUD frame corner brackets — 2 diagonal-opposite corner brackets per frame.
+   Pseudo-elements anchor to the .tl-shape wrapper, so they scale with its
+   transform (translate only — tldraw v4 keeps shape wrappers at 1:1 and
+   applies zoom via --tl-zoom elsewhere). */
+html[data-theme="hud"] [data-shape-type="frame"] {
+  position: relative;
+}
+html[data-theme="hud"] [data-shape-type="frame"]::before,
+html[data-theme="hud"] [data-shape-type="frame"]::after {
+  content: ""; position: absolute;
+  width: 16px; height: 16px;
+  border: 1.5px solid #FFA528;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.85;
+}
+html[data-theme="hud"] [data-shape-type="frame"]::before {
+  top: -2px; left: -2px;
+  border-right: none; border-bottom: none;
+}
+html[data-theme="hud"] [data-shape-type="frame"]::after {
+  bottom: -2px; right: -2px;
+  border-left: none; border-top: none;
+}
+
+/* ─── III · Abyss ─────────────────────────────────────────────────────── */
+/* Sidebar brand serif italic, larger */
+html[data-theme="abyss"] .sidebar-brand {
+  font-family: 'Crimson Pro', 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 20px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-weight: 400;
+}
+/* Sidebar section headings: italic serif instead of mono/tracked */
+html[data-theme="abyss"] .sb-section,
+html[data-theme="abyss"] .sb-subsection {
+  font-family: 'Crimson Pro', 'EB Garamond', serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--s8-text-mid);
+}
+html[data-theme="abyss"] .auth-title,
+html[data-theme="abyss"] .pill-title-text {
+  font-family: 'Crimson Pro', 'EB Garamond', serif;
+  font-style: italic;
+  font-weight: 400;
+}
+html[data-theme="abyss"] .pill-title-text {
+  font-size: 17px;
+  letter-spacing: 0.01em;
+}
+html[data-theme="abyss"] .auth-title { font-weight: 300; }
+
+/* ─── IV · Archive ────────────────────────────────────────────────────── */
+/* Large serif brand + mono subtitle block treatment */
+html[data-theme="archive"] .sidebar-brand {
+  font-family: 'Crimson Pro', 'EB Garamond', serif;
+  font-size: 24px;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  font-weight: 400;
+}
+html[data-theme="archive"] .auth-title {
+  font-family: 'Crimson Pro', 'EB Garamond', serif;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+}
+/* Pill: transparent container, serif title + accent · suffix */
+html[data-theme="archive"] .pill {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 4px 0 !important;
+}
+html[data-theme="archive"] .pill-title-text {
+  font-family: 'Crimson Pro', 'EB Garamond', serif;
+  font-weight: 400;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+html[data-theme="archive"] .pill-title-text::after {
+  content: " ·";
+  color: var(--s8-accent);
+  margin-left: 2px;
+}
+/* Section headings as hard-rule-separated stencils */
+html[data-theme="archive"] .sb-section {
+  font-family: 'Space Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--s8-text-mid);
+}
+/* Sidebar action buttons outlined uppercase mono (not filled) */
+html[data-theme="archive"] .sidebar-action {
+  background: transparent !important;
+  border: 1px solid var(--s8-sidebar-border) !important;
+  color: var(--s8-text-mid) !important;
+  font-family: 'Space Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 400;
+  font-size: 9px;
+  border-radius: 0 !important;
+}
+html[data-theme="archive"] .sidebar-action:hover {
+  color: var(--s8-accent) !important;
+  border-color: var(--s8-accent) !important;
+}
+
+/* ─── V · Prisma ──────────────────────────────────────────────────────── */
+/* Iridescent right-edge on sidebar */
+html[data-theme="prism"] .sidebar { position: relative; }
+html[data-theme="prism"] .sidebar::after {
+  content: ""; position: absolute; top: 0; right: 0; bottom: 0;
+  width: 1px; pointer-events: none; z-index: 2;
+  background: linear-gradient(180deg,
+    #60F0FF 0%, #A07AFF 30%, #FF5CE0 60%, #FFA040 85%, transparent 100%);
+  opacity: 0.7;
+}
+/* Gradient-clipped brand + auth kicker */
+html[data-theme="prism"] .sidebar-brand,
+html[data-theme="prism"] .auth-kicker {
+  background: linear-gradient(90deg, #60F0FF, #FF5CE0);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+/* Active tag gets iridescent gradient fill */
+html[data-theme="prism"] .sb-tag.active {
+  background: linear-gradient(90deg, #60F0FF, #FF5CE0) !important;
+  color: #0B0318 !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   SIDEBAR ITEM TYPOGRAPHY — per-theme.
+   Default uses Inter; HUD wants Space Mono uppercase, Archive wants
+   Space Mono too, Abyss keeps serif section labels (already above) + sans
+   items. Items themselves (folders/boards/sheets) still need readable names.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* HUD sidebar items: Space Mono uppercase so the whole left rail reads
+   like a tactical index. */
+html[data-theme="hud"] .sb-item,
+html[data-theme="hud"] .sb-item-label {
+  font-family: 'Space Mono', 'JetBrains Mono', monospace;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+html[data-theme="hud"] .sb-section { letter-spacing: 0.24em; }
+html[data-theme="hud"] .sb-section::before { content: ":: "; color: var(--s8-text-mid); opacity: 0.7; }
+html[data-theme="hud"] .sidebar-action {
+  font-family: 'Space Mono', monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 9px;
+}
+
+/* Archive sidebar items: Space Mono but not uppercase (preserve names) */
+html[data-theme="archive"] .sb-item,
+html[data-theme="archive"] .sb-item-label {
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* Prism section headings: gradient-clipped */
+html[data-theme="prism"] .sb-section {
+  background: linear-gradient(90deg, #60F0FF, #FF5CE0);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+/* ─── I · Glass ────────────────────────────────────────────────────────── */
+/* Glass doesn't need a floating sidebar margin (breaks layout during
+   collapse); aurora depth is carried by the canvas bg + pill translucency. */
+
+/* ════════════════════════════════════════════════════════════════════════
+   THEME DECORATIONS — overlay DOM elements per theme
+   (rendered by <ThemeDecorations/> inside .work-area)
+   ════════════════════════════════════════════════════════════════════════ */
+.theme-deco {
+  position: absolute; inset: 0; z-index: 5;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* ─── HUD: screen corner brackets + scanline + status readout ─── */
+.theme-deco-hud .theme-deco-corner {
+  position: absolute;
+  width: 22px; height: 22px;
+  border: 1px solid var(--s8-accent);
+  opacity: 0.55;
+}
+.theme-deco-hud .theme-deco-corner.tl { top: 14px; left: 14px;     border-right: none; border-bottom: none; }
+.theme-deco-hud .theme-deco-corner.tr { top: 14px; right: 14px;    border-left: none;  border-bottom: none; }
+.theme-deco-hud .theme-deco-corner.bl { bottom: 14px; left: 14px;  border-right: none; border-top: none; }
+.theme-deco-hud .theme-deco-corner.br { bottom: 14px; right: 14px; border-left: none;  border-top: none; }
+
+.theme-deco-hud .theme-deco-scanline {
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0 3px,
+    rgba(255, 165, 40, 0.025) 3px 4px
+  );
+  mix-blend-mode: screen;
+}
+
+.theme-deco-hud .theme-deco-hud-readout {
+  position: absolute; bottom: 30px; left: 40px;
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  line-height: 1.7;
+  color: var(--s8-text-mid);
+  text-transform: lowercase;
+}
+.theme-deco-hud .theme-deco-hud-readout b  { color: var(--s8-accent);  font-weight: 400; }
+.theme-deco-hud .theme-deco-hud-readout em { color: var(--s8-accent2); font-style: normal; }
+
+/* ─── ABYSS: caustic SVG, low-opacity screen-blend ─── */
+.theme-deco-abyss .theme-deco-caustic {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  opacity: 0.28;
+  mix-blend-mode: screen;
+}
+
+/* ─── ARCHIVE: top+bottom rules + corner stamp + foot ─── */
+.theme-deco-archive .theme-deco-rule {
+  position: absolute; left: 28px; right: 28px;
+  height: 1px; background: var(--s8-sidebar-border);
+}
+.theme-deco-archive .theme-deco-rule.top { top: 52px; }
+.theme-deco-archive .theme-deco-rule.bot { bottom: 52px; }
+
+.theme-deco-archive .theme-deco-stamp {
+  position: absolute; top: 64px; right: 28px;
+  font-family: 'Space Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--s8-text-mid);
+  text-align: right;
+  line-height: 1.9;
+}
+.theme-deco-archive .theme-deco-stamp > div:first-child { color: var(--s8-accent); }
+
+.theme-deco-archive .theme-deco-foot {
+  position: absolute; left: 28px; bottom: 30px;
+  font-family: 'Space Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--s8-text-dim);
+}
+
+/* ─── PRISM: ambient bg glow pools ─── */
+.theme-deco-prism .theme-deco-prism-glow {
+  position: absolute;
+  width: 520px; height: 520px;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.28;
+  pointer-events: none;
+}
+.theme-deco-prism .theme-deco-prism-glow.tl {
+  top: -200px; left: -200px;
+  background: radial-gradient(circle, #60F0FF, transparent 70%);
+}
+.theme-deco-prism .theme-deco-prism-glow.br {
+  bottom: -220px; right: -220px;
+  background: radial-gradient(circle, #FF5CE0, transparent 70%);
+}
+
 /* ────────────────────────────────────────────────────────────────────────
-   CANVAS SHAPE FILTERS — per-theme global drop-shadows + stroke overrides.
+   CANVAS SHAPE FILTERS — per-theme visual flourishes.
    tldraw v4 does NOT emit `.tl-shape-{type}` classes. Every shape gets
    `.tl-shape` and a `data-shape-type` attribute; that's how we scope.
+
+   CRITICAL: Do NOT use `filter: drop-shadow` on shape wrappers or their
+   descendants. tldraw moves and resizes shapes via CSS `transform: matrix(...)`,
+   and `filter` creates a new stacking context whose paint region extends
+   beyond the transform box. During drag/resize the browser fails to
+   invalidate the extended region, leaving ghost/trail artifacts — the same
+   class of bug as `overflow: visible` on `.tl-canvas`. For glow effects,
+   use `box-shadow` on a real HTML container (e.g. `.tl-note__container`)
+   which fits the element's rectangular bounds and repaints cleanly.
    ──────────────────────────────────────────────────────────────────────── */
 
-/* Abyss: bioluminescent blooms — uniform per shape type */
-html[data-theme="abyss"] [data-shape-type="note"]  { filter: drop-shadow(0 0 14px rgba(58, 245, 184, 0.28)); }
-html[data-theme="abyss"] [data-shape-type="frame"] { filter: drop-shadow(0 0 18px rgba(58, 245, 184, 0.10)); }
-html[data-theme="abyss"] [data-shape-type="arrow"] { filter: drop-shadow(0 0 10px rgba(58, 245, 184, 0.45)); }
-html[data-theme="abyss"] [data-shape-type="line"]  { filter: drop-shadow(0 0 8px rgba(58, 245, 184, 0.45)); }
-html[data-theme="abyss"] [data-shape-type="draw"]  { filter: drop-shadow(0 0 8px rgba(58, 245, 184, 0.40)); }
-html[data-theme="abyss"] [data-shape-type="geo"]   { filter: drop-shadow(0 0 12px rgba(58, 245, 184, 0.20)); }
-html[data-theme="abyss"] [data-shape-type="text"]  { filter: drop-shadow(0 0 8px rgba(58, 245, 184, 0.20)); }
+/* Abyss: bioluminescent glow on note containers only (HTML element → clean
+   box-shadow repaint). SVG shapes (arrows, lines, draws, geo, frame body)
+   deliberately omitted — drop-shadow on those leaves trails during resize. */
+html[data-theme="abyss"] .tldraw-wrap [data-shape-type="note"] .tl-note__container {
+  box-shadow: 0 0 14px rgba(58, 245, 184, 0.28), var(--tl-note-shadow, 0 0 0 transparent);
+}
 
 /* Prism: gradient strokes — arrows, lines and frame borders share a single
    <linearGradient id="s8-prism-stroke"> defined in App.jsx <defs>. */
@@ -1158,7 +1434,9 @@ html[data-theme="archive"] [data-shape-type="geo"]  .tl-rich-text {
 .database-results {
   min-height: 0;
   overflow: auto;
-  padding-right: 4px;
+  /* Padding-top prevents hover-lift on the top card from being clipped by
+     the topbar edge. Right-side gap keeps scrollbar off the card border. */
+  padding: 6px 4px 0 0;
 }
 
 .database-list {
@@ -1566,8 +1844,18 @@ html[data-theme="archive"] [data-shape-type="geo"]  .tl-rich-text {
 .save-indicator.save-error { color: var(--s8-danger); }
 .save-indicator.save-ocr { color: var(--s8-accent); }
 
-/* tldraw canvas container */
-.tldraw-wrap { flex: 1; position: relative; min-height: 0; width: 100%; }
+/* tldraw canvas container.
+   `overscroll-behavior: contain` blocks the browser's trackpad swipe-back
+   gesture on macOS. Without it, a horizontal two-finger scroll over the
+   canvas fires browser history navigation, which calls `popstate` and
+   flips to whatever board the user was previously on. */
+.tldraw-wrap {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  width: 100%;
+  overscroll-behavior: contain;
+}
 .tldraw-wrap.sticky-placing,
 .tldraw-wrap.sticky-placing * { cursor: none !important; }
 

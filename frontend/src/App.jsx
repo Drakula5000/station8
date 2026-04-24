@@ -3,6 +3,7 @@ import Spreadsheet from 'react-spreadsheet'
 import TldrawCanvas from './TldrawCanvas'
 import { applyTldrawPalette } from './themePalettes'
 import { ThemePicker, BOARD_THEMES, VISITOR_RANDOM_POOL } from './components/ThemePicker'
+import { ThemeDecorations } from './components/ThemeDecorations'
 import {
   BoardIcon, SheetIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon,
   SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon,
@@ -1149,53 +1150,6 @@ export default function App() {
     }, 3000)
   }
 
-  const [ocrRebuilding, setOcrRebuilding] = useState(false)
-  const [ocrProgress, setOcrProgress] = useState(null) // { done, total } | null
-  const rebuildImageSearch = async () => {
-    if (ocrRebuilding) return
-    setOcrRebuilding(true)
-    setOcrProgress(null)
-    try {
-      const { ocrImage } = await import('./ocr')
-      const listRes = await fetch(`${API}/api/ocr/images`, { credentials: 'include' })
-      if (!listRes.ok) throw new Error('list failed')
-      const { images = [] } = await listRes.json()
-      if (images.length === 0) {
-        showError('No uploaded images to scan.')
-        return
-      }
-      let withText = 0
-      let blank = 0
-      for (let i = 0; i < images.length; i++) {
-        setOcrProgress({ done: i, total: images.length })
-        const { filename } = images[i]
-        try {
-          const imgRes = await fetch(`${API}/uploads/${filename}`, { credentials: 'include' })
-          if (!imgRes.ok) throw new Error('fetch failed')
-          const blob = await imgRes.blob()
-          const text = await ocrImage(blob)
-          await fetch(`${API}/api/ocr/save`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ filename, text }),
-          })
-          if (text) withText++
-          else blank++
-        } catch {
-          blank++
-        }
-      }
-      setOcrProgress({ done: images.length, total: images.length })
-      showError(`Rescanned ${images.length} images · ${withText} with text, ${blank} blank`)
-    } catch {
-      showError('Could not rescan images right now.')
-    } finally {
-      setOcrRebuilding(false)
-      setTimeout(() => setOcrProgress(null), 2000)
-    }
-  }
-
   const clearDragState = () => {
     dragItemRef.current = null
     setDragItem(null)
@@ -1528,19 +1482,6 @@ export default function App() {
           <div className="sidebar-footer">
             <button
               className="sidebar-mode-btn"
-              onClick={rebuildImageSearch}
-              disabled={ocrRebuilding}
-              title="Re-read text from every uploaded image. Run after deploying or if image search is missing words."
-              type="button"
-            >
-              {ocrRebuilding
-                ? ocrProgress
-                  ? `◐ Scanning ${ocrProgress.done}/${ocrProgress.total}…`
-                  : '◐ Loading scanner…'
-                : '◑ Rescan image text'}
-            </button>
-            <button
-              className="sidebar-mode-btn"
               onClick={() => setColorMode(m => m === 'dark' ? 'light' : 'dark')}
               title={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               type="button"
@@ -1719,23 +1660,26 @@ export default function App() {
 
             <div className="work-area">
               {activeId?.type === 'board' && (
-                <TldrawCanvas
-                  key={`${activeId.id}:${effectiveTheme}`}
-                  boardId={activeId.id}
-                  readOnly={readOnly}
-                  viewerMode={viewerMode}
-                  shareSlug={route.shareToken}
-                  onSaveState={setSaveState}
-                  colorMode={colorMode}
-                  findQuery={findQuery}
-                  onFindDismiss={onFindDismiss}
-                  findBoards={findBoards}
-                  findShapeIds={findShapeIdsByBoard[activeId.id] || []}
-                  onNavigateBoard={(boardId) => {
-                    const board = boards.find(b => b.id === boardId)
-                    openDocument('board', boardId, board?.folder_id)
-                  }}
-                />
+                <>
+                  <TldrawCanvas
+                    key={`${activeId.id}:${effectiveTheme}`}
+                    boardId={activeId.id}
+                    readOnly={readOnly}
+                    viewerMode={viewerMode}
+                    shareSlug={route.shareToken}
+                    onSaveState={setSaveState}
+                    colorMode={colorMode}
+                    findQuery={findQuery}
+                    onFindDismiss={onFindDismiss}
+                    findBoards={findBoards}
+                    findShapeIds={findShapeIdsByBoard[activeId.id] || []}
+                    onNavigateBoard={(boardId) => {
+                      const board = boards.find(b => b.id === boardId)
+                      openDocument('board', boardId, board?.folder_id)
+                    }}
+                  />
+                  <ThemeDecorations theme={effectiveTheme} boardName={activeBoard?.name} />
+                </>
               )}
               {activeId?.type === 'sheet' && (
                 <div className="sheet-wrap" key={activeId.id}>
@@ -2227,7 +2171,9 @@ function DatabaseHome({
             </div>
             <div className="database-card-body">
               <div className="database-card-title">{item.name}</div>
-              <div className="database-card-snippet">{item.snippet}</div>
+              {item.snippet && (
+                <div className="database-card-snippet">{item.snippet}</div>
+              )}
               <div className="database-card-meta">
                 <span>{item.folderPath || 'Workspace root'}</span>
                 <span>{item.source}</span>
