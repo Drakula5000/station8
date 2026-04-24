@@ -1665,16 +1665,14 @@ def _board_payload_with_assets(board_id):
 
 @app.route('/uploads/<filename>')
 def serve_upload(filename):
-    if not (_is_studio_authed() or _is_visitor_authed()):
-        return jsonify({'error': 'Not authorized'}), 401
-
+    # No session auth here — this endpoint is hit by <img> tags which can't
+    # send cookies cross-origin. Security is provided by the Supabase signed
+    # URL redirect (time-limited) or by the file being served from local disk
+    # (dev only). The filename is a UUID so enumeration is not a concern.
     if supabase:
         url = _get_cached_signed_url(filename)
         if url:
             resp = redirect(url)
-            # Let the browser cache the 302 so subsequent loads skip the Flask
-            # hop entirely. `private` keeps shared proxies out since the URL
-            # is authenticated on our side.
             resp.headers['Cache-Control'] = f'private, max-age={SIGNED_URL_REUSE_SECONDS}'
             return resp
 
