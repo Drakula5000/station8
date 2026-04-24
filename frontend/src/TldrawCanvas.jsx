@@ -195,16 +195,15 @@ function fitBoardAfterOpen(editor) {
   let lastSignature = null
 
   const doFit = (bounds) => {
-    const before = editor.getCamera()
+    // loadStoreSnapshot replaces instance_state, which includes screenBounds.
+    // Tldraw's centering math in zoomToBounds reads that stored screenBounds
+    // instead of re-measuring the DOM, so without this re-measure the fit
+    // centres against whatever window size the board was last saved at.
+    // When today's viewport is wider/taller than that, content renders
+    // shifted toward the top-left.
+    const container = editor.getContainer()
+    if (container) editor.updateViewportScreenBounds(container)
     editor.zoomToBounds(bounds, { immediate: true, inset: 64 })
-    const after = editor.getCamera()
-    const vs = editor.getViewportScreenBounds()
-    console.log('[s8-fit]', {
-      boundsUsed: { x: Math.round(bounds.x), y: Math.round(bounds.y), w: Math.round(bounds.w), h: Math.round(bounds.h) },
-      viewportScreen: { w: Math.round(vs.w), h: Math.round(vs.h) },
-      cameraBefore: { x: Math.round(before.x), y: Math.round(before.y), z: Number(before.z.toFixed(3)) },
-      cameraAfter: { x: Math.round(after.x), y: Math.round(after.y), z: Number(after.z.toFixed(3)) },
-    })
   }
 
   const tryFit = () => {
