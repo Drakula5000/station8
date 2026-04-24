@@ -655,13 +655,16 @@ def _share_allows_sheet(share, sheet_id):
 
 
 def _snapshot_upload_filenames(snapshot):
-    files = (snapshot or {}).get('files') or {}
+    """Extract /uploads/<filename> references from a tldraw board snapshot."""
     names = set()
-    for file_data in files.values():
-        data_url = file_data.get('dataURL') or ''
-        match = re.search(r'/uploads/([a-z0-9-]+\.[a-z0-9]+)', data_url, flags=re.IGNORECASE)
-        if match:
-            names.add(match.group(1))
+    if not snapshot:
+        return names
+    try:
+        blob = json.dumps(snapshot)
+        for m in re.finditer(r'/uploads/([a-z0-9\-]+\.[a-z0-9]+)', blob, flags=re.IGNORECASE):
+            names.add(m.group(1))
+    except Exception:
+        pass
     return names
 
 
@@ -1593,10 +1596,15 @@ def _get_cached_signed_url(filename):
     try:
         result = supabase.storage.from_('uploads').create_signed_url(filename, SIGNED_URL_EXPIRY_SECONDS)
     except Exception as exc:
-        print(f"Supabase signed URL failed for {filename}: {exc}", flush=True)
+        print(f"Supabase signed URL failed for {filename}: {type(exc).__name__}: {exc}", flush=True)
         return None
-    url = result.get('signedURL') if isinstance(result, dict) else None
+    # storage-py returns a dict with both 'signedURL' and 'signedUrl' keys
+    if isinstance(result, dict):
+        url = result.get('signedURL') or result.get('signedUrl') or result.get('signed_url')
+    else:
+        url = getattr(result, 'signed_url', None) or getattr(result, 'signedURL', None)
     if not url:
+        print(f"Supabase signed URL empty for {filename}: result={result!r}", flush=True)
         return None
     with _signed_url_lock:
         _signed_url_cache[filename] = (url, now + SIGNED_URL_REUSE_SECONDS)
@@ -1677,38 +1685,6 @@ def serve_upload(filename):
 
 # ── Search ───────────────────────────────────────────────────────────────────
 
-def _text_from_excalidraw(snapshot):
-    out = []
-    if not snapshot:
-        return out
-    elements = snapshot.get('elements') or []
-    files = snapshot.get('files') or {}
-    ocr = _load(OCR_FILE, {})
-    for element in elements:
-        if not isinstance(element, dict):
-            continue
-        element_type = element.get('type')
-        if element_type == 'text':
-            text = element.get('text') or ''
-            if text.strip():
-                out.append({'kind': 'text', 'text': text.strip()})
-        elif element_type == 'frame':
-            name = element.get('name') or ''
-            if name.strip():
-                out.append({'kind': 'frame', 'text': name.strip()})
-        elif element_type == 'image':
-            file_id = element.get('fileId')
-            if file_id and file_id in files:
-                data_url = files[file_id].get('dataURL') or ''
-                match = re.search(r'/uploads/([a-z0-9-]+\.[a-z]+)', data_url)
-                if match:
-                    filename = match.group(1)
-                    ocr_text = ocr.get(filename, '')
-                    if ocr_text:
-                        out.append({'kind': 'ocr', 'text': ocr_text})
-    return out
-
-
 def _extract_rich_text(node):
     """Recursively pull text out of a tldraw/ProseMirror rich-text doc."""
     if not isinstance(node, dict):
@@ -1783,8 +1759,7 @@ def _all_items(boards=None, sheets=None):
     for board in board_items:
         data = _load(_board_file(board['id']), {'snapshot': None})
         snap = data.get('snapshot') or {}
-        extractor = _text_from_tldraw if snap.get('store') else _text_from_excalidraw
-        for entry in extractor(snap):
+        for entry in _text_from_tldraw(snap):
             yield {
                 'doc_type': 'board',
                 'doc_id': board['id'],
