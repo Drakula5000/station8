@@ -148,40 +148,63 @@ const TLDRAW_UI_OVERRIDES = {
   },
 }
 
+function getFrameUnionPageBounds(editor) {
+  // Compute the union of all frame shapes in page-space. Frames visually
+  // clip their children, so the frame bounds are what the user actually sees
+  // regardless of how wide stored text shapes are. Returns null if there are
+  // no frames on the page.
+  const frames = editor.getCurrentPageShapes().filter(s => s.type === 'frame')
+  if (frames.length === 0) return null
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const f of frames) {
+    const b = editor.getShapePageBounds(f.id)
+    if (!b) continue
+    if (b.minX < minX) minX = b.minX
+    if (b.minY < minY) minY = b.minY
+    if (b.maxX > maxX) maxX = b.maxX
+    if (b.maxY > maxY) maxY = b.maxY
+  }
+  if (!isFinite(minX)) return null
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+}
+
 function fitBoardAfterOpen(editor) {
-  // Wait for tldraw to finish rendering shapes before fitting.
-  // Poll until bounds are stable (same result twice in a row), then zoom to fit.
+  // Fit to the union of frame bounds when frames exist — overflowing
+  // children (wide text, stray shapes) inflate getCurrentPageBounds but
+  // don't reflect what the user actually sees since frames clip. Fall back
+  // to zoomToFit (all content) on boards without frames.
   let attempts = 0
   const MAX_ATTEMPTS = 40
   const INTERVAL_MS = 100
-  let lastBounds = null
+  let lastSignature = null
 
   const tryFit = () => {
-    const bounds = editor.getCurrentPageBounds()
-    if (bounds && bounds.width > 0 && bounds.height > 0) {
-      // Wait for bounds to stabilise — same result on two consecutive polls
-      const stable = lastBounds &&
-        Math.abs(bounds.x - lastBounds.x) < 1 &&
-        Math.abs(bounds.y - lastBounds.y) < 1 &&
-        Math.abs(bounds.w - lastBounds.w) < 1 &&
-        Math.abs(bounds.h - lastBounds.h) < 1
-      if (stable) {
-        editor.zoomToFit({ immediate: true, inset: 64 })
+    const frameBounds = getFrameUnionPageBounds(editor)
+    const bounds = frameBounds ?? editor.getCurrentPageBounds()
+    if (bounds && bounds.w > 0 && bounds.h > 0) {
+      const signature = `${bounds.x}|${bounds.y}|${bounds.w}|${bounds.h}`
+      if (signature === lastSignature) {
+        if (frameBounds) {
+          editor.zoomToBounds(frameBounds, { immediate: true, inset: 64 })
+        } else {
+          editor.zoomToFit({ immediate: true, inset: 64 })
+        }
         return
       }
-      lastBounds = { x: bounds.x, y: bounds.y, w: bounds.width, h: bounds.height }
+      lastSignature = signature
     }
     attempts++
     if (attempts < MAX_ATTEMPTS) {
       window.setTimeout(tryFit, INTERVAL_MS)
-    } else if (lastBounds) {
-      // Bounds never fully stabilised but we have something — fit anyway
-      editor.zoomToFit({ immediate: true, inset: 64 })
+    } else if (lastSignature) {
+      if (frameBounds) {
+        editor.zoomToBounds(frameBounds, { immediate: true, inset: 64 })
+      } else {
+        editor.zoomToFit({ immediate: true, inset: 64 })
+      }
     }
-    // If no bounds at all after max attempts, leave tldraw's default view
   }
 
-  // Start after a short delay to let tldraw mount and render shapes
   window.setTimeout(tryFit, 150)
 }
 
