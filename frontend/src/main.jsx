@@ -11,7 +11,7 @@ import App from './App.jsx'
 const _getContext = HTMLCanvasElement.prototype.getContext
 HTMLCanvasElement.prototype.getContext = function (type, attrs) {
   if (type === '2d') {
-    attrs = { willReadFrequently: true, ...(attrs || {}) }
+    attrs = { ...(attrs || {}), willReadFrequently: true }
   }
   return _getContext.call(this, type, attrs)
 }
