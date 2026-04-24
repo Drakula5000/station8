@@ -2,6 +2,18 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }
 
+/* Block the macOS trackpad back-swipe gesture at the document level.
+   tldraw's canvas is infinite — it handles wheel events programmatically
+   instead of actually scrolling — so `overscroll-behavior` on any inner
+   container has nothing to contain. The browser fires the swipe-back
+   gesture based on trackpad momentum at the root, regardless of whether
+   the scroll chain reached it, so this rule has to live on `html` + `body`.
+   Board switches go through `window.history.pushState`; without this the
+   swipe fires `popstate` and flips to a previously-visited board. */
+html, body {
+  overscroll-behavior-x: none;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   overflow: hidden;
@@ -705,11 +717,38 @@ html[data-theme="prism"] .sb-section {
    which fits the element's rectangular bounds and repaints cleanly.
    ──────────────────────────────────────────────────────────────────────── */
 
-/* Abyss: bioluminescent glow on note containers only (HTML element → clean
-   box-shadow repaint). SVG shapes (arrows, lines, draws, geo, frame body)
-   deliberately omitted — drop-shadow on those leaves trails during resize. */
+/* Abyss: bioluminescent glow using box-shadow on real HTML containers.
+   NOTES — the .tl-note__container HTML div. CRANKED to mockup intensity
+   (was 14px @ 28% — too subtle to read as a bloom). */
 html[data-theme="abyss"] .tldraw-wrap [data-shape-type="note"] .tl-note__container {
-  box-shadow: 0 0 14px rgba(58, 245, 184, 0.28), var(--tl-note-shadow, 0 0 0 transparent);
+  box-shadow:
+    0 0 32px 2px rgba(58, 245, 184, 0.45),
+    0 0 12px rgba(58, 245, 184, 0.30),
+    var(--tl-note-shadow, 0 0 0 transparent);
+}
+
+/* FRAMES — glow on the frame HEADING label (HTML), reading as a bioluminescent
+   tag floating above the frame. We skip the frame body (SVG rect) because
+   box-shadow doesn't paint on SVG rect elements and drop-shadow would trail. */
+html[data-theme="abyss"] .tl-frame-heading {
+  box-shadow: 0 0 24px rgba(58, 245, 184, 0.35);
+  text-shadow:
+    0 0 10px rgba(58, 245, 184, 0.6),
+    0 0 3px  rgba(58, 245, 184, 0.8);
+}
+
+/* ARROWS — SVG filter on the path's SVG container (doesn't trail because
+   the path itself doesn't translate within its shape wrapper — the wrapper
+   translates and the path stays at origin). */
+html[data-theme="abyss"] [data-shape-type="arrow"] svg,
+html[data-theme="abyss"] [data-shape-type="line"]  svg,
+html[data-theme="abyss"] [data-shape-type="draw"]  svg {
+  filter: drop-shadow(0 0 10px rgba(58, 245, 184, 0.6));
+}
+
+/* GEO — glow on geo outlines. Geo shapes use SVG paths too. */
+html[data-theme="abyss"] [data-shape-type="geo"] svg {
+  filter: drop-shadow(0 0 14px rgba(58, 245, 184, 0.35));
 }
 
 /* Prism: gradient strokes — arrows, lines and frame borders share a single
@@ -739,12 +778,19 @@ html[data-theme="hud"] .tl-frame-heading {
   color: #FFA528;
 }
 html[data-theme="abyss"] .tl-frame-heading {
+  /* Bumped from 400/italic/13px jade → 500/upright/18px brighter-jade with
+     a jade text-shadow glow. Italic serif at tldraw's default heading size
+     was illegible against the dark canvas. */
   font-family: 'Crimson Pro', 'EB Garamond', serif;
-  font-style: italic;
-  font-weight: 400;
-  letter-spacing: 0.02em;
+  font-style: normal !important;
+  font-weight: 500 !important;
+  font-size: 18px !important;
+  letter-spacing: 0.01em;
   text-transform: none;
-  color: #3AF5B8;
+  color: #7BFFD0 !important;
+  text-shadow:
+    0 0 10px rgba(58, 245, 184, 0.6),
+    0 0 3px  rgba(58, 245, 184, 0.8);
 }
 html[data-theme="archive"] .tl-frame-heading {
   font-family: 'Space Mono', monospace;
@@ -1871,6 +1917,16 @@ html[data-theme="archive"] [data-shape-type="geo"]  .tl-rich-text {
 .tldraw-wrap .tl-background { background-color: transparent !important; }
 .tldraw-wrap .tl-canvas { background: transparent !important; }
 .tldraw-wrap .tl-container { --tl-color-background: transparent; }
+
+/* Every image shape gets its own GPU compositor layer via `will-change:
+   transform`. Without it, resizing an image leaves vertical stripes of the
+   old right edge at each intermediate width because the browser fails to
+   invalidate the previous bounds when tldraw animates the shape via CSS
+   `transform: matrix(...)`. `ImageShapeStyles` applies the same rule inline
+   only when a border is set; this rule covers the other 99% of images. */
+.tldraw-wrap [data-shape-type="image"] .tl-html-container {
+  will-change: transform;
+}
 
 /* Theme tldraw's UI panels and grid to match Aurora */
 .tldraw-wrap .tl-theme__dark,
