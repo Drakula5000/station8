@@ -97,7 +97,6 @@ const NOTE_PREVIEW_SIZE = 200
 const MAX_DROPPED_IMAGE_VIEWPORT_FRACTION = 0.2
 const MAX_DROPPED_IMAGE_FRAME_FRACTION = 0.2
 const FRAME_DROPPED_IMAGE_INSET = 32
-const MULTI_DROP_CASCADE_OFFSET = 28
 const BOARD_CACHE_STORAGE_PREFIX = 's8.boardCache.'
 
 // Resolve an image shape to a URL suitable for full-resolution viewing.
@@ -1443,6 +1442,11 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
           // the flash of tldraw rebuilding shapes when cache was already fresh.
           if (!cachedJson || freshJson !== cachedJson) {
             editor.store.loadStoreSnapshot(data.snapshot)
+            // Store changed — invalidate the initial fit and run a fresh one
+            // against the new bounds. Without this, the cache-based fit can
+            // leave the viewport pointed at stale coordinates and the fresh
+            // content lands off-screen.
+            viewRestored = false
           }
           saveCachedBoard(bid, cacheRole, data.snapshot)
         }
@@ -1495,36 +1499,26 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       )
       if (newImages.length === 0) return
 
-      const shapes = newImages
+      const updates = newImages
         .map((image) => editor.getShape(image.id))
         .filter(Boolean)
-      if (shapes.length === 0) return
-
-      // Anchor the cluster at the centroid of where tldraw initially placed
-      // the shapes (which is roughly the drop point after its own
-      // re-centering pass). Sort by original X so the cascade preserves the
-      // file order tldraw spread out horizontally.
-      const sorted = [...shapes].sort((a, b) => a.x - b.x)
-      const centroidX = sorted.reduce(
-        (sum, s) => sum + s.x + Number(s.props?.w ?? 0) / 2, 0
-      ) / sorted.length
-      const centroidY = sorted.reduce(
-        (sum, s) => sum + s.y + Number(s.props?.h ?? 0) / 2, 0
-      ) / sorted.length
-
-      const updates = sorted.map((shape, i) => {
+        .map((shape) => {
         const target = getDroppedImageTargetSize(editor, shape)
+        if (!target) return null
+
+        const currentW = Number(shape.props?.w ?? 0)
+        const currentH = Number(shape.props?.h ?? 0)
         const w = target?.w ?? Number(shape.props?.w ?? 0)
         const h = target?.h ?? Number(shape.props?.h ?? 0)
-        const offset = i * MULTI_DROP_CASCADE_OFFSET
         return {
           id: shape.id,
           type: 'image',
-          x: centroidX - w / 2 + offset,
-          y: centroidY - h / 2 + offset,
+          x: shape.x + (currentW - w) / 2,
+          y: shape.y + (currentH - h) / 2,
           props: { w, h },
         }
       })
+        .filter(Boolean)
 
       editor.updateShapes(updates)
     }, { source: 'user', scope: 'document' })
