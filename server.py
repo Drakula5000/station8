@@ -1665,16 +1665,25 @@ def _board_payload_with_assets(board_id):
 
 @app.route('/uploads/<filename>')
 def serve_upload(filename):
-    # No session auth here — this endpoint is hit by <img> tags which can't
-    # send cookies cross-origin. Security is provided by the Supabase signed
-    # URL redirect (time-limited) or by the file being served from local disk
-    # (dev only). The filename is a UUID so enumeration is not a concern.
+    # No session auth — hit by <img> tags which can't send cookies cross-origin.
+    # We proxy the image bytes through Render rather than redirecting to Supabase,
+    # because a cross-origin redirect to Supabase CDN would require Supabase to
+    # also send CORS headers (which it doesn't for private buckets).
     if supabase:
         url = _get_cached_signed_url(filename)
         if url:
-            resp = redirect(url)
-            resp.headers['Cache-Control'] = f'private, max-age={SIGNED_URL_REUSE_SECONDS}'
-            return resp
+            try:
+                import urllib.request
+                req = urllib.request.Request(url, headers={'User-Agent': 'station8-proxy/1.0'})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    content_type = r.headers.get('Content-Type', 'application/octet-stream')
+                    data = r.read()
+                from flask import Response as FlaskResponse
+                resp = FlaskResponse(data, status=200, content_type=content_type)
+                resp.headers['Cache-Control'] = f'private, max-age={SIGNED_URL_REUSE_SECONDS}'
+                return resp
+            except Exception as exc:
+                print(f"Supabase proxy failed for {filename}: {exc}", flush=True)
 
     response = send_from_directory(UPLOADS_DIR, filename)
     response.headers['Cache-Control'] = f'private, max-age={SIGNED_URL_REUSE_SECONDS}'
