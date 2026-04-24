@@ -732,15 +732,6 @@ def _delete_sheet_files(sheet_ids):
             os.remove(fp)
 
 
-def _share_allows_upload(share, filename):
-    payload = _scoped_share_payload(share)
-    for board in payload['boards']:
-        data = _load(_board_file(board['id']), {'snapshot': None})
-        if filename in _snapshot_upload_filenames(data.get('snapshot')):
-            return True
-    return False
-
-
 def _validate_share_scope(scope_type, scope_id):
     ws = _get_workspace()
     boards = _load_boards()

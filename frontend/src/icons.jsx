@@ -96,16 +96,6 @@ export function CloseIcon(props) {
   )
 }
 
-export function SidebarCollapseIcon(props) {
-  return (
-    <svg {...common} {...props}>
-      <rect x="3" y="3" width="14" height="14" rx="2"/>
-      <path d="M7 3v14"/>
-      <path d="M11.5 10 9 8v4z" fill="currentColor" stroke="none"/>
-    </svg>
-  )
-}
-
 export function SidebarExpandIcon(props) {
   return (
     <svg {...common} {...props}>
@@ -250,41 +240,11 @@ export function FjLineIcon() {
   )
 }
 
-export function FjCleanStyleIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="4" y="6" width="16" height="12" rx="2"/>
-    </svg>
-  )
-}
-
-export function FjSketchStyleIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4.2 7.1c2-1 4.2-1.4 7.8-1.3 3.4.1 6 .5 7.9 1.2"/>
-      <path d="M19.6 7.3c.5 1.7.6 4.1.1 6 -.4 1.7-.3 3.5-.2 4.2"/>
-      <path d="M19.5 17.7c-2 1-4.6 1.3-8 1.2-3.5-.1-5.8-.6-7.6-1.3"/>
-      <path d="M4.1 17.2c-.5-1.7-.6-4.2-.1-6 .4-1.6.3-3.5.2-4.1"/>
-    </svg>
-  )
-}
-
 export function FjSectionIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
       <rect x="4" y="4" width="16" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6"/>
       <path d="M4 9.2h16" stroke="currentColor" strokeWidth="1.6" strokeDasharray="2.5 2.5"/>
-    </svg>
-  )
-}
-
-export function FjFontIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 20l3-10h4l3 10"/>
-      <path d="M5.5 16h6"/>
-      <path d="M14 10h4"/>
-      <path d="M16 10v10"/>
     </svg>
   )
 }
@@ -327,11 +287,3 @@ export function FjInsightIcon() {
   )
 }
 
-export function EmptyBoardIcon(props) {
-  return (
-    <svg width={28} height={28} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <rect x="4" y="4" width="20" height="20" rx="2"/>
-      <path d="M9 10h10M9 14h10M9 18h6"/>
-    </svg>
-  )
-}

@@ -9,7 +9,6 @@ export function ImageLightbox({ src, alt, onClose }) {
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const draggingRef = useRef(null)
-  const imgRef = useRef(null)
 
   const reset = useCallback(() => {
     setZoom(1)
@@ -114,7 +113,6 @@ export function ImageLightbox({ src, alt, onClose }) {
         style={{ cursor: zoom > MIN_ZOOM ? (draggingRef.current ? 'grabbing' : 'grab') : 'zoom-in' }}
       >
         <img
-          ref={imgRef}
           src={src}
           alt={alt || ''}
           draggable={false}
