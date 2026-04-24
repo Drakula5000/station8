@@ -751,6 +751,49 @@ html[data-theme="abyss"] [data-shape-type="geo"] svg {
   filter: drop-shadow(0 0 14px rgba(58, 245, 184, 0.35));
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+   STICKY TEXT CONTRAST SAFETY NET
+   tldraw paints sticky label color from `getColorValue(theme, color, 'noteText')`
+   inline on .tl-rich-text. Keeping a CSS-level override means even if the
+   palette mutation hasn't applied yet (mid-deploy, stale bundle) or the user
+   picked a custom labelColor with low contrast against the themed bg, the
+   sticky text stays readable.
+   Keyed on `data-tl-color` on the shape wrapper.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Dark stickies (bg near-black): force LIGHT text */
+html[data-theme="glass"]   [data-shape-type="note"][data-tl-color="black"] .tl-rich-text,
+html[data-theme="glass"]   [data-shape-type="note"][data-tl-color="grey"]  .tl-rich-text,
+html[data-theme="hud"]     [data-shape-type="note"][data-tl-color="black"] .tl-rich-text,
+html[data-theme="hud"]     [data-shape-type="note"][data-tl-color="grey"]  .tl-rich-text,
+html[data-theme="abyss"]   [data-shape-type="note"][data-tl-color="black"] .tl-rich-text,
+html[data-theme="abyss"]   [data-shape-type="note"][data-tl-color="grey"]  .tl-rich-text,
+html[data-theme="archive"] [data-shape-type="note"][data-tl-color="black"] .tl-rich-text,
+html[data-theme="archive"] [data-shape-type="note"][data-tl-color="grey"]  .tl-rich-text,
+html[data-theme="prism"]   [data-shape-type="note"][data-tl-color="black"] .tl-rich-text,
+html[data-theme="prism"]   [data-shape-type="note"][data-tl-color="grey"]  .tl-rich-text {
+  color: #F2F2F2 !important;
+}
+
+/* Light stickies (everything else): force DARK text */
+html[data-theme="glass"]   [data-shape-type="note"]:not([data-tl-color="black"]):not([data-tl-color="grey"]) .tl-rich-text,
+html[data-theme="hud"]     [data-shape-type="note"]:not([data-tl-color="black"]):not([data-tl-color="grey"]) .tl-rich-text,
+html[data-theme="abyss"]   [data-shape-type="note"]:not([data-tl-color="black"]):not([data-tl-color="grey"]) .tl-rich-text,
+html[data-theme="archive"] [data-shape-type="note"]:not([data-tl-color="black"]):not([data-tl-color="grey"]) .tl-rich-text,
+html[data-theme="prism"]   [data-shape-type="note"]:not([data-tl-color="black"]):not([data-tl-color="grey"]) .tl-rich-text {
+  color: #111111 !important;
+}
+
+/* Propagate to any nested spans / paragraphs / links so rich-text colors
+   don't leak through. */
+html[data-theme] [data-shape-type="note"] .tl-rich-text a,
+html[data-theme] [data-shape-type="note"] .tl-rich-text span,
+html[data-theme] [data-shape-type="note"] .tl-rich-text p,
+html[data-theme] [data-shape-type="note"] .tl-rich-text strong,
+html[data-theme] [data-shape-type="note"] .tl-rich-text em {
+  color: inherit !important;
+}
+
 /* Prism: gradient strokes — arrows, lines and frame borders share a single
    <linearGradient id="s8-prism-stroke"> defined in App.jsx <defs>. */
 html[data-theme="prism"] [data-shape-type="arrow"] path[stroke],
@@ -2782,6 +2825,11 @@ html[data-theme="archive"] [data-shape-type="geo"]  .tl-rich-text {
 .tldraw-wrap [data-shape-type='draw'][data-s8-size='s'] > svg [stroke] {
   stroke-width: calc(1px * var(--tl-scale)) !important;
 }
+
+/* Flat sticky corners — tldraw's default 1px gets scaled up by --tl-scale on
+   large notes, reading as a rounded card. Aurora (and every other theme) wants
+   a crisp rectangular sticky. */
+.tldraw-wrap .tl-note__container { border-radius: 0; }
 
 /* Note backgrounds — dark mode: mirror the Aurora swatch palette exactly */
 .tldraw-wrap .tl-theme__dark [data-tl-color='light-violet'] .tl-note__container,

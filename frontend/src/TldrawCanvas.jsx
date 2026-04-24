@@ -97,6 +97,60 @@ const MAX_DROPPED_IMAGE_VIEWPORT_FRACTION = 0.2
 const MAX_DROPPED_IMAGE_FRAME_FRACTION = 0.2
 const FRAME_DROPPED_IMAGE_INSET = 32
 const BOARD_VIEW_STORAGE_PREFIX = 's8.boardView.'
+const BOARD_CACHE_STORAGE_PREFIX = 's8.boardCache.'
+
+function getBoardCacheKey(boardId, role) {
+  return `${BOARD_CACHE_STORAGE_PREFIX}${role ? role + '.' : ''}${boardId}`
+}
+
+function loadCachedBoard(boardId, role) {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(getBoardCacheKey(boardId, role))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed?.snapshot?.store) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function saveCachedBoard(boardId, role, snapshot) {
+  if (typeof window === 'undefined' || !snapshot) return
+  const key = getBoardCacheKey(boardId, role)
+  const payload = JSON.stringify({ snapshot, cached_at: Date.now() })
+  try {
+    window.localStorage.setItem(key, payload)
+  } catch {
+    // Quota exceeded — evict every other board cache and retry once.
+    try {
+      for (let i = window.localStorage.length - 1; i >= 0; i--) {
+        const k = window.localStorage.key(i)
+        if (k && k.startsWith(BOARD_CACHE_STORAGE_PREFIX) && k !== key) {
+          window.localStorage.removeItem(k)
+        }
+      }
+      window.localStorage.setItem(key, payload)
+    } catch {
+      // Give up — cache is a nice-to-have.
+    }
+  }
+}
+
+export function clearAllBoardCaches() {
+  if (typeof window === 'undefined') return
+  try {
+    for (let i = window.localStorage.length - 1; i >= 0; i--) {
+      const k = window.localStorage.key(i)
+      if (k && k.startsWith(BOARD_CACHE_STORAGE_PREFIX)) {
+        window.localStorage.removeItem(k)
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
 
 const FRAME_SHAPE_UTILS = [FrameShapeUtil.configure({ showColors: true })]
 const FIGMA_REORDER_SHORTCUTS = {
@@ -1279,23 +1333,53 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       ? `${API}/api/visitor/boards/${bid}`
       : `${API}/api/boards/${bid}`
 
+    // Stale-while-revalidate: paint the last-seen snapshot instantly from
+    // localStorage, then reconcile with the server in the background. Image
+    // assets still resolve through `/uploads/X` (Flask 302 cached by the
+    // browser) until fresh signed URLs arrive — stale signed URLs expire
+    // after an hour so caching them would just produce broken images.
+    const cacheRole = mode || 'owner'
+    const cached = loadCachedBoard(bid, cacheRole)
+    let cachedJson = null
+    if (cached?.snapshot?.store) {
+      editor.store.loadStoreSnapshot(cached.snapshot)
+      try { cachedJson = JSON.stringify(cached.snapshot) } catch { cachedJson = null }
+    }
+
+    let viewRestored = false
+    const restoreView = () => {
+      if (viewRestored) return
+      viewRestored = true
+      // Always fit to content on open. Saved-camera-restore was producing
+      // off-screen-on-open when the theme-picker forces a remount (the
+      // saved camera from before the remount pointed at a position that
+      // might not cover the shape bounds anymore). Fitting on every open
+      // guarantees content is visible; users can pan/zoom freely after.
+      fitBoardAfterOpen(editor)
+    }
+    if (cachedJson) restoreView()
+
     fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.asset_urls) setSignedUploadUrls(data.asset_urls)
         if (data?.snapshot?.store) {
-          editor.store.loadStoreSnapshot(data.snapshot)
+          let freshJson = null
+          try { freshJson = JSON.stringify(data.snapshot) } catch { freshJson = null }
+          // Only reload the store if the snapshot actually changed — avoids
+          // the flash of tldraw rebuilding shapes when cache was already fresh.
+          if (!cachedJson || freshJson !== cachedJson) {
+            editor.store.loadStoreSnapshot(data.snapshot)
+          }
+          saveCachedBoard(bid, cacheRole, data.snapshot)
         }
       })
-      .catch(err => console.error('board load failed', err))
+      .catch(err => {
+        if (!cachedJson) console.error('board load failed', err)
+      })
       .finally(() => {
         loadingRef.current = false
-        const savedView = loadSavedBoardView(bid, mode)
-        if (savedView) {
-          restoreBoardViewAfterLoad(editor, savedView)
-        } else {
-          fitBoardAfterOpen(editor)
-        }
+        restoreView()
       })
 
     const defaultFilesHandler = editor.externalContentHandlers.files
