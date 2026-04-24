@@ -195,7 +195,16 @@ function fitBoardAfterOpen(editor) {
   let lastSignature = null
 
   const doFit = (bounds) => {
+    const before = editor.getCamera()
     editor.zoomToBounds(bounds, { immediate: true, inset: 64 })
+    const after = editor.getCamera()
+    const vs = editor.getViewportScreenBounds()
+    console.log('[s8-fit]', {
+      boundsUsed: { x: Math.round(bounds.x), y: Math.round(bounds.y), w: Math.round(bounds.w), h: Math.round(bounds.h) },
+      viewportScreen: { w: Math.round(vs.w), h: Math.round(vs.h) },
+      cameraBefore: { x: Math.round(before.x), y: Math.round(before.y), z: Number(before.z.toFixed(3)) },
+      cameraAfter: { x: Math.round(after.x), y: Math.round(after.y), z: Number(after.z.toFixed(3)) },
+    })
   }
 
   const tryFit = () => {
@@ -1366,6 +1375,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
 
   const handleMount = useCallback((editor) => {
     editorRef.current = editor
+    if (typeof window !== 'undefined') window.__s8Editor = editor
     editor.user.updateUserPreferences({
       colorScheme: colorModeRef.current === 'light' ? 'light' : 'dark',
       isSnapMode: true,
