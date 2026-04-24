@@ -1410,8 +1410,13 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     // assets still resolve through `/uploads/X` (Flask 302 cached by the
     // browser) until fresh signed URLs arrive — stale signed URLs expire
     // after an hour so caching them would just produce broken images.
+    //
+    // Skip the cache path in read-only views (visitor, share). Visitors are
+    // single-session — the localStorage paint is barely faster than the server
+    // fetch but shows a visible flicker when the fresh snapshot replaces the
+    // stale cached one. Owners keep the fast initial paint.
     const cacheRole = mode || 'owner'
-    const cached = loadCachedBoard(bid, cacheRole)
+    const cached = ro ? null : loadCachedBoard(bid, cacheRole)
     let cachedJson = null
     if (cached?.snapshot?.store) {
       editor.store.loadStoreSnapshot(cached.snapshot)
