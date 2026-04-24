@@ -1239,12 +1239,14 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   const [lightbox, setLightbox] = useState(null) // { src, alt } | null
 
   const editorRef = useRef(null)
+  const openLightboxRef = useRef(null)
 
   const openLightbox = useCallback((info) => {
     if (!info?.src) return
     setLightbox(info)
   }, [])
 
+  openLightboxRef.current = openLightbox
   const closeLightbox = useCallback(() => setLightbox(null), [])
 
   useEffect(() => {
@@ -1478,12 +1480,34 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     window.addEventListener('beforeunload', persistCurrentView)
     window.addEventListener('pagehide', persistCurrentView)
 
+    // Double-click on an image shape opens the lightbox. Hook into tldraw's
+    // internal event bus instead of DOM dblclick — tldraw swallows/re-maps
+    // pointer events so native dblclick doesn't reliably bubble up to our
+    // container. The ClickManager dispatches a 'double_click' event through
+    // editor.on('event', ...) and that's the only path we can count on.
+    const handleEditorEvent = (info) => {
+      if (!info || info.type !== 'click' || info.name !== 'double_click') return
+      if (info.phase !== 'down') return
+      if (info.target !== 'shape') return
+      const shape = info.shape
+      if (!shape || shape.type !== 'image') return
+      resolveImageShapeUrl(editor, shape).then((url) => {
+        if (!url) return
+        // Reset tool so the user doesn't get stranded in crop mode when they
+        // close the lightbox — tldraw transitions select → crop on image dbl-click.
+        editor.setCurrentTool('select')
+        openLightboxRef.current?.({ src: url, alt: shape.meta?.altText || '' })
+      })
+    }
+    editor.on('event', handleEditorEvent)
+
     cleanupRef.current = () => {
       cleanupSave()
       cleanupDroppedImages()
       window.removeEventListener('beforeunload', persistCurrentView)
       window.removeEventListener('pagehide', persistCurrentView)
       editor.registerExternalContentHandler('files', defaultFilesHandler)
+      editor.off('event', handleEditorEvent)
     }
   }, [doSave])
 
@@ -1516,25 +1540,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     }
   }, [])
 
-  // Double-click on an image shape opens the lightbox (works for owners and
-  // visitors). We intercept at capture phase so tldraw's native double-click
-  // behaviour (which would enter crop/edit mode for owners) doesn't fire.
-  const handleDoubleClickCapture = useCallback(async (e) => {
-    const shapeEl = e.target?.closest?.('[data-shape-type="image"]')
-    if (!shapeEl) return
-    const shapeId = shapeEl.getAttribute('data-shape-id')
-    if (!shapeId) return
-    const editor = editorRef.current
-    if (!editor) return
-    const shape = editor.getShape(shapeId)
-    if (!shape || shape.type !== 'image') return
-    e.preventDefault()
-    e.stopPropagation()
-    const url = await resolveImageShapeUrl(editor, shape)
-    if (!url) return
-    setLightbox({ src: url, alt: shape.meta?.altText || '' })
-  }, [])
-
   const ghostPx = ghost && editorRef.current
     ? getNotePreviewSizePx(editorRef.current)
     : 0
@@ -1547,7 +1552,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onPointerDownCapture={handlePointerDownCapture}
-      onDoubleClickCapture={handleDoubleClickCapture}
       onWheelCapture={handleWheelCapture}
     >
       <Tldraw
