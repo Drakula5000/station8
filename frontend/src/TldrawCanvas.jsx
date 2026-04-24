@@ -1236,6 +1236,12 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     }
   }, [colorMode])
 
+  useEffect(() => {
+    if (editorRef.current) {
+      editorRef.current.updateInstanceState({ isReadonly: readOnly })
+    }
+  }, [readOnly])
+
   const updateGhost = useCallback((clientX, clientY) => {
     if (toolInfoRef.current.tool !== 'note') {
       setGhost(null)
@@ -1390,6 +1396,8 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     const ro = readOnlyRef.current
     const mode = viewerModeRef.current
     const slug = shareSlugRef.current
+
+    editor.updateInstanceState({ isReadonly: ro })
 
     loadingRef.current = true
     const url = ro && mode === 'share' && slug
