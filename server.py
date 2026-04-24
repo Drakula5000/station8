@@ -5,8 +5,6 @@ import os
 import re
 import secrets
 import shutil
-import threading
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -1133,9 +1131,9 @@ def get_visitor_board(board_id):
     # Parallelise the three Supabase reads — workspace, boards index, and the
     # board snapshot itself — that were running back-to-back before. Each
     # round-trip is ~200 ms on Render free tier, so serial adds up fast.
-    workspace_future = _signed_url_executor.submit(_get_workspace)
-    boards_future = _signed_url_executor.submit(_load_boards)
-    snapshot_future = _signed_url_executor.submit(_load, _board_file(board_id), {'snapshot': None})
+    workspace_future = _io_executor.submit(_get_workspace)
+    boards_future = _io_executor.submit(_load_boards)
+    snapshot_future = _io_executor.submit(_load, _board_file(board_id), {'snapshot': None})
 
     folders = workspace_future.result().get('folders', [])
     board = next((b for b in boards_future.result() if b['id'] == board_id), None)
@@ -1561,10 +1559,6 @@ def optimize_existing_images():
                 except Exception as exc:
                     print(f'Supabase old-blob delete failed for {name}: {exc}', flush=True)
 
-        with _signed_url_lock:
-            _signed_url_cache.pop(name, None)
-            _signed_url_cache.pop(new_name, None)
-
         if new_name != name:
             renames[name] = new_name
         optimized.append({'filename': name, 'new_filename': new_name, 'before': before, 'after': after})
@@ -1588,39 +1582,29 @@ def optimize_existing_images():
     })
 
 
-# Cache Supabase signed URLs so we don't generate a fresh one on every image
-# request. Boards often hold dozens of images; without caching, each refresh
-# fans out N serial Supabase round-trips through the slow Render free tier
-# backend. URLs are valid for SIGNED_URL_EXPIRY_SECONDS; we reuse them for
-# SIGNED_URL_REUSE_SECONDS (shorter window leaves buffer before expiry).
-SIGNED_URL_EXPIRY_SECONDS = 3600
-SIGNED_URL_REUSE_SECONDS = 3000
-_signed_url_cache = {}
-_signed_url_lock = threading.Lock()
+# Uploads bucket is public — image URLs are deterministic and never expire, so
+# we build them locally instead of round-tripping to Supabase to sign. Each
+# URL points straight at the Supabase CDN; the browser caches them indefinitely
+# (see Cache-Control on serve_upload), removing Render from the hot path after
+# the first redirect.
+UPLOAD_CACHE_MAX_AGE = 31536000  # 1 year
+
+# Shared executor for parallelising Supabase reads (e.g. workspace + boards +
+# snapshot on the visitor board endpoint).
+_io_executor = ThreadPoolExecutor(max_workers=12, thread_name_prefix='io')
 
 
-def _get_cached_signed_url(filename):
-    now = time.time()
-    with _signed_url_lock:
-        entry = _signed_url_cache.get(filename)
-        if entry and entry[1] > now:
-            return entry[0]
+def _public_upload_url(filename):
+    if not supabase:
+        return None
     try:
-        result = supabase.storage.from_('uploads').create_signed_url(filename, SIGNED_URL_EXPIRY_SECONDS)
+        url = supabase.storage.from_('uploads').get_public_url(filename)
     except Exception as exc:
-        print(f"Supabase signed URL failed for {filename}: {type(exc).__name__}: {exc}", flush=True)
+        print(f"Supabase public URL build failed for {filename}: {exc}", flush=True)
         return None
-    # storage-py returns a dict with both 'signedURL' and 'signedUrl' keys
-    if isinstance(result, dict):
-        url = result.get('signedURL') or result.get('signedUrl') or result.get('signed_url')
-    else:
-        url = getattr(result, 'signed_url', None) or getattr(result, 'signedURL', None)
-    if not url:
-        print(f"Supabase signed URL empty for {filename}: result={result!r}", flush=True)
-        return None
-    with _signed_url_lock:
-        _signed_url_cache[filename] = (url, now + SIGNED_URL_REUSE_SECONDS)
-    return url
+    # storage3 sometimes appends a trailing '?' — strip it so the URL matches
+    # exactly what the CDN serves and stays cache-key-stable in the browser.
+    return url.rstrip('?') if url else None
 
 
 _UPLOAD_REF_RE = re.compile(r'/uploads/([a-z0-9\-]+\.[a-z0-9]+)', flags=re.IGNORECASE)
@@ -1636,34 +1620,17 @@ def _extract_upload_filenames(snapshot):
     return list({m.group(1) for m in _UPLOAD_REF_RE.finditer(blob)})
 
 
-_signed_url_executor = ThreadPoolExecutor(max_workers=12, thread_name_prefix='signurl')
-
-
 def _asset_urls_for_snapshot(snapshot):
-    """Return {filename: signed_url} for every /uploads/X referenced in the
-    snapshot. Runs the Supabase signing calls in parallel — serial signing
-    was the single biggest source of board-load latency (N images ×
-    ~300 ms per Supabase round-trip blocked the snapshot response)."""
+    """Return {filename: public_url} for every /uploads/X referenced in the
+    snapshot. Public URLs are deterministic string-builds (no Supabase round
+    trips, no expiry), so the frontend's assetStore resolver can serve images
+    straight from the Supabase CDN without bouncing through Render."""
     if not supabase:
         return {}
     filenames = _extract_upload_filenames(snapshot)
-    if not filenames:
-        return {}
-    # Fast path: everything already cached → no thread dispatch needed.
-    uncached = []
     urls = {}
-    now = time.time()
-    with _signed_url_lock:
-        for name in filenames:
-            entry = _signed_url_cache.get(name)
-            if entry and entry[1] > now:
-                urls[name] = entry[0]
-            else:
-                uncached.append(name)
-    if not uncached:
-        return urls
-    results = _signed_url_executor.map(_get_cached_signed_url, uncached)
-    for name, url in zip(uncached, results):
+    for name in filenames:
+        url = _public_upload_url(name)
         if url:
             urls[name] = url
     return urls
@@ -1678,29 +1645,20 @@ def _board_payload_with_assets(board_id):
 @app.route('/uploads/<filename>')
 def serve_upload(filename):
     # No session auth — hit by <img> tags which can't send cookies cross-origin.
-    # We proxy the image bytes through Render rather than redirecting to Supabase,
-    # because a cross-origin redirect to Supabase CDN would require Supabase to
-    # also send CORS headers (which it doesn't for private buckets).
+    # The uploads bucket is public, so we 302 to the Supabase CDN URL and let
+    # the browser fetch bytes directly. The redirect is marked immutable with a
+    # 1-year max-age, so after the first hit per image the browser never asks
+    # us again. For boards loaded via /api/boards, the frontend already has the
+    # public URLs in asset_urls and skips this endpoint entirely.
     if supabase:
-        url = _get_cached_signed_url(filename)
+        url = _public_upload_url(filename)
         if url:
-            try:
-                import urllib.request
-                req = urllib.request.Request(url, headers={'User-Agent': 'station8-proxy/1.0'})
-                with urllib.request.urlopen(req, timeout=15) as r:
-                    content_type = r.headers.get('Content-Type', 'application/octet-stream')
-                    data = r.read()
-                from flask import Response as FlaskResponse
-                resp = FlaskResponse(data, status=200, content_type=content_type)
-                resp.headers['Access-Control-Allow-Origin'] = '*'
-                resp.headers['Cache-Control'] = f'private, max-age={SIGNED_URL_REUSE_SECONDS}'
-                return resp
-            except Exception as exc:
-                print(f"Supabase proxy failed for {filename}: {exc}", flush=True)
+            resp = redirect(url, code=302)
+            resp.headers['Cache-Control'] = f'public, max-age={UPLOAD_CACHE_MAX_AGE}, immutable'
+            return resp
 
     response = send_from_directory(UPLOADS_DIR, filename)
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Cache-Control'] = f'private, max-age={SIGNED_URL_REUSE_SECONDS}'
+    response.headers['Cache-Control'] = f'public, max-age={UPLOAD_CACHE_MAX_AGE}, immutable'
     return response
 
 
