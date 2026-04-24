@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import Spreadsheet from 'react-spreadsheet'
 import TldrawCanvas from './TldrawCanvas'
-import { applyTldrawPalette } from './themePalettes'
 import {
   BoardIcon, SheetIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon,
   SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon,
@@ -18,7 +17,6 @@ const DATABASE_VIEW_STORAGE_KEY = 'researchHub.databaseView'
 if (typeof document !== 'undefined') {
   try {
     document.documentElement.removeAttribute('data-theme')
-    applyTldrawPalette()
   } catch { /* pre-render environments have no document */ }
 }
 const DEFAULT_SHEET = [
@@ -325,13 +323,6 @@ export default function App() {
   const deleteImpact = deleteTarget?.type === 'folder'
     ? summarizeFolderDelete(deleteTarget, folders, boards, sheets)
     : null
-
-  // ── Per-board theming ──
-  // Aurora is the only theme — no theme switching needed.
-
-  useEffect(() => {
-    applyTldrawPalette()
-  }, [])
 
   useEffect(() => {
     activeIdRef.current = activeId

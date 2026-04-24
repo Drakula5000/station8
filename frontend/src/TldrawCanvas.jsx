@@ -1278,86 +1278,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [readOnly])
 
-  // Paste diagnostics — captures DOM state after paste events so we can
-  // identify the rogue overlay element that intermittently appears over the
-  // canvas after copying text from outside sites. Survives within the session
-  // via window.__s8PasteLog (refresh wipes it, which matches when the bug
-  // also clears).
-  useEffect(() => {
-    if (readOnly) return
-    const wrap = wrapRef.current
-    if (!wrap) return
-    if (!window.__s8PasteLog) {
-      try {
-        const saved = sessionStorage.getItem('s8.pasteLog')
-        window.__s8PasteLog = saved ? JSON.parse(saved) : []
-      } catch { window.__s8PasteLog = [] }
-    }
-
-    const scanCanvasOverlays = (label, pasteMeta) => {
-      const wrapRect = wrap.getBoundingClientRect()
-      const tlContainer = wrap.querySelector('.tl-container')
-      const suspects = []
-      document.body.querySelectorAll('*').forEach(el => {
-        if (tlContainer && tlContainer.contains(el)) return
-        if (el === wrap || wrap.contains(el) === false && !document.body.contains(el)) return
-        const r = el.getBoundingClientRect()
-        if (r.width < 80 || r.height < 80) return
-        // Does it overlap the canvas area?
-        const overlapsX = r.right > wrapRect.left && r.left < wrapRect.right
-        const overlapsY = r.bottom > wrapRect.top && r.top < wrapRect.bottom
-        if (!overlapsX || !overlapsY) return
-        // Skip known-good app chrome (sidebar, pills, toolbars, inspector, etc.)
-        if (el.closest('.sidebar, .pill-wrap, .fj-toolbar, .shape-inspector, .modal-overlay, .tlui-menu-zone, .find-overlay, .s8-lightbox, .error-toast')) return
-        const style = getComputedStyle(el)
-        // Require it to be actually rendering (not display:none, not 0-opacity hidden)
-        if (style.display === 'none' || style.visibility === 'hidden') return
-        suspects.push({
-          tag: el.tagName,
-          cls: el.className?.toString?.().slice(0, 120) || '',
-          id: el.id || '',
-          rect: { x: r.left, y: r.top, w: r.width, h: r.height },
-          z: style.zIndex,
-          pos: style.position,
-          bg: style.backgroundColor,
-          opacity: style.opacity,
-          parentTag: el.parentElement?.tagName,
-          parentCls: el.parentElement?.className?.toString?.().slice(0, 80) || '',
-          childCount: el.children.length,
-          outerHTMLPreview: el.outerHTML?.slice(0, 200) || '',
-        })
-      })
-      if (suspects.length) {
-        const entry = { t: Date.now(), label, paste: pasteMeta, suspects }
-        window.__s8PasteLog.push(entry)
-        if (window.__s8PasteLog.length > 20) window.__s8PasteLog.shift()
-        try {
-          sessionStorage.setItem('s8.pasteLog', JSON.stringify(window.__s8PasteLog))
-        } catch { /* storage full — skip */ }
-        console.warn('[s8-paste]', label, 'suspects:', suspects.length, suspects)
-      } else {
-        console.log('[s8-paste]', label, 'clean')
-      }
-    }
-
-    const onPaste = (e) => {
-      const cb = e.clipboardData
-      const types = cb ? Array.from(cb.types) : []
-      const pasteMeta = {
-        types,
-        htmlLen: cb?.getData('text/html')?.length || 0,
-        textLen: cb?.getData('text/plain')?.length || 0,
-        targetTag: e.target?.tagName,
-        targetCls: e.target?.className?.toString?.().slice(0, 80) || '',
-      }
-      console.log('[s8-paste] paste event', pasteMeta)
-      setTimeout(() => scanCanvasOverlays('scan@150ms', pasteMeta), 150)
-      setTimeout(() => scanCanvasOverlays('scan@1500ms', pasteMeta), 1500)
-    }
-    window.addEventListener('paste', onPaste, true)
-    return () => window.removeEventListener('paste', onPaste, true)
-  }, [readOnly])
-
   useEffect(() => () => {
     cleanupRef.current?.()
     if (saveTimerRef.current) {
@@ -1374,7 +1294,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
 
   const handleMount = useCallback((editor) => {
     editorRef.current = editor
-    if (typeof window !== 'undefined') window.__s8Editor = editor
     editor.user.updateUserPreferences({
       colorScheme: colorModeRef.current === 'light' ? 'light' : 'dark',
       isSnapMode: true,

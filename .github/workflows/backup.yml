@@ -14,7 +14,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install supabase==2.3.0
+      # Pin httpx to the version supabase==2.3.0 / gotrue==2.8.1 were built
+      # against. Without this, pip installs a newer httpx that removed the
+      # `proxy` kwarg, and gotrue's SyncClient init raises TypeError.
+      - run: pip install supabase==2.3.0 httpx==0.24.1 gotrue==2.8.1
       - env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}

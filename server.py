@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import wraps
 
-from flask import Flask, jsonify, request, send_file, send_from_directory, session, redirect
+from flask import Flask, jsonify, request, send_from_directory, session, redirect
 from werkzeug.security import check_password_hash, generate_password_hash
 from supabase import create_client, Client
 
@@ -39,7 +39,6 @@ DEFAULT_RENDER_STORAGE_ROOT = (
 STORAGE_ROOT = os.path.abspath(os.getenv('S8_STORAGE_DIR') or DEFAULT_RENDER_STORAGE_ROOT)
 DATA_DIR = os.path.abspath(os.getenv('S8_DATA_DIR') or os.path.join(STORAGE_ROOT, 'data'))
 UPLOADS_DIR = os.path.abspath(os.getenv('S8_UPLOADS_DIR') or os.path.join(STORAGE_ROOT, 'uploads'))
-STATIC_BUILD = os.path.join(BASE_DIR, 'static_build')
 LEGACY_DATA_DIR = os.path.join(BASE_DIR, 'data')
 LEGACY_UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
 
@@ -1881,21 +1880,7 @@ def share_search(token):
 
 @app.route('/')
 def root():
-    index_file = os.path.join(STATIC_BUILD, 'index.html')
-    if os.path.exists(index_file):
-        return send_file(index_file)
-    return 'Frontend not built yet. Run the Vite dev server.', 404
-
-
-@app.route('/<path:path>')
-def static_files(path):
-    full_path = os.path.join(STATIC_BUILD, path)
-    if os.path.exists(full_path):
-        return send_from_directory(STATIC_BUILD, path)
-    index_file = os.path.join(STATIC_BUILD, 'index.html')
-    if os.path.exists(index_file):
-        return send_file(index_file)
-    return 'Not found', 404
+    return 'Station 8 backend.', 200
 
 
 if __name__ == '__main__':

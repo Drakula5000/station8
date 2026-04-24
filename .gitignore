@@ -20,7 +20,6 @@ yarn-error.log*
 
 # Build outputs
 frontend/dist/
-static_build/
 
 # Data & uploads (user content, not in repo)
 data/
@@ -61,10 +60,3 @@ mockups/
 MIGRATION.md
 AGENTS.md
 CLAUDE.MD
-
-# Unused deployment configs
-api/
-start.sh
-railway.json
-railway.toml
-Procfile
