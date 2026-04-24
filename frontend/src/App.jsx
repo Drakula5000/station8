@@ -2,8 +2,6 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import Spreadsheet from 'react-spreadsheet'
 import TldrawCanvas from './TldrawCanvas'
 import { applyTldrawPalette } from './themePalettes'
-import { ThemePicker, BOARD_THEMES, VISITOR_RANDOM_POOL } from './components/ThemePicker'
-import { ThemeDecorations } from './components/ThemeDecorations'
 import {
   BoardIcon, SheetIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon,
   SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon,
@@ -14,52 +12,13 @@ const API = import.meta.env.VITE_API_URL || ''
 const ROOT_FOLDER = '__root__'
 const SIDEBAR_STORAGE_KEY = 'researchHub.sidebarCollapsed'
 const DATABASE_VIEW_STORAGE_KEY = 'researchHub.databaseView'
-const VISITOR_THEME_SESSION_KEY = 's8.visitor.dbTheme'
-const VALID_THEME_IDS = new Set(BOARD_THEMES.map(t => t.id))
-const DEFAULT_BOARD_THEME = 'glass'
 
-/**
- * Apply a theme by setting <html data-theme="…"> globally. Aurora clears the
- * attribute (aurora's tokens live on html[data-mode], so absence of data-theme
- * falls through to them).
- */
-function applyHtmlTheme(themeId) {
-  const root = document.documentElement
-  if (!themeId || themeId === 'aurora') {
-    root.removeAttribute('data-theme')
-  } else if (VALID_THEME_IDS.has(themeId)) {
-    root.setAttribute('data-theme', themeId)
-  }
-}
-
-/**
- * Session-scoped random theme for auth / loading / visitor database views.
- * Picks once per tab, persists in sessionStorage so navigation stays stable;
- * closing the tab rerolls on next visit. Owners pass through the auth page
- * too, so this applies universally pre-login.
- */
-function getVisitorSessionTheme() {
-  try {
-    const existing = window.sessionStorage.getItem(VISITOR_THEME_SESSION_KEY)
-    if (existing && VALID_THEME_IDS.has(existing)) return existing
-    const pick = VISITOR_RANDOM_POOL[Math.floor(Math.random() * VISITOR_RANDOM_POOL.length)]
-    window.sessionStorage.setItem(VISITOR_THEME_SESSION_KEY, pick)
-    return pick
-  } catch {
-    return DEFAULT_BOARD_THEME
-  }
-}
-
-// Apply the session theme on module load — before React mounts — so the
-// auth / loading screens never render a single frame of Aurora before the
-// real theme takes over. Also mutate the tldraw palette so the first
-// <TldrawCanvas> mount gets correct shape hexes. The React effect below
-// refines both once the auth + active-board state settles.
+// Aurora is the only theme — ensure data-theme is always absent so Aurora
+// tokens (on html[data-mode]) take effect.
 if (typeof document !== 'undefined') {
   try {
-    const initial = getVisitorSessionTheme()
-    applyHtmlTheme(initial)
-    applyTldrawPalette(initial)
+    document.documentElement.removeAttribute('data-theme')
+    applyTldrawPalette()
   } catch { /* pre-render environments have no document */ }
 }
 const DEFAULT_SHEET = [
@@ -368,45 +327,11 @@ export default function App() {
     : null
 
   // ── Per-board theming ──
-  // Board open (owner or visitor): the board's theme wins.
-  // Owner workspace (logged in, no board open): default to Glass.
-  // Everyone else — auth, loading, visitor database home, share links without
-  // an active board — gets the session-random theme so no screen falls back
-  // to plain Aurora.
-  const sessionTheme = useMemo(() => getVisitorSessionTheme(), [])
-  const activeBoardTheme = activeBoard?.theme || null
-  const effectiveTheme = useMemo(() => {
-    if (activeBoard) return activeBoardTheme || DEFAULT_BOARD_THEME
-    if (viewerMode === 'owner') return DEFAULT_BOARD_THEME
-    return sessionTheme
-  }, [activeBoard, activeBoardTheme, viewerMode, sessionTheme])
+  // Aurora is the only theme — no theme switching needed.
 
   useEffect(() => {
-    applyHtmlTheme(effectiveTheme)
-    // Mutate tldraw's global DefaultColorThemePalette so every shape (note,
-    // frame, arrow, line, draw, geo, text) paints with this theme's hexes.
-    // The <TldrawCanvas> keys on effectiveTheme below, so shapes re-render.
-    applyTldrawPalette(effectiveTheme)
-  }, [effectiveTheme])
-
-  const updateActiveBoardTheme = useCallback(async (themeId) => {
-    if (!activeBoard || !VALID_THEME_IDS.has(themeId)) return
-    const boardId = activeBoard.id
-    const prev = activeBoard.theme
-    setBoards(bs => bs.map(b => b.id === boardId ? { ...b, theme: themeId } : b))
-    try {
-      const res = await fetch(`${API}/api/boards/${boardId}`, {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme: themeId }),
-      })
-      if (!res.ok) throw new Error(`theme PATCH ${res.status}`)
-    } catch (err) {
-      console.warn('Theme save failed, rolling back', err)
-      setBoards(bs => bs.map(b => b.id === boardId ? { ...b, theme: prev } : b))
-    }
-  }, [activeBoard])
+    applyTldrawPalette()
+  }, [])
 
   useEffect(() => {
     activeIdRef.current = activeId
@@ -1547,15 +1472,6 @@ export default function App() {
                   >
                     <SidebarExpandIcon />
                   </button>
-                  {activeDocType === 'board' && (
-                    <>
-                      <div className="pill-sep" />
-                      <ThemePicker
-                        value={activeBoard?.theme || DEFAULT_BOARD_THEME}
-                        onChange={updateActiveBoardTheme}
-                      />
-                    </>
-                  )}
                   <div className="pill-sep" />
                   <button
                     className="pill-title-btn"
@@ -1688,7 +1604,6 @@ export default function App() {
                       openDocument('board', boardId, board?.folder_id)
                     }}
                   />
-                  <ThemeDecorations theme={effectiveTheme} boardName={activeBoard?.name} />
                 </>
               )}
               {activeId?.type === 'sheet' && (

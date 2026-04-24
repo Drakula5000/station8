@@ -354,10 +354,6 @@ def _parse_tags(raw):
     return []
 
 
-VALID_THEMES = {'aurora', 'glass', 'hud', 'abyss', 'archive', 'prism'}
-DEFAULT_BOARD_THEME = 'glass'
-
-
 def _normalize_doc(item, folders):
     doc = dict(item or {})
     doc['folder_id'] = _normalize_folder_id(doc.get('folder_id'), folders)
@@ -368,9 +364,8 @@ def _normalize_doc(item, folders):
 
 def _normalize_board(board, folders):
     doc = _normalize_doc(board, folders)
-    theme = doc.get('theme')
-    if theme not in VALID_THEMES:
-        doc['theme'] = DEFAULT_BOARD_THEME
+    # Strip any legacy theme field — Aurora is the only theme now
+    doc.pop('theme', None)
     return doc
 
 
@@ -1064,13 +1059,11 @@ def create_board():
     data = request.json or {}
     name = (data.get('name') or 'Untitled').strip() or 'Untitled'
     folders = _get_workspace().get('folders', [])
-    requested_theme = data.get('theme') if data.get('theme') in VALID_THEMES else DEFAULT_BOARD_THEME
     board = {
         'id': str(uuid.uuid4())[:8],
         'name': name,
         'tags': _parse_tags(data.get('tags')),
         'folder_id': _normalize_folder_id(data.get('folder_id'), folders),
-        'theme': requested_theme,
         'created_at': datetime.now().isoformat(),
     }
     boards = _load_boards()
@@ -1097,10 +1090,6 @@ def patch_board(board_id):
             board['folder_id'] = _normalize_folder_id(data.get('folder_id'), folders)
         if 'private' in data:
             board['private'] = True if data['private'] is True else (False if data['private'] is False else None)
-        if 'theme' in data:
-            theme = data.get('theme')
-            if theme in VALID_THEMES:
-                board['theme'] = theme
         _save_boards(boards)
         return jsonify(board)
     return jsonify({'error': 'Not found'}), 404
