@@ -3,12 +3,17 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
-// Suppress third-party console noise
-const _warn = console.warn.bind(console)
-console.warn = (...args) => {
-  const msg = typeof args[0] === 'string' ? args[0] : ''
-  if (msg.includes('willReadFrequently')) return
-  _warn(...args)
+// tldraw internals create 2D canvas contexts without the willReadFrequently
+// hint and then do getImageData readbacks (ImageAlphaCache, image export, etc).
+// Chrome logs a warning for each. Patch the prototype so every 2D context
+// this page creates gets willReadFrequently: true — silences the warning at
+// its source without touching tldraw internals.
+const _getContext = HTMLCanvasElement.prototype.getContext
+HTMLCanvasElement.prototype.getContext = function (type, attrs) {
+  if (type === '2d') {
+    attrs = { willReadFrequently: true, ...(attrs || {}) }
+  }
+  return _getContext.call(this, type, attrs)
 }
 
 createRoot(document.getElementById('root')).render(

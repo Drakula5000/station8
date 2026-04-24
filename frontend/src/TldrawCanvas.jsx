@@ -97,7 +97,6 @@ const NOTE_PREVIEW_SIZE = 200
 const MAX_DROPPED_IMAGE_VIEWPORT_FRACTION = 0.2
 const MAX_DROPPED_IMAGE_FRAME_FRACTION = 0.2
 const FRAME_DROPPED_IMAGE_INSET = 32
-const BOARD_VIEW_STORAGE_PREFIX = 's8.boardView.'
 const BOARD_CACHE_STORAGE_PREFIX = 's8.boardCache.'
 
 // Resolve an image shape to a URL suitable for full-resolution viewing.
@@ -202,48 +201,6 @@ const TLDRAW_UI_OVERRIDES = {
       },
     }
   },
-}
-
-function getBoardViewStorageKey(boardId, role) {
-  return `${BOARD_VIEW_STORAGE_PREFIX}${role ? role + '.' : ''}${boardId}`
-}
-
-function loadSavedBoardView(boardId, role) {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.sessionStorage.getItem(getBoardViewStorageKey(boardId, role))
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (
-      typeof parsed?.x !== 'number' ||
-      typeof parsed?.y !== 'number' ||
-      typeof parsed?.z !== 'number'
-    ) return null
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-function saveBoardView(boardId, camera, role) {
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.setItem(getBoardViewStorageKey(boardId, role), JSON.stringify({
-      x: camera.x,
-      y: camera.y,
-      z: camera.z,
-    }))
-  } catch {
-    // Ignore storage failures; view persistence is a convenience only.
-  }
-}
-
-function restoreBoardViewAfterLoad(editor, camera) {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      editor.setCamera(camera, { immediate: true })
-    })
-  })
 }
 
 function fitBoardAfterOpen(editor) {
@@ -1345,10 +1302,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       saveTimerRef.current = null
       doSave()
     }
-    // Persist camera position so it can be restored on next open
-    if (editorRef.current && boardId) {
-      saveBoardView(boardId, editorRef.current.getCamera(), viewerModeRef.current)
-    }
   }, [doSave])
 
   const colorModeRef = useRef(colorMode)
@@ -1473,13 +1426,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       }
     }, { source: 'user', scope: 'document' })
 
-    const persistCurrentView = () => {
-      saveBoardView(bid, editor.getCamera(), mode)
-    }
-
-    window.addEventListener('beforeunload', persistCurrentView)
-    window.addEventListener('pagehide', persistCurrentView)
-
     // Double-click on an image shape opens the lightbox. Hook into tldraw's
     // internal event bus — tldraw swallows native pointer events so DOM
     // dblclick doesn't reliably fire. ClickManager dispatches 'double_click'
@@ -1512,8 +1458,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     cleanupRef.current = () => {
       cleanupSave()
       cleanupDroppedImages()
-      window.removeEventListener('beforeunload', persistCurrentView)
-      window.removeEventListener('pagehide', persistCurrentView)
       editor.registerExternalContentHandler('files', defaultFilesHandler)
       editor.off('event', handleEditorEvent)
     }
