@@ -1481,22 +1481,37 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     window.addEventListener('pagehide', persistCurrentView)
 
     // Double-click on an image shape opens the lightbox. Hook into tldraw's
-    // internal event bus instead of DOM dblclick — tldraw swallows/re-maps
-    // pointer events so native dblclick doesn't reliably bubble up to our
-    // container. The ClickManager dispatches a 'double_click' event through
-    // editor.on('event', ...) and that's the only path we can count on.
+    // internal event bus — tldraw swallows native pointer events so DOM
+    // dblclick doesn't reliably fire. ClickManager dispatches 'double_click'
+    // via editor.on('event', ...). The canvas emits events with
+    // target: 'canvas' (tldraw only sets target: 'shape' inside tool state
+    // nodes, not on emitted events), so we hit-test the click point ourselves.
     const handleEditorEvent = (info) => {
       if (!info || info.type !== 'click' || info.name !== 'double_click') return
       if (info.phase !== 'down') return
-      if (info.target !== 'shape') return
-      const shape = info.shape
+      const screenPoint = info.point
+      if (!screenPoint) {
+        console.log('[s8-lightbox] double_click without point', info)
+        return
+      }
+      let shape = null
+      if (info.target === 'shape' && info.shape) {
+        shape = info.shape
+      } else {
+        const pagePoint = editor.screenToPage(screenPoint)
+        shape = editor.getShapeAtPoint(pagePoint, { hitInside: true, hitLabels: false })
+      }
+      console.log('[s8-lightbox] double_click shape?', shape?.type, shape?.id)
       if (!shape || shape.type !== 'image') return
       resolveImageShapeUrl(editor, shape).then((url) => {
+        console.log('[s8-lightbox] resolved url', url ? url.slice(0, 80) : null)
         if (!url) return
         // Reset tool so the user doesn't get stranded in crop mode when they
         // close the lightbox — tldraw transitions select → crop on image dbl-click.
         editor.setCurrentTool('select')
         openLightboxRef.current?.({ src: url, alt: shape.meta?.altText || '' })
+      }).catch((err) => {
+        console.log('[s8-lightbox] resolve failed', err)
       })
     }
     editor.on('event', handleEditorEvent)
