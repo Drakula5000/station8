@@ -15,7 +15,6 @@ import {
   FjEllipseIcon, FjDiamondIcon, FjRectIcon, FjLineIcon, FjChevronDownIcon,
 } from './icons'
 import { ShapeInspector } from './components/ShapeInspector'
-import { ocrImage } from './ocr'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -38,6 +37,9 @@ export function setSignedUploadUrls(map) {
 // form field. Without this tldraw would store images as inline data URLs.
 const assetStore = {
   async upload(_asset, file) {
+    // Lazy-load ocr.js only when an owner actually uploads — keeps tesseract.js
+    // out of the visitor bundle entirely (visitors can't upload).
+    const { ocrImage } = await import('./ocr')
     const ocrText = await ocrImage(file)
     const body = new FormData()
     body.append('file', file)

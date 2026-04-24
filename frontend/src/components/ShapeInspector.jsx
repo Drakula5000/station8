@@ -493,6 +493,14 @@ export const ShapeInspector = track(function ShapeInspector() {
       }}
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
+      // After any button inside the inspector is clicked, browser focus
+      // transfers to that <button> and tldraw's `isFocused` flips to false.
+      // tldraw then silently drops keyboard shortcuts — including Escape,
+      // which is the only way to unwind focused-group → edit-mode → selection
+      // after a double-click into a grouped shape. Returning focus to the
+      // editor on pointerup keeps keyboard shortcuts alive. Deferred to the
+      // next microtask so the button click registers first.
+      onPointerUp={() => { queueMicrotask(() => editor.focus()) }}
     >
       {(showColor || showImageStyling) && (
         <div className="insp-row">
