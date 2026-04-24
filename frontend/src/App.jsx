@@ -857,6 +857,16 @@ export default function App() {
         }
         keysToRemove.forEach(k => sessionStorage.removeItem(k))
       } catch { /* ignore */ }
+      // Clear cached board snapshots so next user on this machine can't peek
+      // at boards they don't have access to.
+      try {
+        const keysToRemove = []
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i)
+          if (k && k.startsWith('s8.boardCache.')) keysToRemove.push(k)
+        }
+        keysToRemove.forEach(k => localStorage.removeItem(k))
+      } catch { /* ignore */ }
       setBoards([])
       setSheets([])
       setFolders([])
