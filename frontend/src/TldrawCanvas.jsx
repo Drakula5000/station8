@@ -97,8 +97,6 @@ const NOTE_PREVIEW_SIZE = 200
 const MAX_DROPPED_IMAGE_VIEWPORT_FRACTION = 0.2
 const MAX_DROPPED_IMAGE_FRAME_FRACTION = 0.2
 const FRAME_DROPPED_IMAGE_INSET = 32
-const BOARD_CACHE_STORAGE_PREFIX = 's8.boardCache.'
-
 // Resolve an image shape to a URL suitable for full-resolution viewing.
 // Uses tldraw's asset resolver so cropped images still point at the original
 // source; falls back to the shape's own src prop if the asset lookup fails.
@@ -116,59 +114,6 @@ async function resolveImageShapeUrl(editor, shape) {
     }
   }
   return shape.props?.src || null
-}
-
-function getBoardCacheKey(boardId, role) {
-  return `${BOARD_CACHE_STORAGE_PREFIX}${role ? role + '.' : ''}${boardId}`
-}
-
-function loadCachedBoard(boardId, role) {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(getBoardCacheKey(boardId, role))
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed?.snapshot?.store) return null
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-function saveCachedBoard(boardId, role, snapshot) {
-  if (typeof window === 'undefined' || !snapshot) return
-  const key = getBoardCacheKey(boardId, role)
-  const payload = JSON.stringify({ snapshot, cached_at: Date.now() })
-  try {
-    window.localStorage.setItem(key, payload)
-  } catch {
-    // Quota exceeded — evict every other board cache and retry once.
-    try {
-      for (let i = window.localStorage.length - 1; i >= 0; i--) {
-        const k = window.localStorage.key(i)
-        if (k && k.startsWith(BOARD_CACHE_STORAGE_PREFIX) && k !== key) {
-          window.localStorage.removeItem(k)
-        }
-      }
-      window.localStorage.setItem(key, payload)
-    } catch {
-      // Give up — cache is a nice-to-have.
-    }
-  }
-}
-
-export function clearAllBoardCaches() {
-  if (typeof window === 'undefined') return
-  try {
-    for (let i = window.localStorage.length - 1; i >= 0; i--) {
-      const k = window.localStorage.key(i)
-      if (k && k.startsWith(BOARD_CACHE_STORAGE_PREFIX)) {
-        window.localStorage.removeItem(k)
-      }
-    }
-  } catch {
-    // ignore
-  }
 }
 
 const FRAME_SHAPE_UTILS = [FrameShapeUtil.configure({ showColors: true })]
@@ -1405,63 +1350,32 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       ? `${API}/api/visitor/boards/${bid}`
       : `${API}/api/boards/${bid}`
 
-    // Stale-while-revalidate: paint the last-seen snapshot instantly from
-    // localStorage, then reconcile with the server in the background. Image
-    // assets still resolve through `/uploads/X` (Flask 302 cached by the
-    // browser) until fresh signed URLs arrive — stale signed URLs expire
-    // after an hour so caching them would just produce broken images.
-    //
-    // Skip the cache path in read-only views (visitor, share). Visitors are
-    // single-session — the localStorage paint is barely faster than the server
-    // fetch but shows a visible flicker when the fresh snapshot replaces the
-    // stale cached one. Owners keep the fast initial paint.
-    const cacheRole = mode || 'owner'
-    const cached = ro ? null : loadCachedBoard(bid, cacheRole)
-    let cachedJson = null
-    if (cached?.snapshot?.store) {
-      editor.store.loadStoreSnapshot(cached.snapshot)
-      try { cachedJson = JSON.stringify(cached.snapshot) } catch { cachedJson = null }
-    }
-
-    let viewRestored = false
-    const restoreView = () => {
-      if (viewRestored) return
-      viewRestored = true
-      // Always fit to content on open. Saved-camera-restore was producing
-      // off-screen-on-open when the theme-picker forces a remount (the
-      // saved camera from before the remount pointed at a position that
-      // might not cover the shape bounds anymore). Fitting on every open
-      // guarantees content is visible; users can pan/zoom freely after.
-      fitBoardAfterOpen(editor)
-    }
-    if (cachedJson) restoreView()
-
+    // Single fetch → single store load → single fit. No localStorage cache.
+    // The previous stale-while-revalidate cache saved ~300ms on warm Render
+    // but caused a visible double-paint flicker and a camera race on cold
+    // loads where the cached-bounds fit fired against stale data before the
+    // fresh snapshot replaced it. Keep the code path identical for owner
+    // and visitor.
     fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.asset_urls) setSignedUploadUrls(data.asset_urls)
         if (data?.snapshot?.store) {
-          let freshJson = null
-          try { freshJson = JSON.stringify(data.snapshot) } catch { freshJson = null }
-          // Only reload the store if the snapshot actually changed — avoids
-          // the flash of tldraw rebuilding shapes when cache was already fresh.
-          if (!cachedJson || freshJson !== cachedJson) {
-            editor.store.loadStoreSnapshot(data.snapshot)
-            // Store changed — invalidate the initial fit and run a fresh one
-            // against the new bounds. Without this, the cache-based fit can
-            // leave the viewport pointed at stale coordinates and the fresh
-            // content lands off-screen.
-            viewRestored = false
-          }
-          saveCachedBoard(bid, cacheRole, data.snapshot)
+          editor.store.loadStoreSnapshot(data.snapshot)
         }
       })
       .catch(err => {
-        if (!cachedJson) console.error('board load failed', err)
+        console.error('board load failed', err)
       })
       .finally(() => {
         loadingRef.current = false
-        restoreView()
+        // Re-apply read-only AFTER snapshot load. loadStoreSnapshot replaces
+        // the entire store including the instance_state record, which
+        // silently resets isReadonly to whatever the snapshot was saved
+        // with (usually false). Without this, visitors can select + delete
+        // shapes locally even though saves are blocked.
+        editor.updateInstanceState({ isReadonly: ro })
+        fitBoardAfterOpen(editor)
       })
 
     const defaultFilesHandler = editor.externalContentHandlers.files
