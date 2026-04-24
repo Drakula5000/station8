@@ -1490,10 +1490,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       if (!info || info.type !== 'click' || info.name !== 'double_click') return
       if (info.phase !== 'down') return
       const screenPoint = info.point
-      if (!screenPoint) {
-        console.log('[s8-lightbox] double_click without point', info)
-        return
-      }
+      if (!screenPoint) return
       let shape = null
       if (info.target === 'shape' && info.shape) {
         shape = info.shape
@@ -1501,17 +1498,13 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         const pagePoint = editor.screenToPage(screenPoint)
         shape = editor.getShapeAtPoint(pagePoint, { hitInside: true, hitLabels: false })
       }
-      console.log('[s8-lightbox] double_click shape?', shape?.type, shape?.id)
       if (!shape || shape.type !== 'image') return
       resolveImageShapeUrl(editor, shape).then((url) => {
-        console.log('[s8-lightbox] resolved url', url ? url.slice(0, 80) : null)
         if (!url) return
         // Reset tool so the user doesn't get stranded in crop mode when they
         // close the lightbox — tldraw transitions select → crop on image dbl-click.
         editor.setCurrentTool('select')
         openLightboxRef.current?.({ src: url, alt: shape.meta?.altText || '' })
-      }).catch((err) => {
-        console.log('[s8-lightbox] resolve failed', err)
       })
     }
     editor.on('event', handleEditorEvent)
