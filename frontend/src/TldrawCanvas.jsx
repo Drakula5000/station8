@@ -148,16 +148,32 @@ const TLDRAW_UI_OVERRIDES = {
   },
 }
 
-function getFrameUnionPageBounds(editor) {
-  // Compute the union of all frame shapes in page-space. Frames visually
-  // clip their children, so the frame bounds are what the user actually sees
-  // regardless of how wide stored text shapes are. Returns null if there are
-  // no frames on the page.
-  const frames = editor.getCurrentPageShapes().filter(s => s.type === 'frame')
-  if (frames.length === 0) return null
+function getVisibleContentBounds(editor) {
+  // Compute the page-space bounds of everything a user can see:
+  //   - every frame's own rectangle (frames visually clip their children,
+  //     so the frame bounds already account for anything inside)
+  //   - every shape that is NOT inside a frame (floating on the page)
+  // Shapes inside a frame are intentionally skipped — their stored w/h can
+  // exceed the frame (e.g. text with a huge props.w) and would pull the fit
+  // box far past the last visible content.
+  const shapes = editor.getCurrentPageShapes()
+  if (shapes.length === 0) return null
+
+  const isInsideFrame = (shape) => {
+    let cur = shape
+    while (cur) {
+      const parent = editor.getShapeParent(cur)
+      if (!parent) return false
+      if (parent.type === 'frame') return true
+      cur = parent
+    }
+    return false
+  }
+
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  for (const f of frames) {
-    const b = editor.getShapePageBounds(f.id)
+  for (const s of shapes) {
+    if (s.type !== 'frame' && isInsideFrame(s)) continue
+    const b = editor.getShapePageBounds(s.id)
     if (!b) continue
     if (b.minX < minX) minX = b.minX
     if (b.minY < minY) minY = b.minY
@@ -169,26 +185,25 @@ function getFrameUnionPageBounds(editor) {
 }
 
 function fitBoardAfterOpen(editor) {
-  // Fit to the union of frame bounds when frames exist — overflowing
-  // children (wide text, stray shapes) inflate getCurrentPageBounds but
-  // don't reflect what the user actually sees since frames clip. Fall back
-  // to zoomToFit (all content) on boards without frames.
+  // Poll until the visible-content bounds stabilise, then zoom to them.
+  // Excludes the overflow of shapes nested inside frames (wide text etc.)
+  // since frames clip those visually — including them would push the fit
+  // box past the last visible content and leave the viewport off-center.
   let attempts = 0
   const MAX_ATTEMPTS = 40
   const INTERVAL_MS = 100
   let lastSignature = null
 
+  const doFit = (bounds) => {
+    editor.zoomToBounds(bounds, { immediate: true, inset: 64 })
+  }
+
   const tryFit = () => {
-    const frameBounds = getFrameUnionPageBounds(editor)
-    const bounds = frameBounds ?? editor.getCurrentPageBounds()
+    const bounds = getVisibleContentBounds(editor) ?? editor.getCurrentPageBounds()
     if (bounds && bounds.w > 0 && bounds.h > 0) {
       const signature = `${bounds.x}|${bounds.y}|${bounds.w}|${bounds.h}`
       if (signature === lastSignature) {
-        if (frameBounds) {
-          editor.zoomToBounds(frameBounds, { immediate: true, inset: 64 })
-        } else {
-          editor.zoomToFit({ immediate: true, inset: 64 })
-        }
+        doFit(bounds)
         return
       }
       lastSignature = signature
@@ -197,11 +212,8 @@ function fitBoardAfterOpen(editor) {
     if (attempts < MAX_ATTEMPTS) {
       window.setTimeout(tryFit, INTERVAL_MS)
     } else if (lastSignature) {
-      if (frameBounds) {
-        editor.zoomToBounds(frameBounds, { immediate: true, inset: 64 })
-      } else {
-        editor.zoomToFit({ immediate: true, inset: 64 })
-      }
+      const fallback = getVisibleContentBounds(editor) ?? editor.getCurrentPageBounds()
+      if (fallback) doFit(fallback)
     }
   }
 
