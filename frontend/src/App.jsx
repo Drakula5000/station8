@@ -1588,7 +1588,7 @@ export default function App() {
               {activeId?.type === 'board' && (
                 <>
                   <TldrawCanvas
-                    key={`${activeId.id}:${effectiveTheme}`}
+                    key={activeId.id}
                     boardId={activeId.id}
                     readOnly={readOnly}
                     viewerMode={viewerMode}
