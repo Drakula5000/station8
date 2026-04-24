@@ -1692,12 +1692,14 @@ def serve_upload(filename):
                     data = r.read()
                 from flask import Response as FlaskResponse
                 resp = FlaskResponse(data, status=200, content_type=content_type)
+                resp.headers['Access-Control-Allow-Origin'] = '*'
                 resp.headers['Cache-Control'] = f'private, max-age={SIGNED_URL_REUSE_SECONDS}'
                 return resp
             except Exception as exc:
                 print(f"Supabase proxy failed for {filename}: {exc}", flush=True)
 
     response = send_from_directory(UPLOADS_DIR, filename)
+    response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Cache-Control'] = f'private, max-age={SIGNED_URL_REUSE_SECONDS}'
     return response
 

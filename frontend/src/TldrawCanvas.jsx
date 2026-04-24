@@ -97,6 +97,7 @@ const NOTE_PREVIEW_SIZE = 200
 const MAX_DROPPED_IMAGE_VIEWPORT_FRACTION = 0.2
 const MAX_DROPPED_IMAGE_FRAME_FRACTION = 0.2
 const FRAME_DROPPED_IMAGE_INSET = 32
+const MULTI_DROP_CASCADE_OFFSET = 28
 const BOARD_CACHE_STORAGE_PREFIX = 's8.boardCache.'
 
 // Resolve an image shape to a URL suitable for full-resolution viewing.
@@ -251,7 +252,7 @@ function getContainedDimensions(w, h, maxW, maxH) {
   return { w: w * scale, h: h * scale }
 }
 
-function getDroppedImageResize(editor, shape) {
+function getDroppedImageTargetSize(editor, shape) {
   if (shape.type !== 'image') return null
 
   const width = Number(shape.props?.w ?? 0)
@@ -271,18 +272,7 @@ function getDroppedImageResize(editor, shape) {
   }
 
   const resized = getContainedDimensions(width, height, maxW, maxH)
-  if (!resized) return null
-
-  return {
-    id: shape.id,
-    type: 'image',
-    x: shape.x + (width - resized.w) / 2,
-    y: shape.y + (height - resized.h) / 2,
-    props: {
-      w: resized.w,
-      h: resized.h,
-    },
-  }
+  return resized || { w: width, h: height }
 }
 
 // Stamps data-tl-color on each shape DOM node so CSS can remap tldraw's
@@ -1495,15 +1485,40 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       const newImages = Object.values(entry.changes.added).filter(
         r => r.typeName === 'shape' && r.type === 'image'
       )
-      const updates = newImages
-        .map((image) => {
-          const shape = editor.getShape(image.id)
-          return shape ? getDroppedImageResize(editor, shape) : null
-        })
+      if (newImages.length === 0) return
+
+      const shapes = newImages
+        .map((image) => editor.getShape(image.id))
         .filter(Boolean)
-      if (updates.length) {
-        editor.updateShapes(updates)
-      }
+      if (shapes.length === 0) return
+
+      // Anchor the cluster at the centroid of where tldraw initially placed
+      // the shapes (which is roughly the drop point after its own
+      // re-centering pass). Sort by original X so the cascade preserves the
+      // file order tldraw spread out horizontally.
+      const sorted = [...shapes].sort((a, b) => a.x - b.x)
+      const centroidX = sorted.reduce(
+        (sum, s) => sum + s.x + Number(s.props?.w ?? 0) / 2, 0
+      ) / sorted.length
+      const centroidY = sorted.reduce(
+        (sum, s) => sum + s.y + Number(s.props?.h ?? 0) / 2, 0
+      ) / sorted.length
+
+      const updates = sorted.map((shape, i) => {
+        const target = getDroppedImageTargetSize(editor, shape)
+        const w = target?.w ?? Number(shape.props?.w ?? 0)
+        const h = target?.h ?? Number(shape.props?.h ?? 0)
+        const offset = i * MULTI_DROP_CASCADE_OFFSET
+        return {
+          id: shape.id,
+          type: 'image',
+          x: centroidX - w / 2 + offset,
+          y: centroidY - h / 2 + offset,
+          props: { w, h },
+        }
+      })
+
+      editor.updateShapes(updates)
     }, { source: 'user', scope: 'document' })
 
     // Double-click on an image shape opens the lightbox. Hook into tldraw's
