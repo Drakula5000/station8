@@ -15,6 +15,7 @@ import {
   FjEllipseIcon, FjDiamondIcon, FjRectIcon, FjLineIcon, FjChevronDownIcon,
 } from './icons'
 import { ShapeInspector } from './components/ShapeInspector'
+import { ImageLightbox } from './components/ImageLightbox'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -98,6 +99,25 @@ const MAX_DROPPED_IMAGE_FRAME_FRACTION = 0.2
 const FRAME_DROPPED_IMAGE_INSET = 32
 const BOARD_VIEW_STORAGE_PREFIX = 's8.boardView.'
 const BOARD_CACHE_STORAGE_PREFIX = 's8.boardCache.'
+
+// Resolve an image shape to a URL suitable for full-resolution viewing.
+// Uses tldraw's asset resolver so cropped images still point at the original
+// source; falls back to the shape's own src prop if the asset lookup fails.
+async function resolveImageShapeUrl(editor, shape) {
+  if (!shape || shape.type !== 'image') return null
+  const assetId = shape.props?.assetId
+  if (assetId) {
+    const asset = editor.getAsset(assetId)
+    if (asset) {
+      try {
+        const url = await editor.resolveAssetUrl(asset.id, { shouldResolveToOriginal: true })
+        if (url) return url
+      } catch {}
+      if (asset.props?.src) return asset.props.src
+    }
+  }
+  return shape.props?.src || null
+}
 
 function getBoardCacheKey(boardId, role) {
   return `${BOARD_CACHE_STORAGE_PREFIX}${role ? role + '.' : ''}${boardId}`
@@ -817,7 +837,7 @@ const BrokenImageRetry = track(function BrokenImageRetry() {
   return null
 })
 
-const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
+const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox }) {
   const editor = useEditor()
   const [stickyPickerOpen, setStickyPickerOpen] = useState(false)
   const [sectionPickerOpen, setSectionPickerOpen] = useState(false)
@@ -908,11 +928,9 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
 
   const downloadImage = async () => {
     if (!selectedImage) return
-    if (!selectedImage.props.assetId) return
-    const asset = editor.getAsset(selectedImage.props.assetId)
-    if (!asset) return
-    const url = await editor.resolveAssetUrl(asset.id, { shouldResolveToOriginal: true })
+    const url = await resolveImageShapeUrl(editor, selectedImage)
     if (!url) return
+    const asset = selectedImage.props.assetId ? editor.getAsset(selectedImage.props.assetId) : null
     const resp = await fetch(url)
     if (!resp.ok) {
       window.open(url, '_blank', 'noopener,noreferrer')
@@ -921,11 +939,18 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
     const blob = await resp.blob()
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
-    link.download = asset.props.name || 'image'
+    link.download = asset?.props?.name || 'image'
     document.body.appendChild(link)
     link.click()
     link.remove()
     URL.revokeObjectURL(link.href)
+  }
+
+  const expandImage = async () => {
+    if (!selectedImage || !onOpenLightbox) return
+    const url = await resolveImageShapeUrl(editor, selectedImage)
+    if (!url) return
+    onOpenLightbox({ src: url, alt: selectedImage.meta?.altText || '' })
   }
 
   const saveAltText = () => {
@@ -1145,6 +1170,13 @@ const FjToolbar = track(function FjToolbar({ toolInfoRef }) {
           ><TldrawUiButtonIcon small icon="crop" /></button>
           <button
             className="fj-tool"
+            onClick={expandImage}
+            onPointerDown={stopToolbarPointer}
+            title="View full size"
+            type="button"
+          ><TldrawUiButtonIcon small icon="zoom-in" /></button>
+          <button
+            className="fj-tool"
             onClick={downloadImage}
             onPointerDown={stopToolbarPointer}
             title="Download original"
@@ -1204,8 +1236,16 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   const toolInfoRef = useRef({ tool: 'select', stickyColor: 'yellow' })
   const pointerRef = useRef(null)
   const [ghost, setGhost] = useState(null) // { x, y, color } | null
+  const [lightbox, setLightbox] = useState(null) // { src, alt } | null
 
   const editorRef = useRef(null)
+
+  const openLightbox = useCallback((info) => {
+    if (!info?.src) return
+    setLightbox(info)
+  }, [])
+
+  const closeLightbox = useCallback(() => setLightbox(null), [])
 
   useEffect(() => {
     boardIdRef.current = boardId
@@ -1476,6 +1516,25 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     }
   }, [])
 
+  // Double-click on an image shape opens the lightbox (works for owners and
+  // visitors). We intercept at capture phase so tldraw's native double-click
+  // behaviour (which would enter crop/edit mode for owners) doesn't fire.
+  const handleDoubleClickCapture = useCallback(async (e) => {
+    const shapeEl = e.target?.closest?.('[data-shape-type="image"]')
+    if (!shapeEl) return
+    const shapeId = shapeEl.getAttribute('data-shape-id')
+    if (!shapeId) return
+    const editor = editorRef.current
+    if (!editor) return
+    const shape = editor.getShape(shapeId)
+    if (!shape || shape.type !== 'image') return
+    e.preventDefault()
+    e.stopPropagation()
+    const url = await resolveImageShapeUrl(editor, shape)
+    if (!url) return
+    setLightbox({ src: url, alt: shape.meta?.altText || '' })
+  }, [])
+
   const ghostPx = ghost && editorRef.current
     ? getNotePreviewSizePx(editorRef.current)
     : 0
@@ -1488,6 +1547,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onPointerDownCapture={handlePointerDownCapture}
+      onDoubleClickCapture={handleDoubleClickCapture}
       onWheelCapture={handleWheelCapture}
     >
       <Tldraw
@@ -1498,7 +1558,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         overrides={TLDRAW_UI_OVERRIDES}
         shapeUtils={FRAME_SHAPE_UTILS}
       >
-        {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} />}
+        {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} onOpenLightbox={openLightbox} />}
         {!readOnly && <ShapeInspector />}
         <FrameCornerStyles />
         <ImageShapeStyles />
@@ -1518,6 +1578,9 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
             background: ghostBg,
           }}
         />
+      )}
+      {lightbox && (
+        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={closeLightbox} />
       )}
     </div>
   )

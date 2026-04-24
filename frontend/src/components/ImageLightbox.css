@@ -1,0 +1,113 @@
+.s8-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: var(--s8-lightbox-backdrop);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  animation: s8LightboxFade 0.15s ease-out;
+}
+
+@keyframes s8LightboxFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.s8-lightbox-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  user-select: none;
+}
+
+.s8-lightbox-stage img {
+  max-width: 95vw;
+  max-height: 92vh;
+  object-fit: contain;
+  transform-origin: center center;
+  will-change: transform;
+  pointer-events: none;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  border-radius: 6px;
+  background: var(--s8-lightbox-img-bg);
+}
+
+.s8-lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid var(--s8-accent-border);
+  background: var(--s8-pill-bg);
+  color: var(--s8-text);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background 0.12s ease, transform 0.12s ease, color 0.12s ease;
+  z-index: 2;
+}
+
+.s8-lightbox-close:hover {
+  background: var(--s8-accent);
+  color: var(--s8-on-accent);
+  transform: scale(1.05);
+}
+
+.s8-lightbox-controls {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 999px;
+  background: var(--s8-pill-bg);
+  border: 1px solid var(--s8-accent-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 2;
+}
+
+.s8-lightbox-btn {
+  min-width: 36px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--s8-text);
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.s8-lightbox-btn:hover {
+  background: var(--s8-accent);
+  color: var(--s8-on-accent);
+}
+
+.s8-lightbox-btn-reset {
+  min-width: 56px;
+}

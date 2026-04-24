@@ -58,6 +58,8 @@ html[data-mode="dark"], html:not([data-mode]) {
   --s8-shadow-menu:    0 12px 40px rgba(0, 0, 0, 0.65);
   --s8-shadow-modal:   0 20px 60px rgba(0, 0, 0, 0.70);
   --s8-radius-lg:      18px;
+  --s8-lightbox-backdrop: rgba(4, 6, 14, 0.92);
+  --s8-lightbox-img-bg:   #0a0e1c;
 }
 
 /* ── Aurora light ── */
@@ -96,6 +98,8 @@ html[data-mode="light"] {
   --s8-shadow-menu:    0 12px 36px rgba(40, 25, 100, 0.14);
   --s8-shadow-modal:   0 20px 50px rgba(40, 25, 100, 0.18);
   --s8-radius-lg:      18px;
+  --s8-lightbox-backdrop: rgba(24, 20, 58, 0.78);
+  --s8-lightbox-img-bg:   #ffffff;
 }
 
 /* ── App layout ── */
