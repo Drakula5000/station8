@@ -128,6 +128,18 @@ def add_cors_headers(response):
     if request.path.startswith('/api/auth/'):
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
+    # `/uploads/*` serves image bytes to <img> tags. tldraw mounts image shapes
+    # with crossOrigin="anonymous", so the browser makes a CORS request. If the
+    # same image was previously loaded without crossorigin (no Origin header),
+    # the cached response had no ACAO header — browsers then reuse that cached
+    # entry for the CORS request and reject it. Always emit ACAO:* + Vary:Origin
+    # here so every response (cached or fresh) satisfies CORS. No credentials
+    # because <img crossorigin="anonymous"> doesn't send cookies anyway, and
+    # ACAO:* is incompatible with Access-Control-Allow-Credentials.
+    if request.path.startswith('/uploads/'):
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Vary'] = 'Origin'
+        return response
     origin = request.headers.get('Origin')
     if origin and origin in _allowed_origins():
         response.headers['Access-Control-Allow-Origin'] = origin
