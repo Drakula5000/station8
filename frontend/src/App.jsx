@@ -189,7 +189,23 @@ function formatDocDate(value) {
   if (!value) return 'No timestamp'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'No timestamp'
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffDays = Math.floor(diffMs / 86_400_000)
+  if (diffDays < 0) {
+    // Future-dated (unlikely but possible in dev) — show full date.
+    return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(date)
+  }
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  if (diffDays < 7)  return `${diffDays}d ago`
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`
+  // After a month, absolute date with year so "Apr 23" never has ambiguous year context.
+  const sameYear = date.getFullYear() === now.getFullYear()
+  return new Intl.DateTimeFormat(undefined, sameYear
+    ? { month: 'short', day: 'numeric' }
+    : { year: 'numeric', month: 'short', day: 'numeric' }
+  ).format(date)
 }
 
 async function fetchJson(url, options = {}, fallback = null) {
@@ -1094,9 +1110,11 @@ export default function App() {
       type: doc.type,
       docId: doc.id,
       name: doc.name,
-      snippet: doc.type === 'board'
-        ? 'Canvas board ready for notes, frames, and visual research.'
-        : 'Structured sheet available for sorting, tracking, and synthesis.',
+      // No search query → no snippet. Visitors can't edit, so SaaS-style
+      // "ready for notes, frames…" placeholders are misleading. Cards show
+      // title + folder + date + tags; snippet only appears with a real
+      // search match context.
+      snippet: null,
       source: docTypeLabel(doc.type),
       createdAt: doc.created_at,
       folderPath: buildFolderPath(doc.folder_id, folderById),

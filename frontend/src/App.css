@@ -422,39 +422,25 @@ html[data-theme="prism"] .fj-toolbar {
 }
 
 /* ────────────────────────────────────────────────────────────────────────
-   CANVAS SHAPE FILTERS — per-theme global drop-shadows + stroke overrides
-   scoped by html[data-theme=X] .tl-shape-*
+   CANVAS SHAPE FILTERS — per-theme global drop-shadows + stroke overrides.
+   tldraw v4 does NOT emit `.tl-shape-{type}` classes. Every shape gets
+   `.tl-shape` and a `data-shape-type` attribute; that's how we scope.
    ──────────────────────────────────────────────────────────────────────── */
 
 /* Abyss: bioluminescent blooms — uniform per shape type */
-html[data-theme="abyss"] .tl-shape-note  { filter: drop-shadow(0 0 14px rgba(58, 245, 184, 0.28)); }
-html[data-theme="abyss"] .tl-shape-frame { filter: drop-shadow(0 0 18px rgba(58, 245, 184, 0.10)); }
-html[data-theme="abyss"] .tl-shape-arrow { filter: drop-shadow(0 0 10px rgba(58, 245, 184, 0.45)); }
-html[data-theme="abyss"] .tl-shape-line  { filter: drop-shadow(0 0 8px rgba(58, 245, 184, 0.45)); }
-html[data-theme="abyss"] .tl-shape-draw  { filter: drop-shadow(0 0 8px rgba(58, 245, 184, 0.40)); }
-html[data-theme="abyss"] .tl-shape-geo   { filter: drop-shadow(0 0 12px rgba(58, 245, 184, 0.20)); }
+html[data-theme="abyss"] [data-shape-type="note"]  { filter: drop-shadow(0 0 14px rgba(58, 245, 184, 0.28)); }
+html[data-theme="abyss"] [data-shape-type="frame"] { filter: drop-shadow(0 0 18px rgba(58, 245, 184, 0.10)); }
+html[data-theme="abyss"] [data-shape-type="arrow"] { filter: drop-shadow(0 0 10px rgba(58, 245, 184, 0.45)); }
+html[data-theme="abyss"] [data-shape-type="line"]  { filter: drop-shadow(0 0 8px rgba(58, 245, 184, 0.45)); }
+html[data-theme="abyss"] [data-shape-type="draw"]  { filter: drop-shadow(0 0 8px rgba(58, 245, 184, 0.40)); }
+html[data-theme="abyss"] [data-shape-type="geo"]   { filter: drop-shadow(0 0 12px rgba(58, 245, 184, 0.20)); }
+html[data-theme="abyss"] [data-shape-type="text"]  { filter: drop-shadow(0 0 8px rgba(58, 245, 184, 0.20)); }
 
-/* Prism: iridescent gradient strokes on arrows + frame borders
-   (shared <defs> is injected once at document level — see App.jsx) */
-html[data-theme="prism"] .tl-shape-arrow path,
-html[data-theme="prism"] .tl-shape-line path {
-  stroke: url(#s8-prism-stroke);
-}
-html[data-theme="prism"] .tl-shape-frame .tl-frame__body {
-  stroke: url(#s8-prism-stroke);
-  stroke-width: 1.5;
-}
-
-/* HUD: amber stroke emphasis on frames (replaces tldraw's default) */
-html[data-theme="hud"] .tl-shape-frame .tl-frame__body {
-  stroke: rgba(255, 165, 40, 0.55);
-  stroke-width: 1;
-}
-
-/* Archive: 1px cream frame borders */
-html[data-theme="archive"] .tl-shape-frame .tl-frame__body {
-  stroke: #2D2B24;
-  stroke-width: 1;
+/* Prism: gradient strokes — arrows, lines and frame borders share a single
+   <linearGradient id="s8-prism-stroke"> defined in App.jsx <defs>. */
+html[data-theme="prism"] [data-shape-type="arrow"] path[stroke],
+html[data-theme="prism"] [data-shape-type="line"] path[stroke] {
+  stroke: url(#s8-prism-stroke) !important;
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -499,6 +485,27 @@ html[data-theme="prism"] .tl-frame-heading {
   background: linear-gradient(90deg, #60F0FF, #FF5CE0);
   -webkit-background-clip: text; background-clip: text;
   color: transparent;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   CANVAS TEXT SHAPES — per-theme font-family / style.
+   tldraw canvas text renders inside [data-shape-type="text"] .tl-rich-text.
+   Only the font family / style is overridden here — color still follows
+   the user's picked tldraw color (which has already been remapped via
+   DefaultColorThemePalette mutations).
+   ──────────────────────────────────────────────────────────────────────── */
+html[data-theme="hud"] [data-shape-type="text"] .tl-rich-text,
+html[data-theme="hud"] [data-shape-type="geo"]  .tl-rich-text {
+  font-family: 'tldraw_mono', 'Space Mono', ui-monospace, monospace !important;
+}
+html[data-theme="abyss"] [data-shape-type="text"] .tl-rich-text,
+html[data-theme="abyss"] [data-shape-type="geo"]  .tl-rich-text {
+  font-family: 'tldraw_serif', 'Crimson Pro', serif !important;
+  font-style: italic !important;
+}
+html[data-theme="archive"] [data-shape-type="text"] .tl-rich-text,
+html[data-theme="archive"] [data-shape-type="geo"]  .tl-rich-text {
+  font-family: 'tldraw_serif', 'Crimson Pro', serif !important;
 }
 
 /* ────────────────────────────────────────────────────────────────────────

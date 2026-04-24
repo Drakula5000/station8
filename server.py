@@ -8,6 +8,7 @@ import shutil
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from functools import wraps
 
@@ -1125,11 +1126,20 @@ def get_board(board_id):
 @app.route('/api/visitor/boards/<board_id>', methods=['GET'])
 @_viewer_auth_required
 def get_visitor_board(board_id):
-    folders = _get_workspace().get('folders', [])
-    board = next((b for b in _load_boards() if b['id'] == board_id), None)
+    # Parallelise the three Supabase reads — workspace, boards index, and the
+    # board snapshot itself — that were running back-to-back before. Each
+    # round-trip is ~200 ms on Render free tier, so serial adds up fast.
+    workspace_future = _signed_url_executor.submit(_get_workspace)
+    boards_future = _signed_url_executor.submit(_load_boards)
+    snapshot_future = _signed_url_executor.submit(_load, _board_file(board_id), {'snapshot': None})
+
+    folders = workspace_future.result().get('folders', [])
+    board = next((b for b in boards_future.result() if b['id'] == board_id), None)
     if not board or not _doc_is_visitor_visible(board, folders):
         return jsonify({'error': 'Not found'}), 404
-    return jsonify(_board_payload_with_assets(board_id))
+    data = snapshot_future.result()
+    data['asset_urls'] = _asset_urls_for_snapshot(data.get('snapshot'))
+    return jsonify(data)
 
 
 @app.route('/api/boards/<board_id>', methods=['PUT'])
@@ -1617,19 +1627,34 @@ def _extract_upload_filenames(snapshot):
     return list({m.group(1) for m in _UPLOAD_REF_RE.finditer(blob)})
 
 
+_signed_url_executor = ThreadPoolExecutor(max_workers=12, thread_name_prefix='signurl')
+
+
 def _asset_urls_for_snapshot(snapshot):
     """Return {filename: signed_url} for every /uploads/X referenced in the
-    snapshot. Lets the frontend render images direct from Supabase instead of
-    bouncing each request through Flask (one redirect per image adds up fast
-    on Render free tier)."""
+    snapshot. Runs the Supabase signing calls in parallel — serial signing
+    was the single biggest source of board-load latency (N images ×
+    ~300 ms per Supabase round-trip blocked the snapshot response)."""
     if not supabase:
         return {}
     filenames = _extract_upload_filenames(snapshot)
     if not filenames:
         return {}
+    # Fast path: everything already cached → no thread dispatch needed.
+    uncached = []
     urls = {}
-    for name in filenames:
-        url = _get_cached_signed_url(name)
+    now = time.time()
+    with _signed_url_lock:
+        for name in filenames:
+            entry = _signed_url_cache.get(name)
+            if entry and entry[1] > now:
+                urls[name] = entry[0]
+            else:
+                uncached.append(name)
+    if not uncached:
+        return urls
+    results = _signed_url_executor.map(_get_cached_signed_url, uncached)
+    for name, url in zip(uncached, results):
         if url:
             urls[name] = url
     return urls
