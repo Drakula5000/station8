@@ -120,7 +120,7 @@ def main():
     ts = now.strftime("%Y%m%d-%H%M%S")
     print(f"Autobackup run at {now.isoformat()}")
     written, unchanged = snapshot_primary_rows(ts)
-    print(f"Wrote {written} new .auto-{ts} rows, skipped {unchanged} unchanged rows")
+    print(f"Wrote {written} new .{BACKUP_SUFFIX}-{ts} rows, skipped {unchanged} unchanged rows")
     cutoff = now - timedelta(days=RETENTION_DAYS)
     deleted = prune_old_auto_backups(cutoff)
     print(f"Pruned {deleted} .auto-* rows older than {RETENTION_DAYS} days (before {cutoff.isoformat()})")

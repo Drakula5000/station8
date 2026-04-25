@@ -53,6 +53,7 @@ private/
 backups/
 ops/.backup-env
 ops/.env*
+ops/.deploy-hook
 
 # Internal docs and mockups (not for public repo)
 docs/
