@@ -1131,6 +1131,7 @@ export default function App() {
             source: hit.source,
             score: hit.score,
             createdAt: doc.created_at,
+            folderId: doc.folder_id || null,
             folderPath: buildFolderPath(doc.folder_id, folderById),
             tags: doc.tags || [],
           })
@@ -1151,6 +1152,7 @@ export default function App() {
       snippet: null,
       source: docTypeLabel(doc.type),
       createdAt: doc.created_at,
+      folderId: doc.folder_id || null,
       folderPath: buildFolderPath(doc.folder_id, folderById),
       tags: doc.tags || [],
     }))
@@ -1509,48 +1511,54 @@ export default function App() {
 
           {/* Sticky footer */}
           <div className="sidebar-footer">
-            {googleAuth.connected ? (
-              <button
-                className="sidebar-google-btn is-connected"
-                onClick={disconnectGoogle}
-                title="Disconnect Google account"
-                type="button"
-              >
-                <GoogleLogoIcon />
-                <span className="sidebar-google-label">
-                  <span className="sidebar-google-status">Google connected</span>
-                  <span className="sidebar-google-email">{googleAuth.email}</span>
+            <div className="sidebar-drive-card" data-connected={googleAuth.connected ? 'true' : 'false'}>
+              <div className="sidebar-drive-head">
+                <span className="sidebar-drive-label">
+                  <span className="sidebar-drive-dot" />
+                  Drive
                 </span>
-                <span className="sidebar-google-action">Disconnect</span>
-              </button>
-            ) : (
-              <button
-                className="sidebar-google-btn"
-                onClick={openGoogleConnect}
-                title="Connect Google account to create Docs and Sheets"
-                type="button"
-                disabled={googleAuth.loading}
-              >
-                <GoogleLogoIcon />
-                <span className="sidebar-google-label">Connect Google</span>
-              </button>
-            )}
-            {(gdocs.length > 0 || gsheets.length > 0) && (
-              <button
-                className="sidebar-google-btn sidebar-google-sync"
-                onClick={syncDriveContent}
-                title="Pull latest text from your linked Google Docs and Sheets so search reflects edits"
-                type="button"
-                disabled={driveSyncState.busy}
-              >
-                <RefreshIcon />
-                <span className="sidebar-google-label">
+                {googleAuth.connected && (
+                  <div className="sidebar-drive-actions">
+                    {(gdocs.length > 0 || gsheets.length > 0) && (
+                      <button
+                        className={`sidebar-drive-icon${driveSyncState.busy ? ' is-busy' : ''}`}
+                        onClick={syncDriveContent}
+                        title="Pull latest text from your linked Docs and Sheets"
+                        type="button"
+                        disabled={driveSyncState.busy}
+                      >
+                        <RefreshIcon />
+                      </button>
+                    )}
+                    <button
+                      className="sidebar-drive-icon"
+                      onClick={disconnectGoogle}
+                      title="Disconnect"
+                      type="button"
+                    >
+                      <CloseIcon />
+                    </button>
+                  </div>
+                )}
+              </div>
+              {googleAuth.connected ? (
+                <div className="sidebar-drive-body">
                   {driveSyncState.busy
-                    ? 'Syncing Drive content…'
-                    : driveSyncState.message || 'Sync Drive content'}
-                </span>
-              </button>
-            )}
+                    ? 'Syncing…'
+                    : (driveSyncState.message || googleAuth.email)}
+                </div>
+              ) : (
+                <button
+                  className="sidebar-drive-link-btn"
+                  onClick={openGoogleConnect}
+                  title="Link your account to create Docs and Sheets"
+                  type="button"
+                  disabled={googleAuth.loading}
+                >
+                  <PlusIcon /> <span>Link account</span>
+                </button>
+              )}
+            </div>
             <div className="sidebar-utility-row">
               <button
                 className="sidebar-utility-btn"
@@ -1575,7 +1583,7 @@ export default function App() {
         </aside>
       )}
 
-      <main className="canvas-wrap">
+      <main className="canvas-wrap s8-grid">
         {showDatabaseHome ? (
           <DatabaseHome
             query={query}
@@ -1583,6 +1591,9 @@ export default function App() {
             databaseView={databaseView}
             onDatabaseViewChange={setDatabaseView}
             items={databaseItems}
+            folders={folders}
+            allTags={allTags}
+            topTags={allTags.slice(0, 3).map(([t]) => t)}
             tagColor={tagColor}
             onOpenItem={(type, docId) => {
               openDocument(type, docId)
@@ -1602,6 +1613,8 @@ export default function App() {
             searchRef={homeSearchRef}
             backendStatus={backendStatus}
             searchLoading={searchLoading}
+            colorMode={colorMode}
+            onToggleColorMode={() => setColorMode(m => m === 'dark' ? 'light' : 'dark')}
           />
         ) : (
           <>
@@ -1892,7 +1905,7 @@ export default function App() {
       {shareOpen && workspace && (
         <Modal onClose={() => setShareOpen(false)} title="Share your research">
           <div className="share-body">
-            <div className="share-desc">
+            <div className="modal-copy">
               These links use the visitor password gate. Visitors land in the database view by default, and deep links can open a specific board or sheet directly.
             </div>
             <div className="share-url-row">
@@ -1938,7 +1951,7 @@ export default function App() {
               </div>
             )}
             <div className="share-owner-row">
-              <label>Your display name:</label>
+              <label className="modal-field-label">Your display name:</label>
               <input
                 className="share-owner-input"
                 value={workspace.owner || ''}
@@ -1955,7 +1968,7 @@ export default function App() {
 
       {ownerPromptOpen && (
         <Modal onClose={skipOwner} title="What's your name?">
-          <p style={{ fontSize: 13, color: '#666', marginBottom: 12 }}>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--s8-text-mid)', marginBottom: '0.75rem' }}>
             This shows on visitor links so people know who shared the workspace.
           </p>
           <input
@@ -1975,7 +1988,7 @@ export default function App() {
       {deleteConfirmOpen && deleteTarget && (
         <Modal onClose={() => { setDeleteConfirmOpen(false); setDeleteTarget(null) }} title={`Delete ${deleteTarget.type}`}>
           <div className="delete-dialog-body">
-            <p className="delete-dialog-copy">
+            <p className="modal-copy">
               {deleteTarget.type === 'folder'
                 ? <>Choose what should happen to <strong>{deleteTarget.name}</strong>.</>
                 : <>Delete <strong>{deleteTarget.name}</strong>? This permanently removes it.</>}
@@ -2126,7 +2139,7 @@ function AccessGate({
 }) {
   if (loading) {
     return (
-      <div className="auth-shell">
+      <div className="auth-shell s8-grid">
         <div className="auth-card auth-card-loading">
           <div className="auth-kicker">Station 8</div>
           <div className="auth-title">Loading access state…</div>
@@ -2140,7 +2153,7 @@ function AccessGate({
   const configMissing = !authConfigured && !setupAllowed
 
   return (
-    <div className="auth-shell">
+    <div className="auth-shell s8-grid">
       <div className="auth-card">
         <div className="auth-kicker">Station 8</div>
         <h1 className="auth-title">{allowSetup ? 'Set up access' : configMissing ? 'Access offline' : 'Enter the workspace'}</h1>
@@ -2206,15 +2219,23 @@ function DatabaseHome({
   databaseView,
   onDatabaseViewChange,
   items,
+  folders,
+  allTags,
+  topTags,
   tagColor,
   onOpenItem,
   onLogout,
   searchRef,
   backendStatus,
   searchLoading,
+  colorMode,
+  onToggleColorMode,
 }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [selectedFolder, setSelectedFolder] = useState('all')
+  const [selectedTags, setSelectedTags] = useState(() => new Set())
   const isReady = backendStatus === 'ready'
+  const hasQuery = !!query.trim()
 
   useEffect(() => {
     if (isReady) return
@@ -2230,10 +2251,87 @@ function DatabaseHome({
     ? 'Almost there…'
     : 'Taking a little longer than usual…'
 
+  const folderById = useMemo(() => {
+    const m = {}
+    for (const f of (folders || [])) m[f.id] = f
+    return m
+  }, [folders])
+
+  const rootFolderIdOf = useCallback((folderId) => {
+    let cursor = folderId
+    const seen = new Set()
+    while (cursor && folderById[cursor] && !seen.has(cursor)) {
+      seen.add(cursor)
+      const parent = folderById[cursor].parent_id
+      if (!parent) return cursor
+      cursor = parent
+    }
+    return null
+  }, [folderById])
+
+  const folderRail = useMemo(() => {
+    const counts = new Map()
+    let unfiled = 0
+    for (const item of items) {
+      const root = rootFolderIdOf(item.folderId)
+      if (root) counts.set(root, (counts.get(root) || 0) + 1)
+      else unfiled += 1
+    }
+    const topLevel = (folders || [])
+      .filter(f => !f.parent_id)
+      .map(f => ({ id: f.id, name: f.name, count: counts.get(f.id) || 0 }))
+      .filter(f => f.count > 0)
+      .sort((a, b) => a.name.localeCompare(b.name))
+    if (unfiled > 0) topLevel.push({ id: '__unfiled__', name: 'Unfiled', count: unfiled })
+    return topLevel
+  }, [items, folders, rootFolderIdOf])
+
+  const filteredItems = useMemo(() => {
+    if (hasQuery) return items
+    return items.filter(item => {
+      let folderOk = selectedFolder === 'all'
+      if (!folderOk) {
+        if (selectedFolder === '__unfiled__') folderOk = !item.folderId
+        else folderOk = rootFolderIdOf(item.folderId) === selectedFolder
+      }
+      if (!folderOk) return false
+      if (selectedTags.size === 0) return true
+      const itemTags = item.tags || []
+      for (const t of selectedTags) if (!itemTags.includes(t)) return false
+      return true
+    })
+  }, [items, hasQuery, selectedFolder, selectedTags, rootFolderIdOf])
+
+  const toggleTag = (tag) => {
+    setSelectedTags(prev => {
+      const next = new Set(prev)
+      if (next.has(tag)) next.delete(tag)
+      else next.add(tag)
+      return next
+    })
+  }
+
+  const dividerLabel = (() => {
+    let folderTitle = 'ALL'
+    if (selectedFolder !== 'all') {
+      const f = folderRail.find(x => x.id === selectedFolder)
+      folderTitle = (f ? f.name : 'ALL').toUpperCase()
+    }
+    let tagSuffix = ''
+    if (selectedTags.size > 0) {
+      tagSuffix = ' / ' + [...selectedTags].map(t => '#' + t.toUpperCase()).join(' + ')
+    }
+    const unit = filteredItems.length === 1 ? 'DOCUMENT' : 'DOCUMENTS'
+    return `${folderTitle}${tagSuffix} · ${filteredItems.length} ${unit}`
+  })()
+
   return (
-    <div className="database-home">
+    <div className="database-home s8-grid">
       <div className="database-topbar">
-        <span className="database-brand">STATION 8</span>
+        <div className="database-brand-wrap">
+          <span className="database-brand"><span className="database-brand-dot" />STATION 8</span>
+          <span className="database-brand-status">VISITOR ACCESS</span>
+        </div>
         <label className={`database-search ${!isReady ? 'database-search--loading' : ''}`}>
           <SearchIcon />
           <input
@@ -2254,57 +2352,151 @@ function DatabaseHome({
           <button className={databaseView === 'list' ? 'active' : ''} onClick={() => onDatabaseViewChange('list')} type="button">List</button>
           <button className={databaseView === 'grid' ? 'active' : ''} onClick={() => onDatabaseViewChange('grid')} type="button">Grid</button>
         </div>
+        {onToggleColorMode && (
+          <button
+            className="topbar-theme"
+            onClick={onToggleColorMode}
+            title={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-label={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            type="button"
+          >
+            <ThemeToggleIcon />
+          </button>
+        )}
         <button className="topbar-logout" onClick={onLogout} type="button">Logout</button>
       </div>
 
+      {!hasQuery && (
+        <div className="database-hero">
+          <h1 className="database-hero-title">Research Database</h1>
+          <p className="database-hero-sub">Boards, docs, and field notes from across Station 8. Every image, sticky, and cell is indexed.</p>
+          {topTags && topTags.length > 0 && (
+            <div className="database-hero-tries">
+              <span className="database-hero-tries-label">Try</span>
+              {topTags.map((t) => (
+                <button
+                  key={t}
+                  className="database-hero-try"
+                  type="button"
+                  onClick={() => {
+                    if (!isReady) return
+                    onQueryChange(t)
+                    if (searchRef && searchRef.current) searchRef.current.focus()
+                  }}
+                  disabled={!isReady}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!hasQuery && (folderRail.length > 0 || (allTags || []).length > 0) && (
+        <div className="database-explore">
+          {folderRail.length > 0 && (
+            <div className="database-explore-col">
+              <div className="database-explore-label">Browse by Folder</div>
+              <div className="database-folder-chips">
+                <button
+                  type="button"
+                  className={`database-folder-chip${selectedFolder === 'all' ? ' is-active' : ''}`}
+                  onClick={() => setSelectedFolder('all')}
+                >
+                  All <span className="database-chip-count">{items.length}</span>
+                </button>
+                {folderRail.map(f => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    className={`database-folder-chip${selectedFolder === f.id ? ' is-active' : ''}`}
+                    onClick={() => setSelectedFolder(f.id)}
+                  >
+                    {f.name} <span className="database-chip-count">{f.count}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {(allTags || []).length > 0 && (
+            <div className="database-explore-col">
+              <div className="database-explore-label">Browse by Tag</div>
+              <div className="database-tag-chips">
+                {allTags.map(([t]) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={`database-tag-chip${selectedTags.has(t) ? ' is-active' : ''}`}
+                    onClick={() => toggleTag(t)}
+                  >
+                    #{t}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!hasQuery && (
+        <div className="database-divider">
+          <span className="database-divider-label">{dividerLabel}</span>
+          <span className="database-divider-line" />
+        </div>
+      )}
+
       <div className={`database-results database-${databaseView}`}>
-        {items.map((item) => (
+        {filteredItems.map((item) => (
           <button
             key={item.key}
             className={`database-card database-card-${databaseView}`}
             onClick={() => onOpenItem(item.type, item.docId)}
             type="button"
           >
-            <div className={`database-thumb database-thumb-${item.type}`}>
-              {item.type === 'board' ? <BoardIcon /> : item.type === 'gdoc' ? <DocIcon /> : <SheetIcon />}
-              <span>{docTypeLabel(item.type)}</span>
+            <div className="database-card-top">
+              <span className="database-card-type">{docTypeLabel(item.type)}</span>
+              <span className="database-card-date">{formatDocDate(item.createdAt)}</span>
             </div>
-            <div className="database-card-body">
-              <div className="database-card-title">{item.name}</div>
-              {item.snippet && (
-                <div className="database-card-snippet">{item.snippet}</div>
-              )}
-              <div className="database-card-meta">
-                <span>{item.folderPath || 'Workspace root'}</span>
-                <span>{item.source}</span>
-                <span>{formatDocDate(item.createdAt)}</span>
-              </div>
-              {item.tags.length > 0 && (
-                <div className="database-card-tags">
-                  {item.tags.slice(0, 4).map((tag) => {
-                    const c = tagColor(tag)
-                    return (
-                      <span key={tag} className="tag-pill" style={{ background: c.bg, color: c.fg }}>
-                        #{tag}
-                      </span>
-                    )
-                  })}
-                </div>
-              )}
+            <div className="database-card-title">{item.name}</div>
+            {item.snippet && (
+              <div className="database-card-snippet">{item.snippet}</div>
+            )}
+            <div className="database-card-meta">
+              <span className="database-card-folder">{item.folderPath || 'Workspace root'}</span>
+              {item.tags.slice(0, 4).map((tag) => {
+                const c = tagColor(tag)
+                return (
+                  <span key={tag} className="tag-pill" style={{ background: c.bg, color: c.fg }}>
+                    #{tag}
+                  </span>
+                )
+              })}
             </div>
           </button>
         ))}
-        {items.length === 0 && (
+        {filteredItems.length === 0 && (
           <div className="database-empty">
             {searchLoading ? (
               <>
                 <div className="database-empty-title">Searching…</div>
                 <div className="database-empty-copy">Hang tight.</div>
               </>
-            ) : query ? (
+            ) : hasQuery ? (
               <>
                 <div className="database-empty-title">Nothing public matched that search.</div>
                 <div className="database-empty-copy">Clear the query or add more public material to the workspace.</div>
+              </>
+            ) : (selectedFolder !== 'all' || selectedTags.size > 0) ? (
+              <>
+                <div className="database-empty-title">No documents match this filter.</div>
+                <div className="database-empty-copy">
+                  <button
+                    type="button"
+                    className="database-empty-reset"
+                    onClick={() => { setSelectedFolder('all'); setSelectedTags(new Set()) }}
+                  >Clear filters</button>
+                </div>
               </>
             ) : null}
           </div>
