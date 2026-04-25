@@ -503,7 +503,7 @@ export default function App() {
   const findShapeIdsByBoard = useMemo(() => {
     const acc = {}
     for (const hit of results) {
-      if (hit.kind !== 'board' || !hit.shape_id) continue
+      if (hit.doc_type !== 'board' || !hit.shape_id) continue
       if (!acc[hit.doc_id]) acc[hit.doc_id] = []
       if (!acc[hit.doc_id].includes(hit.shape_id)) acc[hit.doc_id].push(hit.shape_id)
     }
@@ -1592,7 +1592,7 @@ export default function App() {
                 // Collect all unique board IDs from results in order
                 const boardIds = [...new Set(
                   results
-                    .filter(r => r.kind !== 'sheet')
+                    .filter(r => r.doc_type === 'board')
                     .map(r => r.doc_id)
                 )]
                 setFindBoards(boardIds)
@@ -2077,7 +2077,7 @@ export default function App() {
                     if (hitType === 'board') {
                       setFindQuery(query)
                       const boardIds = [...new Set(
-                        results.filter(r2 => r2.kind === 'board').map(r2 => r2.doc_id)
+                        results.filter(r2 => r2.doc_type === 'board').map(r2 => r2.doc_id)
                       )]
                       setFindBoards(boardIds)
                     }
