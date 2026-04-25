@@ -1374,7 +1374,7 @@ html[data-mode="light"] {
   width: 0.0625rem; height: 1.75rem; background: var(--s8-pill-border); margin: 0 0.125rem;
 }
 
-.shape-btn-wrap { position: relative; display: inline-flex; }
+.shape-btn-wrap { display: inline-flex; }
 .shape-picker {
   position: absolute; bottom: calc(100% + 0.625rem); left: 50%;
   transform: translateX(-50%);
@@ -1584,13 +1584,8 @@ html[data-mode="light"] {
 }
 .btn-primary:hover { opacity: 0.88; }
 .btn-primary:disabled { background: var(--s8-text-dim); cursor: not-allowed; }
-.btn-danger,
-.btn-danger:hover {
-  background: var(--s8-danger);
-}
-.btn-danger:hover {
-  opacity: 0.88;
-}
+.btn-danger { background: var(--s8-danger); }
+.btn-danger:hover { background: var(--s8-danger); opacity: 0.88; }
 
 .delete-dialog-body {
   display: flex;

@@ -1,4 +1,4 @@
-# Research Hub
+![Station 8](./assets/header.svg)
 
 A searchable research workspace with infinite canvas boards and spreadsheets.
 
