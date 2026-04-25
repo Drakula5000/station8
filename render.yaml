@@ -4,6 +4,24 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python server.py
+    buildFilter:
+      paths:
+        - server.py
+        - requirements.txt
+        - render.yaml
+        - start.sh
+        - ops/**
+      ignoredPaths:
+        - frontend/**
+        - mockups/**
+        - backups/**
+        - data/**
+        - uploads/**
+        - private/**
+        - "**/*.md"
+        - .github/**
+        - .vscode/**
+        - .claude/**
     disk:
       name: station8-data
       mountPath: /var/data
