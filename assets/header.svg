@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 250" width="900" height="250">
+<defs>
+  <style>
+    .hr { font-family: 'Courier New', Courier, monospace; font-size: 11px; }
+    .s8 { font-family: 'Courier New', Courier, monospace; font-size: 11px; }
+  </style>
+  <clipPath id="c"><rect width="900" height="250"/></clipPath>
+  <filter id="glow">
+    <feGaussianBlur stdDeviation="2" result="blur"/>
+    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <linearGradient id="vl" x1="0" x2="1" y1="0" y2="0">
+    <stop offset="0%"   stop-color="#06060f" stop-opacity="0.95"/>
+    <stop offset="10%"  stop-color="#06060f" stop-opacity="0"/>
+    <stop offset="90%"  stop-color="#06060f" stop-opacity="0"/>
+    <stop offset="100%" stop-color="#06060f" stop-opacity="0.95"/>
+  </linearGradient>
+</defs>
+
+<!-- Background -->
+<rect width="900" height="250" fill="#06060f"/>
+
+<!-- Horizon scan lines: rows near the centre Y are brightest (the "horizon"),
+     edges fade out. Alternating left/right scrolls at varying speeds give
+     parallax depth. SMIL animateTransform is used because CSS `transform`
+     animations on SVG <text> are unreliable in standalone SVG renderers. -->
+<g clip-path="url(#c)">
+
+  <!-- Row 1  y=14  far sky -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" from="0,0" to="-900,0" dur="80s" repeatCount="indefinite"/>
+    <text class="hr" x="0" y="14"  fill="#3a4a70" opacity="0.55">·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·     ·</text>
+  </g>
+
+  <!-- Row 2  y=34 -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" from="-900,0" to="0,0" dur="65s" repeatCount="indefinite"/>
+    <text class="hr" x="0" y="34"  fill="#4a5878" opacity="0.6">,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,  ·  ,</text>
+  </g>
+
+  <!-- Row 3  y=54 -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" from="0,0" to="-900,0" dur="50s" repeatCount="indefinite"/>
+    <text class="hr" x="0" y="54"  fill="#5a6c92" opacity="0.65">- · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - · - ·</text>
+  </g>
+
+  <!-- Row 4  y=74 -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" from="-900,0" to="0,0" dur="40s" repeatCount="indefinite"/>
+    <text class="hr" x="0" y="74"  fill="#6a80b0" opacity="0.7">░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ · ░ ·</text>
+  </g>
+
+  <!-- Row 5  y=94  approaching horizon -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" from="0,0" to="-900,0" dur="30s" repeatCount="indefinite"/>
+    <text class="hr" x="0" y="94"  fill="#7a92c8" opacity="0.78">░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ · ░░ ·</text>
+  </g>
+
+  <!-- Row 6  y=114  HORIZON (brightest, fastest) -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" from="-900,0" to="0,0" dur="12s" repeatCount="indefinite"/>
+    <text class="hr" x="0" y="114" fill="#a8c4f0" opacity="0.88">▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░▒░</text>
+  </g>
+
+  <!-- Row 7  y=134 -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" from="0,0" to="-900,0" dur="14s" repeatCount="indefinite"/>
+    <text class="hr" x="0" y="134" fill="#7a92c8" opacity="0.78">▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ · ▒ ░ ·</text>
+  </g>
+
+  <!-- Row 8  y=154 -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" from="-900,0" to="0,0" dur="20s" repeatCount="indefinite"/>
+    <text class="hr" x="0" y="154" fill="#6a80b0" opacity="0.7">░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·  ░  ·</text>
+  </g>
+
+  <!-- Row 9  y=174 -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" from="0,0" to="-900,0" dur="28s" repeatCount="indefinite"/>
+    <text class="hr" x="0" y="174" fill="#5a6c92" opacity="0.65">·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·   -   ·</text>
+  </g>
+
+  <!-- Row 10 y=194 -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" from="-900,0" to="0,0" dur="38s" repeatCount="indefinite"/>
+    <text class="hr" x="0" y="194" fill="#4a5878" opacity="0.6">.       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .       .</text>
+  </g>
+
+  <!-- Row 11 y=214 -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" from="0,0" to="-900,0" dur="55s" repeatCount="indefinite"/>
+    <text class="hr" x="0" y="214" fill="#3a4a70" opacity="0.5">,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,         ,</text>
+  </g>
+
+  <!-- Row 12 y=234  foreground far edge -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" from="-900,0" to="0,0" dur="75s" repeatCount="indefinite"/>
+    <text class="hr" x="0" y="234" fill="#2a3858" opacity="0.45">·           ·           ·           ·           ·           ·           ·           ·           ·           ·           ·           ·           ·           ·           ·           ·           ·           ·           ·           ·           ·</text>
+  </g>
+
+</g>
+
+<!-- Edge vignette: fade left/right edges so scroll boundary is hidden -->
+<rect width="900" height="250" fill="url(#vl)"/>
+
+<!-- Dark overlay behind text for legibility -->
+<rect x="60" y="72" width="780" height="120" rx="4" fill="#06060f" opacity="0.65"/>
+
+<!-- ═══ STATION 8 block text ═══ -->
+<g filter="url(#glow)">
+  <text class="s8" x="110" y="90"  fill="#C8B0F5" xml:space="preserve">░▒▓███████▓▒░▒▓████████▓▒░▒▓██████▓▒░▒▓████████▓▒░▒▓█▓▒░░▒▓██████▓▒░░▒▓███████▓▒░        ░▒▓██████▓▒░</text>
+  <text class="s8" x="110" y="106" fill="#C8B0F5" xml:space="preserve">░▒▓█▓▒░         ░▒▓█▓▒░  ░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░</text>
+  <text class="s8" x="110" y="122" fill="#C8B0F5" xml:space="preserve">░▒▓█▓▒░         ░▒▓█▓▒░  ░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░</text>
+  <text class="s8" x="110" y="138" fill="#C8B0F5" xml:space="preserve"> ░▒▓██████▓▒░   ░▒▓█▓▒░  ░▒▓████████▓▒░ ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░       ░▒▓██████▓▒░</text>
+  <text class="s8" x="110" y="154" fill="#C8B0F5" xml:space="preserve">       ░▒▓█▓▒░  ░▒▓█▓▒░  ░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░</text>
+  <text class="s8" x="110" y="170" fill="#C8B0F5" xml:space="preserve">       ░▒▓█▓▒░  ░▒▓█▓▒░  ░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░   ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░</text>
+  <text class="s8" x="110" y="186" fill="#C8B0F5" xml:space="preserve">░▒▓███████▓▒░   ░▒▓█▓▒░  ░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░   ░▒▓█▓▒░░▒▓██████▓▒░░▒▓█▓▒░░▒▓█▓▒░       ░▒▓██████▓▒░</text>
+</g>
+
+</svg>

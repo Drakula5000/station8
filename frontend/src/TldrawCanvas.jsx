@@ -16,6 +16,7 @@ import {
 } from './icons'
 import { ShapeInspector } from './components/ShapeInspector'
 import { ImageLightbox } from './components/ImageLightbox'
+import { STICKY_SWATCHES } from './colors'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -80,15 +81,6 @@ const TLDRAW_COMPONENTS = {
   DebugPanel: null,
   NavigationPanel: null,
   ImageToolbar: null,
-}
-
-const STICKY_SWATCHES = {
-  yellow: { bg: '#C8B0F5', tl: 'light-violet' },
-  pink:   { bg: '#F0A8C0', tl: 'light-red' },
-  blue:   { bg: '#90BCE8', tl: 'light-blue' },
-  green:  { bg: '#88D4B0', tl: 'light-green' },
-  orange: { bg: '#F0B880', tl: 'orange' },
-  purple: { bg: '#B8A0F8', tl: 'violet' },
 }
 
 // tldraw NOTE_SIZE is hardcoded at 200 canvas units. Use dynamic size mode so
@@ -286,19 +278,13 @@ const ShapeColorSync = track(function ShapeColorSync() {
         el.removeAttribute('data-s8-size')
       }
 
-      if (shape.type === 'geo') {
-        const fillColor = typeof shape.meta?.fillColor === 'string' ? shape.meta.fillColor : null
-        const fillOpacity = typeof shape.meta?.fillOpacity === 'number' ? shape.meta.fillOpacity : 0
+      const fillColor = shape.type === 'geo' && typeof shape.meta?.fillColor === 'string' ? shape.meta.fillColor : null
+      const fillOpacity = shape.type === 'geo' && typeof shape.meta?.fillOpacity === 'number' ? shape.meta.fillOpacity : 0
 
-        if (fillColor && fillOpacity > 0) {
-          el.setAttribute('data-geo-fill-custom', 'true')
-          el.style.setProperty('--s8-geo-fill-color', fillColor)
-          el.style.setProperty('--s8-geo-fill-opacity', String(fillOpacity))
-        } else {
-          el.removeAttribute('data-geo-fill-custom')
-          el.style.removeProperty('--s8-geo-fill-color')
-          el.style.removeProperty('--s8-geo-fill-opacity')
-        }
+      if (fillColor && fillOpacity > 0) {
+        el.setAttribute('data-geo-fill-custom', 'true')
+        el.style.setProperty('--s8-geo-fill-color', fillColor)
+        el.style.setProperty('--s8-geo-fill-opacity', String(fillOpacity))
       } else {
         el.removeAttribute('data-geo-fill-custom')
         el.style.removeProperty('--s8-geo-fill-color')
@@ -580,29 +566,29 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
         /* Top-center find bar, glass style matching the pill */
         .find-bar {
           position: fixed;
-          top: 14px;
+          top: 0.875rem;
           left: 50%;
           transform: translateX(-50%);
           z-index: 520;
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 6px 8px 6px 14px;
+          gap: 0.625rem;
+          padding: 0.375rem 0.5rem 0.375rem 0.875rem;
           background: color-mix(in srgb, var(--s8-bg) 80%, transparent);
-          backdrop-filter: blur(20px) saturate(1.2);
-          -webkit-backdrop-filter: blur(20px) saturate(1.2);
+          backdrop-filter: blur(1.25rem) saturate(1.2);
+          -webkit-backdrop-filter: blur(1.25rem) saturate(1.2);
           color: var(--s8-text);
-          border: 1px solid var(--s8-accent-border);
+          border: 0.0625rem solid var(--s8-accent-border);
           box-shadow: var(--s8-shadow-pill);
-          border-radius: 999px;
-          font-size: 12px;
+          border-radius: 62.4375rem;
+          font-size: 0.75rem;
           font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
           letter-spacing: 0.01em;
           white-space: nowrap;
           pointer-events: all;
         }
         .find-bar-label {
-          font-size: 10px;
+          font-size: 0.625rem;
           text-transform: uppercase;
           letter-spacing: 0.12em;
           color: var(--s8-text-mid);
@@ -610,34 +596,34 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
         }
         .find-bar-query {
           font-family: 'Space Mono', monospace;
-          font-size: 12px;
+          font-size: 0.75rem;
           color: var(--s8-text);
-          max-width: 180px;
+          max-width: 11.25rem;
           overflow: hidden;
           text-overflow: ellipsis;
         }
         .find-bar-counter {
           font-variant-numeric: tabular-nums;
           opacity: 0.7;
-          padding: 0 6px;
-          border-left: 1px solid var(--s8-accent-border);
-          border-right: 1px solid var(--s8-accent-border);
+          padding: 0 0.375rem;
+          border-left: 0.0625rem solid var(--s8-accent-border);
+          border-right: 0.0625rem solid var(--s8-accent-border);
         }
         .find-bar-btn {
           background: transparent;
           border: none;
           cursor: pointer;
           color: var(--s8-text);
-          padding: 4px 8px;
-          border-radius: 999px;
-          font-size: 13px;
+          padding: 0.25rem 0.5rem;
+          border-radius: 62.4375rem;
+          font-size: 0.8125rem;
           line-height: 1;
           transition: background 0.12s, color 0.12s;
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          min-width: 24px;
-          height: 24px;
+          min-width: 1.5rem;
+          height: 1.5rem;
         }
         .find-bar-btn:hover:not(:disabled) {
           background: var(--s8-accent-dim);
@@ -646,7 +632,7 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
         .find-bar-btn.find-bar-close {
           background: var(--s8-accent);
           color: #fff;
-          margin-left: 2px;
+          margin-left: 0.125rem;
         }
         .find-bar-btn.find-bar-close:hover {
           background: color-mix(in srgb, var(--s8-accent) 85%, white);
@@ -671,25 +657,25 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
           position: fixed;
           z-index: 510;
           pointer-events: none;
-          border: 1.5px solid var(--s8-accent);
-          border-radius: 3px;
+          border: 0.0938rem solid var(--s8-accent);
+          border-radius: 0.1875rem;
           box-shadow:
-            0 0 0 4px color-mix(in srgb, var(--s8-accent) 12%, transparent),
-            0 0 28px 4px color-mix(in srgb, var(--s8-accent) 35%, transparent);
+            0 0 0 0.25rem color-mix(in srgb, var(--s8-accent) 12%, transparent),
+            0 0 1.75rem 0.25rem color-mix(in srgb, var(--s8-accent) 35%, transparent);
         }
         .find-overlay-label {
           position: absolute;
-          top: -11px;
-          left: 10px;
-          padding: 2px 8px;
+          top: -0.6875rem;
+          left: 0.625rem;
+          padding: 0.125rem 0.5rem;
           background: var(--s8-accent);
           color: #fff;
           font-family: 'Inter', -apple-system, sans-serif;
-          font-size: 10px;
+          font-size: 0.625rem;
           font-weight: 600;
           letter-spacing: 0.08em;
           text-transform: uppercase;
-          border-radius: 999px;
+          border-radius: 62.4375rem;
           white-space: nowrap;
           box-shadow: var(--s8-shadow-pill);
           font-variant-numeric: tabular-nums;

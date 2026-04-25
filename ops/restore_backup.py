@@ -11,31 +11,16 @@ Example:
 Always snapshots the target first as
 `<target_stem>.pre-restore-<timestamp>.json` so the operation is reversible.
 """
-import os
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
-ENV_FILE = Path(__file__).resolve().parent / ".backup-env"
-if ENV_FILE.exists():
-    for line in ENV_FILE.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line: continue
-        k, v = line.split("=", 1)
-        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+from _common import supabase_client
 
 if len(sys.argv) != 3:
     sys.exit(__doc__.strip())
 
 backup_id, target_id = sys.argv[1], sys.argv[2]
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-if not SUPABASE_URL or not SUPABASE_KEY:
-    sys.exit("Missing SUPABASE_URL / SUPABASE_KEY")
-
-from supabase import create_client
-client = create_client(SUPABASE_URL, SUPABASE_KEY)
+client = supabase_client()
 
 backup = client.table("json_storage").select("*").eq("id", backup_id).execute()
 if not backup.data:

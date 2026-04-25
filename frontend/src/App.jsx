@@ -176,6 +176,27 @@ async function fetchJson(url, options = {}, fallback = null) {
   }
 }
 
+const JSON_HEADERS = { 'Content-Type': 'application/json' }
+
+function fetchJsonPost(url, payload, fallback = null) {
+  return fetchJson(url, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(payload) }, fallback)
+}
+
+function fetchJsonPatch(url, payload, fallback = null) {
+  return fetchJson(url, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(payload) }, fallback)
+}
+
+function clearStorageByPrefix(storage, prefix) {
+  try {
+    const keysToRemove = []
+    for (let i = 0; i < storage.length; i++) {
+      const k = storage.key(i)
+      if (k && k.startsWith(prefix)) keysToRemove.push(k)
+    }
+    keysToRemove.forEach((k) => storage.removeItem(k))
+  } catch { /* ignore */ }
+}
+
 export default function App() {
   const [boards, setBoards] = useState([])
   const [sheets, setSheets] = useState([])
@@ -602,11 +623,7 @@ export default function App() {
 
     setSearchLoading(true)
     const t = setTimeout(async () => {
-      const data = await fetchJson(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query }),
-      }, null)
+      const data = await fetchJsonPost(url, { query })
       setSearchLoading(false)
       if (data) {
         const hits = data.hits || []
@@ -637,11 +654,7 @@ export default function App() {
   const createBoard = async () => {
     const name = newBoardName.trim()
     if (!name) return
-    const board = await fetchJson(`${API}/api/boards`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, folder_id: normalizeFolderValue(newBoardFolderId) }),
-    }, null)
+    const board = await fetchJsonPost(`${API}/api/boards`, { name, folder_id: normalizeFolderValue(newBoardFolderId) })
     if (!board) return
     setBoards(bs => [board, ...bs])
     if (board.folder_id) expandFolderPath(board.folder_id)
@@ -652,11 +665,7 @@ export default function App() {
   const createSheet = async () => {
     const name = newSheetName.trim()
     if (!name) return
-    const sheet = await fetchJson(`${API}/api/sheets`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, folder_id: normalizeFolderValue(newSheetFolderId) }),
-    }, null)
+    const sheet = await fetchJsonPost(`${API}/api/sheets`, { name, folder_id: normalizeFolderValue(newSheetFolderId) })
     if (!sheet) return
     setSheets(ss => [sheet, ...ss])
     if (sheet.folder_id) expandFolderPath(sheet.folder_id)
@@ -668,11 +677,7 @@ export default function App() {
     const name = newFolderName.trim()
     if (!name) return
     const parentId = normalizeFolderValue(newFolderParentId)
-    const folder = await fetchJson(`${API}/api/folders`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, parent_id: parentId }),
-    }, null)
+    const folder = await fetchJsonPost(`${API}/api/folders`, { name, parent_id: parentId })
     if (!folder) return
     setFolders(current => [...current, folder])
     setExpandedFolders(current => ({
@@ -727,11 +732,7 @@ export default function App() {
       : item.type === 'board'
         ? `${API}/api/boards/${item.id}`
         : `${API}/api/sheets/${item.id}`
-    const updated = await fetchJson(url, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ private: newValue }),
-    }, null)
+    const updated = await fetchJsonPatch(url, { private: newValue })
     if (!updated) return
     if (isFolder) {
       setFolders(fs => fs.map(f => f.id === updated.id ? updated : f))
@@ -764,25 +765,10 @@ export default function App() {
         credentials: 'include',
       })
       if (!res.ok) throw new Error('logout failed')
-      // Clear all saved board views so next login starts with fit-to-content
-      try {
-        const keysToRemove = []
-        for (let i = 0; i < sessionStorage.length; i++) {
-          const k = sessionStorage.key(i)
-          if (k && k.startsWith('s8.boardView.')) keysToRemove.push(k)
-        }
-        keysToRemove.forEach(k => sessionStorage.removeItem(k))
-      } catch { /* ignore */ }
-      // Clear cached board snapshots so next user on this machine can't peek
-      // at boards they don't have access to.
-      try {
-        const keysToRemove = []
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i)
-          if (k && k.startsWith('s8.boardCache.')) keysToRemove.push(k)
-        }
-        keysToRemove.forEach(k => localStorage.removeItem(k))
-      } catch { /* ignore */ }
+      // Wipe per-board view + cached snapshots so the next login starts fresh
+      // and a different user on this machine can't peek at restricted boards.
+      clearStorageByPrefix(sessionStorage, 's8.boardView.')
+      clearStorageByPrefix(localStorage, 's8.boardCache.')
       setBoards([])
       setSheets([])
       setFolders([])
@@ -812,11 +798,7 @@ export default function App() {
   const saveTags = async (tagsStr) => {
     if (!activeId) return
     const endpoint = activeId.type === 'board' ? 'boards' : 'sheets'
-    const updated = await fetchJson(`${API}/api/${endpoint}/${activeId.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tags: tagsStr }),
-    }, null)
+    const updated = await fetchJsonPatch(`${API}/api/${endpoint}/${activeId.id}`, { tags: tagsStr })
     if (!updated) return
     if (activeId.type === 'board') {
       setBoards(bs => bs.map(b => b.id === updated.id ? updated : b))
@@ -891,7 +873,7 @@ export default function App() {
       <div key={`${doc.type}-${doc.id}`} className={`tree-item-shell ${active ? 'active' : ''}${isDragging ? ' is-dragging' : ''}`}>
         <button
           className={`sb-item sb-item-main tree-row tree-doc ${active ? 'active' : ''} ${priv ? 'sb-item-private' : ''}`}
-          style={{ paddingLeft: `${10 + depth * 18}px` }}
+          style={{ paddingLeft: `${0.625 + depth * 1.125}rem` }}
           draggable={!readOnly}
           onDragEnd={handleItemDragEnd}
           onDragStart={(event) => handleItemDragStart(event, doc)}
@@ -941,7 +923,7 @@ export default function App() {
         <div className={`tree-item-shell${isDragging ? ' is-dragging' : ''}`}>
           <button
             className={`sb-item sb-item-main tree-row tree-folder ${expanded ? 'folder-open' : ''} ${priv ? 'sb-item-private' : ''}${isDropTarget ? ' is-drop-target' : ''}`}
-            style={{ paddingLeft: `${10 + depth * 18}px` }}
+            style={{ paddingLeft: `${0.625 + depth * 1.125}rem` }}
             draggable={!readOnly}
             onDragEnd={handleItemDragEnd}
             onDragOver={(event) => handleFolderDragOver(event, folder.id)}
@@ -983,7 +965,7 @@ export default function App() {
             {childFolders.map(child => renderFolderNode(child, depth + 1))}
             {childDocs.map(doc => renderDocItem(doc, depth + 1))}
             {!tagFilter && childFolders.length === 0 && childDocs.length === 0 && (
-              <div className="sb-empty tree-empty" style={{ paddingLeft: `${28 + (depth + 1) * 18}px` }}>
+              <div className="sb-empty tree-empty" style={{ paddingLeft: `${1.75 + (depth + 1) * 1.125}rem` }}>
                 Empty folder
               </div>
             )}
@@ -1051,11 +1033,7 @@ export default function App() {
   const saveOwner = async () => {
     const name = ownerInput.trim()
     if (!name) return
-    const updated = await fetchJson(`${API}/api/workspace`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ owner: name }),
-    }, null)
+    const updated = await fetchJsonPatch(`${API}/api/workspace`, { owner: name })
     if (!updated) return
     setWorkspace(updated)
     setOwnerPromptDismissed(true)
@@ -1146,11 +1124,7 @@ export default function App() {
       ? { parent_id: targetFolderId || null }
       : { folder_id: targetFolderId || null }
 
-    const updated = await fetchJson(url, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }, null)
+    const updated = await fetchJsonPatch(url, body)
 
     if (!updated) {
       showError(`Could not move ${dragged.name}.`)
@@ -1724,11 +1698,7 @@ export default function App() {
                 value={workspace.owner || ''}
                 onChange={(e) => setWorkspace(w => ({ ...w, owner: e.target.value }))}
                 onBlur={async (e) => {
-                  const updated = await fetchJson(`${API}/api/workspace`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ owner: e.target.value }),
-                  }, null)
+                  const updated = await fetchJsonPatch(`${API}/api/workspace`, { owner: e.target.value })
                   if (updated) setWorkspace(updated)
                 }}
               />

@@ -11,9 +11,9 @@ would otherwise back up recursively.
 """
 import os
 import re
-import sys
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
+
+from _common import supabase_client, list_all_json_rows
 
 RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", "7"))
 RESERVED_SUFFIXES = (".auto-", ".manual-", ".pre-", ".backup-")
@@ -22,41 +22,13 @@ PRUNABLE_ID_RE = re.compile(r"\.(auto|pre-deploy)-(\d{8}-\d{6})\.json$")
 AUTO_ID_RE = re.compile(r"\.auto-(\d{8}-\d{6})\.json$")
 BACKUP_SUFFIX = os.getenv("BACKUP_SUFFIX", "auto")  # 'auto' for cron, 'pre-deploy' for deploys
 
-# Local fallback: if running on the user's machine, read ops/.backup-env
-ENV_FILE = Path(__file__).resolve().parent / ".backup-env"
-if ENV_FILE.exists():
-    for line in ENV_FILE.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-if not SUPABASE_URL or not SUPABASE_KEY:
-    sys.exit("Missing SUPABASE_URL / SUPABASE_KEY in environment")
-
-from supabase import create_client
-
-client = create_client(SUPABASE_URL, SUPABASE_KEY)
+client = supabase_client()
 
 def is_primary(row_id: str) -> bool:
     return not any(suffix in row_id for suffix in RESERVED_SUFFIXES)
 
 def list_all_rows():
-    rows = []
-    page_size = 1000
-    offset = 0
-    while True:
-        batch = client.table("json_storage").select("id").range(offset, offset + page_size - 1).execute()
-        if not batch.data:
-            break
-        rows.extend(batch.data)
-        if len(batch.data) < page_size:
-            break
-        offset += page_size
-    return rows
+    return list_all_json_rows(client, columns="id")
 
 def latest_auto_for(row_id: str):
     """Return the `data` of the newest .auto-* backup for this primary id, or None."""

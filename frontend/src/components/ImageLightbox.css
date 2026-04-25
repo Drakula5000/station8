@@ -3,8 +3,8 @@
   inset: 0;
   z-index: 10000;
   background: var(--s8-lightbox-backdrop);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(0.75rem);
+  -webkit-backdrop-filter: blur(0.75rem);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -35,29 +35,29 @@
   transform-origin: center center;
   will-change: transform;
   pointer-events: none;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
-  border-radius: 6px;
+  box-shadow: 0 1.5rem 5rem rgba(0, 0, 0, 0.55);
+  border-radius: 0.375rem;
   background: var(--s8-lightbox-img-bg);
 }
 
 .s8-lightbox-close {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 40px;
-  height: 40px;
-  border-radius: 999px;
-  border: 1px solid var(--s8-accent-border);
+  top: 1rem;
+  right: 1rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 62.4375rem;
+  border: 0.0625rem solid var(--s8-accent-border);
   background: var(--s8-pill-bg);
   color: var(--s8-text);
-  font-size: 18px;
+  font-size: 1.125rem;
   line-height: 1;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(0.5rem);
+  -webkit-backdrop-filter: blur(0.5rem);
   transition: background 0.12s ease, transform 0.12s ease, color 0.12s ease;
   z-index: 2;
 }
@@ -70,30 +70,30 @@
 
 .s8-lightbox-controls {
   position: absolute;
-  bottom: 24px;
+  bottom: 1.5rem;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px;
-  border-radius: 999px;
+  gap: 0.25rem;
+  padding: 0.375rem;
+  border-radius: 62.4375rem;
   background: var(--s8-pill-bg);
-  border: 1px solid var(--s8-accent-border);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border: 0.0625rem solid var(--s8-accent-border);
+  backdrop-filter: blur(0.75rem);
+  -webkit-backdrop-filter: blur(0.75rem);
   z-index: 2;
 }
 
 .s8-lightbox-btn {
-  min-width: 36px;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 999px;
+  min-width: 2.25rem;
+  height: 2rem;
+  padding: 0 0.625rem;
+  border-radius: 62.4375rem;
   border: none;
   background: transparent;
   color: var(--s8-text);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
@@ -109,5 +109,5 @@
 }
 
 .s8-lightbox-btn-reset {
-  min-width: 56px;
+  min-width: 3.5rem;
 }

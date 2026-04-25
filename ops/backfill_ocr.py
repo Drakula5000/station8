@@ -5,35 +5,15 @@ Tesseract pipeline used server-side in server.py, and upserts ocr.json back
 to the Supabase json_storage table. Safe to re-run.
 """
 import io
-import json
 import os
 import re
-import sys
-import tempfile
-from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-ENV_FILE = HERE / ".backup-env"
-
-if ENV_FILE.exists():
-    for line in ENV_FILE.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-
-URL = os.getenv("SUPABASE_URL")
-KEY = os.getenv("SUPABASE_KEY")
-if not URL or not KEY:
-    sys.stderr.write(f"Missing SUPABASE_URL / SUPABASE_KEY. Fill {ENV_FILE}.\n")
-    sys.exit(1)
+from _common import supabase_client
 
 import pytesseract  # noqa: E402
 from PIL import Image, ImageOps  # noqa: E402
-from supabase import create_client  # noqa: E402
 
-client = create_client(URL, KEY)
+client = supabase_client()
 
 
 def run_ocr_bytes(blob: bytes) -> str:

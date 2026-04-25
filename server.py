@@ -4,7 +4,6 @@ import json
 import os
 import re
 import secrets
-import shutil
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -39,8 +38,6 @@ DEFAULT_RENDER_STORAGE_ROOT = (
 STORAGE_ROOT = os.path.abspath(os.getenv('S8_STORAGE_DIR') or DEFAULT_RENDER_STORAGE_ROOT)
 DATA_DIR = os.path.abspath(os.getenv('S8_DATA_DIR') or os.path.join(STORAGE_ROOT, 'data'))
 UPLOADS_DIR = os.path.abspath(os.getenv('S8_UPLOADS_DIR') or os.path.join(STORAGE_ROOT, 'uploads'))
-LEGACY_DATA_DIR = os.path.join(BASE_DIR, 'data')
-LEGACY_UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
 
 BOARDS_FILE = os.path.join(DATA_DIR, 'boards.json')
 SHEETS_FILE = os.path.join(DATA_DIR, 'sheets.json')
@@ -48,6 +45,14 @@ OCR_FILE = os.path.join(DATA_DIR, 'ocr.json')
 WORKSPACE_FILE = os.path.join(DATA_DIR, 'workspace.json')
 SHARES_FILE = os.path.join(DATA_DIR, 'shares.json')
 AUTH_FILE = os.path.join(DATA_DIR, 'auth.json')
+
+SUPABASE_BUCKET = 'uploads'
+SUPABASE_TABLE = 'json_storage'
+
+# `/uploads/<filename>` references inside board snapshots, asset src URLs, etc.
+# Capture group is the filename. Single source of truth — used by snapshot
+# scanners, OCR text extraction, and the asset-rewrite migration helper.
+_UPLOAD_REF_RE = re.compile(r'/uploads/([a-z0-9\-]+\.[a-z0-9]+)', flags=re.IGNORECASE)
 
 PRODUCTION = bool(
     os.getenv('RENDER')
@@ -77,33 +82,8 @@ app.config.update(
     SESSION_COOKIE_SECURE=PRODUCTION,
 )
 
-def _dir_has_files(path):
-    return os.path.isdir(path) and any(os.scandir(path))
-
-
-def _copy_tree_contents(src, dst):
-    if not os.path.isdir(src):
-        return
-    os.makedirs(dst, exist_ok=True)
-    for entry in os.scandir(src):
-        src_path = entry.path
-        dst_path = os.path.join(dst, entry.name)
-        if entry.is_dir():
-            shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
-        else:
-            shutil.copy2(src_path, dst_path)
-
-
-def _migrate_legacy_storage():
-    if os.path.abspath(DATA_DIR) != os.path.abspath(LEGACY_DATA_DIR) and not _dir_has_files(DATA_DIR):
-        _copy_tree_contents(LEGACY_DATA_DIR, DATA_DIR)
-    if os.path.abspath(UPLOADS_DIR) != os.path.abspath(LEGACY_UPLOADS_DIR) and not _dir_has_files(UPLOADS_DIR):
-        _copy_tree_contents(LEGACY_UPLOADS_DIR, UPLOADS_DIR)
-
-
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
-_migrate_legacy_storage()
 
 
 def _allowed_origins():
@@ -159,7 +139,7 @@ def _load(path, default):
         try:
             # Use the filename (relative to DATA_DIR) as the ID
             file_id = os.path.basename(path)
-            response = supabase.table('json_storage').select('data').eq('id', file_id).execute()
+            response = supabase.table(SUPABASE_TABLE).select('data').eq('id', file_id).execute()
             if response.data:
                 return response.data[0]['data']
         except Exception as exc:
@@ -187,7 +167,7 @@ def _save(path, data):
     if supabase:
         try:
             file_id = os.path.basename(path)
-            supabase.table('json_storage').upsert({
+            supabase.table(SUPABASE_TABLE).upsert({
                 'id': file_id,
                 'data': data
             }).execute()
@@ -226,10 +206,9 @@ def _env_visitor_password():
 def _load_auth_config():
     primary_auth = _load(AUTH_FILE, {})
     local_auth = _load_local_json(AUTH_FILE, {})
-    legacy_auth = _load_local_json(os.path.join(LEGACY_DATA_DIR, 'auth.json'), {})
 
     auth = {}
-    for candidate in (primary_auth, local_auth, legacy_auth):
+    for candidate in (primary_auth, local_auth):
         if not isinstance(candidate, dict):
             continue
         for key in ('studio_password_hash', 'visitor_password_hash', 'configured_at'):
@@ -398,6 +377,16 @@ def _save_sheets(sheets):
     _save(SHEETS_FILE, [_normalize_doc(sheet, folders) for sheet in sheets])
 
 
+def _list_docs_sorted(docs, *, visitor=False):
+    """Common list-endpoint shape: visitor filter (when applicable) + sort by
+    created_at desc. Keeps owner and visitor listings from drifting."""
+    if visitor:
+        folders = _get_workspace().get('folders', [])
+        docs = [d for d in docs if _doc_is_visitor_visible(d, folders)]
+    docs.sort(key=lambda item: item.get('created_at', ''), reverse=True)
+    return docs
+
+
 def _any_ancestor_private(folder_id, folders):
     folder_map = {f['id']: f for f in folders}
     fid = folder_id
@@ -432,6 +421,29 @@ def _doc_is_visitor_visible(doc, folders):
     if dp is False:
         return True
     return not _any_ancestor_private(doc.get('folder_id'), folders)
+
+
+# Shared executor for parallelising Supabase reads on the visitor doc endpoints —
+# each Supabase round-trip is ~200ms on Render free tier, so serialising the
+# workspace + index + snapshot reads adds up to ~600ms; the futures fire all
+# three concurrently for a single round-trip wall time instead.
+_io_executor = ThreadPoolExecutor(max_workers=12, thread_name_prefix='io')
+
+
+def _visitor_doc_load(doc_id, *, load_index, doc_file_fn, default_payload):
+    """Visitor doc fetch: parallel reads of workspace + doc index + payload,
+    then a visitor-visibility check. Returns (payload, error) where exactly
+    one of the two is None. Caller jsonifies the payload or returns the error.
+    """
+    workspace_future = _io_executor.submit(_get_workspace)
+    docs_future = _io_executor.submit(load_index)
+    payload_future = _io_executor.submit(_load, doc_file_fn(doc_id), default_payload)
+
+    folders = workspace_future.result().get('folders', [])
+    doc = next((d for d in docs_future.result() if d['id'] == doc_id), None)
+    if not doc or not _doc_is_visitor_visible(doc, folders):
+        return None, (jsonify({'error': 'Not found'}), 404)
+    return payload_future.result(), None
 
 
 def _folder_with_descendants(folder_id, folders):
@@ -670,7 +682,7 @@ def _snapshot_upload_filenames(snapshot):
         return names
     try:
         blob = json.dumps(snapshot)
-        for m in re.finditer(r'/uploads/([a-z0-9\-]+\.[a-z0-9]+)', blob, flags=re.IGNORECASE):
+        for m in _UPLOAD_REF_RE.finditer(blob):
             names.add(m.group(1))
     except Exception:
         pass
@@ -1042,18 +1054,13 @@ def share_sheet(token, sheet_id):
 @app.route('/api/boards', methods=['GET'])
 @_studio_auth_required
 def list_boards():
-    boards = _load_boards()
-    boards.sort(key=lambda item: item.get('created_at', ''), reverse=True)
-    return jsonify(boards)
+    return jsonify(_list_docs_sorted(_load_boards()))
 
 
 @app.route('/api/visitor/boards', methods=['GET'])
 @_viewer_auth_required
 def list_visitor_boards():
-    folders = _get_workspace().get('folders', [])
-    boards = [b for b in _load_boards() if _doc_is_visitor_visible(b, folders)]
-    boards.sort(key=lambda item: item.get('created_at', ''), reverse=True)
-    return jsonify(boards)
+    return jsonify(_list_docs_sorted(_load_boards(), visitor=True))
 
 
 @app.route('/api/boards', methods=['POST'])
@@ -1118,18 +1125,11 @@ def get_board(board_id):
 @app.route('/api/visitor/boards/<board_id>', methods=['GET'])
 @_viewer_auth_required
 def get_visitor_board(board_id):
-    # Parallelise the three Supabase reads — workspace, boards index, and the
-    # board snapshot itself — that were running back-to-back before. Each
-    # round-trip is ~200 ms on Render free tier, so serial adds up fast.
-    workspace_future = _io_executor.submit(_get_workspace)
-    boards_future = _io_executor.submit(_load_boards)
-    snapshot_future = _io_executor.submit(_load, _board_file(board_id), {'snapshot': None})
-
-    folders = workspace_future.result().get('folders', [])
-    board = next((b for b in boards_future.result() if b['id'] == board_id), None)
-    if not board or not _doc_is_visitor_visible(board, folders):
-        return jsonify({'error': 'Not found'}), 404
-    data = snapshot_future.result()
+    data, error = _visitor_doc_load(
+        board_id, load_index=_load_boards, doc_file_fn=_board_file, default_payload={'snapshot': None}
+    )
+    if error:
+        return error
     data['asset_urls'] = _asset_urls_for_snapshot(data.get('snapshot'))
     return jsonify(data)
 
@@ -1147,18 +1147,13 @@ def update_board(board_id):
 @app.route('/api/sheets', methods=['GET'])
 @_studio_auth_required
 def list_sheets():
-    sheets = _load_sheets()
-    sheets.sort(key=lambda item: item.get('created_at', ''), reverse=True)
-    return jsonify(sheets)
+    return jsonify(_list_docs_sorted(_load_sheets()))
 
 
 @app.route('/api/visitor/sheets', methods=['GET'])
 @_viewer_auth_required
 def list_visitor_sheets():
-    folders = _get_workspace().get('folders', [])
-    sheets = [s for s in _load_sheets() if _doc_is_visitor_visible(s, folders)]
-    sheets.sort(key=lambda item: item.get('created_at', ''), reverse=True)
-    return jsonify(sheets)
+    return jsonify(_list_docs_sorted(_load_sheets(), visitor=True))
 
 
 @app.route('/api/sheets', methods=['POST'])
@@ -1221,11 +1216,12 @@ def get_sheet(sheet_id):
 @app.route('/api/visitor/sheets/<sheet_id>', methods=['GET'])
 @_viewer_auth_required
 def get_visitor_sheet(sheet_id):
-    folders = _get_workspace().get('folders', [])
-    sheet = next((s for s in _load_sheets() if s['id'] == sheet_id), None)
-    if not sheet or not _doc_is_visitor_visible(sheet, folders):
-        return jsonify({'error': 'Not found'}), 404
-    return jsonify(_load(_sheet_file(sheet_id), {'data': []}))
+    data, error = _visitor_doc_load(
+        sheet_id, load_index=_load_sheets, doc_file_fn=_sheet_file, default_payload={'data': []}
+    )
+    if error:
+        return error
+    return jsonify(data)
 
 
 @app.route('/api/sheets/<sheet_id>', methods=['PUT'])
@@ -1372,7 +1368,7 @@ def upload_image():
     if supabase:
         try:
             with open(path, 'rb') as f:
-                supabase.storage.from_('uploads').upload(
+                supabase.storage.from_(SUPABASE_BUCKET).upload(
                     path=filename,
                     file=f,
                     file_options={"content-type": f"image/{ext.lstrip('.')}"}
@@ -1397,24 +1393,7 @@ def list_ocr_images():
     uses this to drive a client-side rescan (OCR in the browser via
     Tesseract.js, result posted back via /api/ocr/save).
     """
-    exts = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
-    filenames = set()
-
-    if os.path.isdir(UPLOADS_DIR):
-        for entry in os.scandir(UPLOADS_DIR):
-            if entry.is_file() and os.path.splitext(entry.name)[1].lower() in exts:
-                filenames.add(entry.name)
-
-    if supabase:
-        try:
-            listed = supabase.storage.from_('uploads').list()
-            for item in listed or []:
-                name = item.get('name') if isinstance(item, dict) else None
-                if name and os.path.splitext(name)[1].lower() in exts:
-                    filenames.add(name)
-        except Exception as exc:
-            print(f'Supabase list failed: {exc}', flush=True)
-
+    filenames = _collect_upload_filenames({'.jpg', '.jpeg', '.png', '.gif', '.webp'})
     ocr = _load(OCR_FILE, {})
     items = [
         {'filename': name, 'has_text': bool((ocr.get(name) or '').strip())}
@@ -1483,23 +1462,7 @@ def optimize_existing_images():
     optimizer to shrink images that were uploaded before compression was
     wired in. Opaque PNGs are converted to JPEG (huge size win) and board
     snapshots that reference them are rewritten in place."""
-    exts = {'.jpg', '.jpeg', '.png', '.webp'}
-    filenames = set()
-
-    if os.path.isdir(UPLOADS_DIR):
-        for entry in os.scandir(UPLOADS_DIR):
-            if entry.is_file() and os.path.splitext(entry.name)[1].lower() in exts:
-                filenames.add(entry.name)
-
-    if supabase:
-        try:
-            listed = supabase.storage.from_('uploads').list()
-            for item in listed or []:
-                name = item.get('name') if isinstance(item, dict) else None
-                if name and os.path.splitext(name)[1].lower() in exts:
-                    filenames.add(name)
-        except Exception as exc:
-            print(f'Supabase list failed during image optimize: {exc}', flush=True)
+    filenames = _collect_upload_filenames({'.jpg', '.jpeg', '.png', '.webp'})
 
     optimized = []
     skipped = []
@@ -1510,7 +1473,7 @@ def optimize_existing_images():
         local_path = os.path.join(UPLOADS_DIR, name)
         if not os.path.exists(local_path) and supabase:
             try:
-                blob = supabase.storage.from_('uploads').download(name)
+                blob = supabase.storage.from_(SUPABASE_BUCKET).download(name)
                 os.makedirs(UPLOADS_DIR, exist_ok=True)
                 with open(local_path, 'wb') as f:
                     f.write(blob)
@@ -1533,7 +1496,7 @@ def optimize_existing_images():
             content_type = f'image/{"jpeg" if new_ext == "jpg" else new_ext}'
             try:
                 with open(new_path, 'rb') as f:
-                    supabase.storage.from_('uploads').upload(
+                    supabase.storage.from_(SUPABASE_BUCKET).upload(
                         path=new_name,
                         file=f,
                         file_options={'content-type': content_type, 'upsert': 'true'},
@@ -1545,7 +1508,7 @@ def optimize_existing_images():
 
             if new_name != name:
                 try:
-                    supabase.storage.from_('uploads').remove([name])
+                    supabase.storage.from_(SUPABASE_BUCKET).remove([name])
                 except Exception as exc:
                     print(f'Supabase old-blob delete failed for {name}: {exc}', flush=True)
 
@@ -1579,25 +1542,18 @@ def optimize_existing_images():
 # the first redirect.
 UPLOAD_CACHE_MAX_AGE = 31536000  # 1 year
 
-# Shared executor for parallelising Supabase reads (e.g. workspace + boards +
-# snapshot on the visitor board endpoint).
-_io_executor = ThreadPoolExecutor(max_workers=12, thread_name_prefix='io')
-
 
 def _public_upload_url(filename):
     if not supabase:
         return None
     try:
-        url = supabase.storage.from_('uploads').get_public_url(filename)
+        url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(filename)
     except Exception as exc:
         print(f"Supabase public URL build failed for {filename}: {exc}", flush=True)
         return None
     # storage3 sometimes appends a trailing '?' — strip it so the URL matches
     # exactly what the CDN serves and stays cache-key-stable in the browser.
     return url.rstrip('?') if url else None
-
-
-_UPLOAD_REF_RE = re.compile(r'/uploads/([a-z0-9\-]+\.[a-z0-9]+)', flags=re.IGNORECASE)
 
 
 def _extract_upload_filenames(snapshot):
@@ -1624,6 +1580,25 @@ def _asset_urls_for_snapshot(snapshot):
         if url:
             urls[name] = url
     return urls
+
+
+def _collect_upload_filenames(exts):
+    """Union of upload filenames in the local cache + Supabase bucket, filtered
+    to the given extension set (lowercased, dotted: {'.jpg', '.png', ...})."""
+    filenames = set()
+    if os.path.isdir(UPLOADS_DIR):
+        for entry in os.scandir(UPLOADS_DIR):
+            if entry.is_file() and os.path.splitext(entry.name)[1].lower() in exts:
+                filenames.add(entry.name)
+    if supabase:
+        try:
+            for item in supabase.storage.from_(SUPABASE_BUCKET).list() or []:
+                name = item.get('name') if isinstance(item, dict) else None
+                if name and os.path.splitext(name)[1].lower() in exts:
+                    filenames.add(name)
+        except Exception as exc:
+            print(f'Supabase list failed: {exc}', flush=True)
+    return filenames
 
 
 def _board_payload_with_assets(board_id):
@@ -1702,7 +1677,7 @@ def _text_from_tldraw(snapshot):
             asset_id = props.get('assetId')
             asset = assets.get(asset_id) if asset_id else None
             src = ((asset or {}).get('props') or {}).get('src') or ''
-            match = re.search(r'/uploads/([a-z0-9-]+\.[a-z]+)', src)
+            match = _UPLOAD_REF_RE.search(src)
             if match:
                 ocr_text = ocr.get(match.group(1), '')
                 if ocr_text:

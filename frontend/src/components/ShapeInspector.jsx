@@ -1,21 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { track, useEditor, DefaultColorStyle, DefaultFillStyle, DefaultFontStyle, DefaultSizeStyle, DefaultHorizontalAlignStyle, DefaultDashStyle } from 'tldraw'
 import { FjDraftIcon, FjDataIcon, FjAnalysisIcon, FjInsightIcon } from '../icons'
-
-// Aurora palette — must stay in sync with STICKY_SWATCHES in TldrawCanvas.jsx.
-// bg = what the swatch shows = what you'll see on the canvas.
-const COLOR_SWATCHES = [
-  { id: 'black',    bg: '#000000', tl: 'black' },
-  { id: 'white',    bg: '#FFFFFF', tl: 'white' },
-  { id: 'lavender', bg: '#C8B0F5', tl: 'light-violet' },
-  { id: 'pink',     bg: '#F0A8C0', tl: 'light-red' },
-  { id: 'blue',     bg: '#90BCE8', tl: 'light-blue' },
-  { id: 'teal',     bg: '#88D4B0', tl: 'light-green' },
-  { id: 'orange',   bg: '#F0B880', tl: 'orange' },
-  { id: 'purple',   bg: '#B8A0F8', tl: 'violet' },
-  { id: 'red',      bg: '#e87890', tl: 'red' },
-  { id: 'grey',     bg: '#8898b0', tl: 'grey' },
-]
+import { AURORA_SWATCHES as COLOR_SWATCHES } from '../colors'
 
 const DEFAULT_FILL_OPACITY = 0.4
 
@@ -449,22 +435,17 @@ export const ShapeInspector = track(function ShapeInspector() {
       }
     })
   })
-  const applyCorner = (rx) => editor.updateShapes(
-    shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, cornerRadius: rx } }))
+  const updateMeta = (key, value) => editor.updateShapes(
+    shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, [key]: value } }))
   )
+  const applyCorner = (rx) => updateMeta('cornerRadius', rx)
   const applyGeoCorner = (cornerStyle) => editor.setStyleForSelectedShapes(
     DefaultDashStyle,
     cornerStyle === 'round' ? 'draw' : 'solid'
   )
-  const applyImageCorner = (rx) => editor.updateShapes(
-    shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, imageCornerRadius: rx } }))
-  )
-  const applyImageBorder = (width) => editor.updateShapes(
-    shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, imageBorderWidth: width } }))
-  )
-  const applyImageBorderColor = (color) => editor.updateShapes(
-    shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, imageBorderColor: color } }))
-  )
+  const applyImageCorner = (rx) => updateMeta('imageCornerRadius', rx)
+  const applyImageBorder = (width) => updateMeta('imageBorderWidth', width)
+  const applyImageBorderColor = (color) => updateMeta('imageBorderColor', color)
   const applyListType = (listType) => {
     editor.updateShapes(
       shapes.map(s => ({

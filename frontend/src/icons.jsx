@@ -1,4 +1,4 @@
-// Minimal stroke-based SVG icons. 1.75px stroke, 20px box. Keep inline — zero dependency.
+// Minimal stroke-based SVG icons. 0.1094rem stroke, 1.25rem box. Keep inline — zero dependency.
 const common = {
   width: 18,
   height: 18,
@@ -135,7 +135,7 @@ export function UnlockIcon(props) {
   )
 }
 
-/* ─── FigJam-style canvas-toolbar icons (colored, 22px) ─── */
+/* ─── FigJam-style canvas-toolbar icons (colored, 1.375rem) ─── */
 
 export function FjCursorIcon() {
   return (

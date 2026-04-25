@@ -7,33 +7,11 @@ Usage:
   python ops/check_ocr.py
   (reads SUPABASE_URL / SUPABASE_KEY from env or ./ops/.backup-env)
 """
-import json
-import os
 import re
-import sys
-from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-ENV_FILE = HERE / ".backup-env"
+from _common import supabase_client
 
-if ENV_FILE.exists():
-    for line in ENV_FILE.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, val = line.split("=", 1)
-        os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
-
-URL = os.getenv("SUPABASE_URL")
-KEY = os.getenv("SUPABASE_KEY")
-
-if not URL or not KEY:
-    sys.stderr.write(f"Missing SUPABASE_URL / SUPABASE_KEY. Fill {ENV_FILE}.\n")
-    sys.exit(1)
-
-from supabase import create_client  # noqa: E402
-
-client = create_client(URL, KEY)
+client = supabase_client()
 
 def load_row(row_id):
     resp = client.table("json_storage").select("data").eq("id", row_id).execute()

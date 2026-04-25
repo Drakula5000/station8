@@ -9,36 +9,13 @@ Writes a manifest.txt summarizing the dump. Safe to run repeatedly.
 """
 import json
 import os
-import sys
-import time
 from datetime import datetime
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-REPO = HERE.parent
-ENV_FILE = HERE / ".backup-env"
+from _common import supabase_client, list_all_json_rows
 
-if ENV_FILE.exists():
-    for line in ENV_FILE.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, val = line.split("=", 1)
-        os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    sys.stderr.write(
-        "Missing SUPABASE_URL / SUPABASE_KEY.\n"
-        f"Fill them into {ENV_FILE} (or export them in the shell) and re-run.\n"
-    )
-    sys.exit(1)
-
-from supabase import create_client  # noqa: E402
-
-client = create_client(SUPABASE_URL, SUPABASE_KEY)
+REPO = Path(__file__).resolve().parent.parent
+client = supabase_client()
 
 stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 out_dir = REPO / "backups" / stamp
@@ -47,20 +24,11 @@ uploads_dir = out_dir / "uploads"
 json_dir.mkdir(parents=True, exist_ok=True)
 uploads_dir.mkdir(parents=True, exist_ok=True)
 
-manifest_lines = [f"Backup taken: {datetime.now().isoformat()}", f"Supabase URL: {SUPABASE_URL}", ""]
+manifest_lines = [f"Backup taken: {datetime.now().isoformat()}", f"Supabase URL: {os.getenv('SUPABASE_URL')}", ""]
 
 # ---- Dump json_storage ----
 print("Dumping json_storage table...", flush=True)
-rows = []
-page = 0
-page_size = 1000
-while True:
-    resp = client.table("json_storage").select("id, data").range(page * page_size, (page + 1) * page_size - 1).execute()
-    batch = resp.data or []
-    rows.extend(batch)
-    if len(batch) < page_size:
-        break
-    page += 1
+rows = list_all_json_rows(client)
 
 for row in rows:
     row_id = row.get("id") or f"row-{rows.index(row)}"
