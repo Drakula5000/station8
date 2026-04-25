@@ -2409,29 +2409,3 @@ html[data-mode="light"] {
   padding-left: 0;
 }
 
-/* ── Cross-board confirmation card ── */
-.cross-board-confirm {
-  padding: 1.25rem 0.25rem 0.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.cross-board-confirm-heading {
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--s8-text);
-}
-
-.cross-board-confirm-sub {
-  font-size: 0.8125rem;
-  color: var(--s8-text-mid);
-  margin-bottom: 0.25rem;
-}
-
-.cross-board-confirm-actions {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
-  margin-top: 0.5rem;
-}

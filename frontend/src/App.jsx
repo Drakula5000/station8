@@ -280,7 +280,6 @@ export default function App() {
   const [findQuery, setFindQuery] = useState(null) // string | null — triggers FindBar in TldrawCanvas
   const [findBoards, setFindBoards] = useState([]) // ordered board IDs that matched the search
   const [searchScope, setSearchScope] = useState(null) // { boardId, boardName } | null
-  const [crossBoardPending, setCrossBoardPending] = useState(null) // { docId, docName, folderId, kind } | null
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
@@ -620,7 +619,6 @@ export default function App() {
       if (e.key === 'Escape') {
         setSearchOpen(false)
         setSearchScope(null)
-        setCrossBoardPending(null)
         setNewBoardOpen(false)
         setNewGDocOpen(false)
         setNewGSheetOpen(false)
@@ -2033,7 +2031,7 @@ export default function App() {
       )}
 
       {searchOpen && (
-        <Modal onClose={() => { setSearchOpen(false); setSearchScope(null); setCrossBoardPending(null) }} wide>
+        <Modal onClose={() => { setSearchOpen(false); setSearchScope(null) }} wide>
           {searchScope && (
             <div className="search-scope-row">
               <div className="search-scope-pill">
@@ -2065,29 +2063,7 @@ export default function App() {
             >Search all boards</button>
           )}
           {!query && <div className="hint">Text, shapes, sticky notes, sheet cells, OCR — across all boards and sheets.</div>}
-          {crossBoardPending ? (
-            <div className="cross-board-confirm">
-              <div className="cross-board-confirm-heading">Navigate to "{crossBoardPending.docName}"?</div>
-              <div className="cross-board-confirm-sub">This will leave your current board.</div>
-              <div className="cross-board-confirm-actions">
-                <button
-                  className="btn-ghost"
-                  onClick={() => setCrossBoardPending(null)}
-                  type="button"
-                >Cancel</button>
-                <button
-                  className="btn-primary"
-                  onClick={() => {
-                    openDocument(crossBoardPending.kind, crossBoardPending.docId, crossBoardPending.folderId)
-                    setSearchOpen(false)
-                    setCrossBoardPending(null)
-                  }}
-                  type="button"
-                >Go</button>
-              </div>
-            </div>
-          ) : (
-            <div className="results">
+          <div className="results">
               {searchLoading ? (
                 <div className="result-empty">Searching…</div>
               ) : results.map((r, i) => (
@@ -2095,32 +2071,17 @@ export default function App() {
                   key={i}
                   className="result"
                   onClick={() => {
-                    if (activeId?.type === 'board' && r.doc_id !== activeId.id) {
-                      // Cross-board navigation — show confirmation first
-                      const hitType = hitKindToDocType(r.kind)
-                      const hitDoc = (docsByKind[hitType] || []).find(item => item.id === r.doc_id)
-                      setCrossBoardPending({
-                        docId: r.doc_id,
-                        docName: r.doc_name,
-                        folderId: hitDoc?.folder_id ?? null,
-                        kind: hitType,
-                      })
-                    } else {
-                      // Same board, or activeId is null (database home) — navigate directly
-                      const hitType = hitKindToDocType(r.kind)
-                      const hitDoc = (docsByKind[hitType] || []).find(item => item.id === r.doc_id)
-                      openDocument(hitType, r.doc_id, hitDoc?.folder_id)
-                      if (hitType === 'board') {
-                        // Always set findQuery for board results so FindBar activates
-                        // whether we're already on this board or navigating to it
-                        setFindQuery(query)
-                        const boardIds = [...new Set(
-                          results.filter(r2 => r2.kind === 'board').map(r2 => r2.doc_id)
-                        )]
-                        setFindBoards(boardIds)
-                      }
-                      setSearchOpen(false)
+                    const hitType = hitKindToDocType(r.kind)
+                    const hitDoc = (docsByKind[hitType] || []).find(item => item.id === r.doc_id)
+                    openDocument(hitType, r.doc_id, hitDoc?.folder_id)
+                    if (hitType === 'board') {
+                      setFindQuery(query)
+                      const boardIds = [...new Set(
+                        results.filter(r2 => r2.kind === 'board').map(r2 => r2.doc_id)
+                      )]
+                      setFindBoards(boardIds)
                     }
+                    setSearchOpen(false)
                   }}
                 >
                   <span className={`result-kind-pill kind-${r.kind}`}>{KIND_PILL_LABEL[r.kind] || r.kind.toUpperCase()}</span>
@@ -2136,7 +2097,6 @@ export default function App() {
               ))}
               {query && !searchLoading && results.length === 0 && <div className="result-empty">No hits</div>}
             </div>
-          )}
         </Modal>
       )}
 
