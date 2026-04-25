@@ -2300,8 +2300,10 @@ def root():
 
 
 if __name__ == '__main__':
+    _is_dev = os.getenv('FLASK_ENV') == 'development' or os.getenv('PORT') is None
     app.run(
-        debug=False,
+        debug=_is_dev,
+        use_reloader=_is_dev,
         port=int(os.getenv('PORT', '5001')),
         host='0.0.0.0',
         threaded=True,
