@@ -1,71 +1,108 @@
 ![Station 8](./assets/header.svg)
 
-A searchable research workspace with infinite canvas boards and spreadsheets.
+**Searchable whiteboards for research. Every picture, sticky, and spreadsheet cell is indexed.**
 
-The app now has two access modes:
+Whiteboards beat walls of text. But FigJam and Miro can't search the images on them, and images are as important as text collection.
 
-- `owner view`: the full internal workspace
-- `visitor view`: a read-only workspace view plus scoped share links
+🌐 Live demo coming at **YOUR_DOMAIN/demo** *(in the works)*.
 
-At `YOUR_DOMAIN`, everyone sees the same password gate. The password they enter determines whether they land in the owner view or the visitor view. Scoped share links still work, and they use the same visitor password.
+---
+
+## Why this exists
+
+I use whiteboards a lot for research — nobody wants to read a document (ie: traditional research). Admittedly, I like visuals better for much of my research, too.
+
+But FigJam, Miro, et al. don't have the kind of searchability you get with documents. And I supplement research with images, those images don't turn up in search either. A picture of a jellyfish, in FigJam or Miro, is invisible to search.
+
+So Station 8 is my personal fix. Drop an image on a board and OCR runs in your browser — words printed inside the image become findable immediately. Tag the image with alt text and that's searchable too.
+
+It also actually takes you to the match instead of hoping that you find it. Cmd+K, type, the canvas zooms to each hit one at a time. Even threw a glow around it so you can't miss it.
+
+I pulled native spreadsheets and Google Docs/Sheets into the same workspace too, so I don't need to work across several tabs.
+
+I named it Station 8, because I was researching marine field stations when I decided to make this.
+
+---
+
+## It's free, and images are searchable
+
+| Tool | Cost | Image search | Native sheets | Jumps to match |
+|:---|:---|:---:|:---:|:---:|
+| **Station 8** | **free** | ✓ | ✓ | ✓ |
+| AFFiNE | $6.75/mo | ✗ | ✗ | ✗ |
+| Obsidian | free | plugin | ✗ | ✗ |
+| FigJam | free → paid | ✗ | ✗ | ✗ |
+| Miro | free → paid | enterprise | ✗ | ✗ |
+| Heptabase | $8/mo | ✗ | ✗ | ✗ |
+| Notion AI | $10/user/mo | ✗ | ✗ | ✗ |
+
+**Tradeoff for being free:** search uses TF-IDF, not LLM embeddings. It finds what you typed or what was OCR'd — it won't guess that "jellyfish" relates to "sea animals". Tag images with alt text for concept matches. Upside: fast, private, runs on tiny hardware, never sends your data anywhere.
+
+One password gate, two modes: owner reads and writes, visitor is read-only with scoped share links per board.
+
+---
+
+## How it looks
+
+![Walkthrough](./assets/demo.svg)
+
+---
 
 ## Stack
 
-- **Frontend**: React + Vite + tldraw
-- **Backend**: Flask + Python
-- **Search**: Keyword + semantic (sentence-transformers)
-- **OCR**: Tesseract
+- **Canvas:** [tldraw](https://tldraw.dev) — the entire project leans on it
+- **OCR:** [Tesseract.js](https://tesseract.projectnaptha.com/), running in the browser
+- **Native sheets:** [react-spreadsheet](https://github.com/iddan/react-spreadsheet)
+- **Search ranking:** scikit-learn (TF-IDF cosine similarity)
+- **Backend:** Flask (Python, single-file `server.py`)
+- **Storage:** Supabase (JSON state + image bucket)
+- **Hosting:** Vercel (frontend) / Render (backend, free tier)
 
-## Deploy
-
-### Backend (Render)
-1. Create or update the Render web service from this repo.
-2. Make sure the service has a persistent disk mounted at `/var/data`.
-   The committed `render.yaml` now declares this disk and sets `S8_STORAGE_DIR=/var/data`.
-3. Set environment variables:
-   - `OWNER_PASSWORD=<workspace-password>` or `STUDIO_PASSWORD=<workspace-password>`
-   - `VISITOR_PASSWORD=<shared-visitor-password>` or set it in-app on first run
-   - `FLASK_SECRET_KEY=<long-random-secret>`
-   - `CORS_ALLOWED_ORIGINS=https://YOUR_DOMAIN,https://YOUR_DOMAIN`
-   - Optional: `S8_ALLOW_PROD_AUTH_SETUP=true` only if you intentionally want browser-based password setup in production
-4. Render runs `python server.py`.
-5. Your live JSON data and uploads will persist across deploys because the backend now reads/writes from:
-   - `/var/data/data`
-   - `/var/data/uploads`
-6. Copy the Render URL (e.g. `https://your-app.onrender.com`)
-
-### Frontend (Vercel)
-1. Connect this repo to Vercel
-2. Set environment variable: `VITE_API_URL=<your-render-url>`
-3. Point your domain `YOUR_DOMAIN` to the Vercel deployment
-
-## Local Development
+## Local development
 
 ```bash
-# Backend
+# Backend (terminal 1)
 export FLASK_SECRET_KEY=dev-secret
-python3 server.py
+python server.py
 
-# Frontend (separate terminal)
+# Frontend (terminal 2)
 cd frontend
 npm install
 npm run dev
 ```
 
-Visit `http://127.0.0.1:5173`
+Visit `http://127.0.0.1:5173`.
 
-If you do not provide `OWNER_PASSWORD`/`STUDIO_PASSWORD` and `VISITOR_PASSWORD`, local development can prompt you to create both passwords in the browser. In production, browser-based setup should stay disabled unless you explicitly opt in with `S8_ALLOW_PROD_AUTH_SETUP=true`.
+If you don't set `OWNER_PASSWORD` and `VISITOR_PASSWORD`, local dev will prompt you to create both in the browser on first run.
 
-### Storage paths
+## Acknowledgements
 
-By default, the backend stores files in local repo folders:
-- `data/`
-- `uploads/`
+- **[tldraw](https://tldraw.dev)** for the load-bearing canvas
+- **[react-spreadsheet](https://github.com/iddan/react-spreadsheet)** for the sheet view
+- **[Tesseract.js](https://tesseract.projectnaptha.com/)** for browser-side OCR
+- **scikit-learn** for the search ranking
+- The [asciiart.eu ASCII Horizon](https://www.asciiart.eu/animations/ascii-horizon) animation, which inspired the header
 
-To move them somewhere persistent in production, set one of:
-- `S8_STORAGE_DIR=/some/root`
-  Then the app will use `/some/root/data` and `/some/root/uploads`.
-- `S8_DATA_DIR=/some/data/path`
-- `S8_UPLOADS_DIR=/some/uploads/path`
+---
 
-`S8_DATA_DIR` and `S8_UPLOADS_DIR` override `S8_STORAGE_DIR` if all three are set.
+<details>
+<summary><strong>Deployment notes (for self-hosting)</strong></summary>
+
+### Backend (Render)
+
+1. Create a Render web service from this repo.
+2. Mount a persistent disk at `/var/data`.
+3. Environment variables:
+   - `OWNER_PASSWORD=<workspace-password>`
+   - `VISITOR_PASSWORD=<visitor-password>`
+   - `FLASK_SECRET_KEY=<long-random-secret>`
+   - `CORS_ALLOWED_ORIGINS=https://your-domain.com`
+   - `SUPABASE_URL` and `SUPABASE_KEY`
+4. Render runs `python server.py`.
+
+### Frontend (Vercel)
+
+1. Connect the repo to Vercel.
+2. Set `VITE_API_URL=<your-render-url>`.
+
+</details>

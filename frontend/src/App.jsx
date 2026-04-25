@@ -1,9 +1,8 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
-import Spreadsheet from 'react-spreadsheet'
 import TldrawCanvas from './TldrawCanvas'
 import {
-  BoardIcon, SheetIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon,
-  SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon,
+  BoardIcon, SheetIcon, DocIcon, GoogleLogoIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon, ThemeToggleIcon, LogoutIcon,
+  SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon, RefreshIcon,
 } from './icons'
 import './App.css'
 
@@ -19,12 +18,22 @@ if (typeof document !== 'undefined') {
     document.documentElement.removeAttribute('data-theme')
   } catch { /* pre-render environments have no document */ }
 }
-const DEFAULT_SHEET = [
-  [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
-  [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
-  [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
-  [{ value: '' }, { value: '' }, { value: '' }, { value: '' }],
-]
+
+// Doc-type kinds. `gdoc`/`gsheet` are Google Drive-backed (iframe embeds);
+// `board` is the tldraw canvas.
+const DOC_KINDS = ['board', 'gdoc', 'gsheet']
+
+const DOC_KIND_API = {
+  board: 'boards',
+  gdoc: 'gdocs',
+  gsheet: 'gsheets',
+}
+
+const DOC_KIND_LABEL = {
+  board: 'Board',
+  gdoc: 'Doc',
+  gsheet: 'Sheet',
+}
 
 const compareByName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
 const normalizeFolderValue = (value) => value === ROOT_FOLDER ? null : (value || null)
@@ -64,9 +73,11 @@ function buildFolderOptions(folders, parentId = null, depth = 0, seen = new Set(
     })
 }
 
+const DOC_KIND_ORDER = { board: 0, gdoc: 1, gsheet: 2 }
+
 function sortDocs(items) {
   return [...items].sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'board' ? -1 : 1
+    if (a.type !== b.type) return (DOC_KIND_ORDER[a.type] ?? 99) - (DOC_KIND_ORDER[b.type] ?? 99)
     return compareByName(a, b)
   })
 }
@@ -86,37 +97,40 @@ function collectFolderTree(folderId, folders) {
   return folderIds
 }
 
-function summarizeFolderDelete(folder, folders, boards, sheets) {
+function summarizeFolderDelete(folder, folders, docsByKind) {
   const folderIds = collectFolderTree(folder.id, folders)
   const childFolderCount = folders.filter(item => item.parent_id === folder.id).length
-  const directBoardCount = boards.filter(item => item.folder_id === folder.id).length
-  const directSheetCount = sheets.filter(item => item.folder_id === folder.id).length
-  const totalBoardCount = boards.filter(item => folderIds.has(item.folder_id)).length
-  const totalSheetCount = sheets.filter(item => folderIds.has(item.folder_id)).length
-
+  const direct = {}
+  const total = {}
+  let directDocCount = 0
+  let totalDocCount = 0
+  for (const kind of DOC_KINDS) {
+    const items = docsByKind[kind] || []
+    direct[kind] = items.filter(item => item.folder_id === folder.id).length
+    total[kind] = items.filter(item => folderIds.has(item.folder_id)).length
+    directDocCount += direct[kind]
+    totalDocCount += total[kind]
+  }
   return {
     folderIds,
     childFolderCount,
     descendantFolderCount: folderIds.size - 1,
-    directBoardCount,
-    directSheetCount,
-    directDocCount: directBoardCount + directSheetCount,
-    totalBoardCount,
-    totalSheetCount,
-    totalDocCount: totalBoardCount + totalSheetCount,
-    isEmpty: childFolderCount === 0 && directBoardCount === 0 && directSheetCount === 0,
+    direct,
+    total,
+    directDocCount,
+    totalDocCount,
+    isEmpty: childFolderCount === 0 && directDocCount === 0,
   }
 }
 
-function pickNextActiveDoc(currentActiveId, boards, sheets) {
-  if (currentActiveId?.type === 'board' && boards.some(item => item.id === currentActiveId.id)) {
+function pickNextActiveDoc(currentActiveId, docsByKind) {
+  if (currentActiveId && docsByKind[currentActiveId.type]?.some(item => item.id === currentActiveId.id)) {
     return currentActiveId
   }
-  if (currentActiveId?.type === 'sheet' && sheets.some(item => item.id === currentActiveId.id)) {
-    return currentActiveId
+  for (const kind of DOC_KINDS) {
+    const items = docsByKind[kind] || []
+    if (items[0]) return { type: kind, id: items[0].id }
   }
-  if (boards[0]) return { type: 'board', id: boards[0].id }
-  if (sheets[0]) return { type: 'sheet', id: sheets[0].id }
   return null
 }
 
@@ -127,7 +141,7 @@ function pluralize(count, singular, plural = `${singular}s`) {
 function parseRoute() {
   const url = new URL(window.location.href)
   const path = url.pathname.replace(/\/+$/, '') || '/'
-  const docMatch = path.match(/^\/(board|sheet)\/([^/]+)$/)
+  const docMatch = path.match(/^\/(board|gdoc|gsheet)\/([^/]+)$/)
   return {
     shareToken: url.searchParams.get('share') || null,
     doc: docMatch ? { type: docMatch[1], id: docMatch[2] } : null,
@@ -140,7 +154,45 @@ function buildUrl(doc = null, shareToken = null) {
 }
 
 function docTypeLabel(type) {
-  return type === 'board' ? 'Board' : 'Sheet'
+  return DOC_KIND_LABEL[type] || 'Item'
+}
+
+function docKindIcon(type) {
+  if (type === 'board') return <BoardIcon />
+  if (type === 'gdoc') return <DocIcon />
+  if (type === 'gsheet') return <SheetIcon />
+  return <BoardIcon />
+}
+
+const KIND_PILL_LABEL = {
+  alt:    'ALT TEXT',
+  ocr:    'OCR',
+  text:   'TEXT',
+  frame:  'SECTION',
+  sheet:  'CELL',
+  gdoc:   'DOC',
+  gsheet: 'SHEET',
+}
+
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+function renderHighlightedSnippet(snippet, query) {
+  const trimmed = (snippet || '').trim()
+  const q = (query || '').trim()
+  if (!q) return <>"{trimmed}"</>
+  const parts = trimmed.split(new RegExp(`(${escapeRegex(q)})`, 'ig'))
+  const qLower = q.toLowerCase()
+  return (
+    <>
+      "
+      {parts.map((part, idx) => (
+        part.toLowerCase() === qLower
+          ? <mark key={idx} className="result-mark">{part}</mark>
+          : <span key={idx}>{part}</span>
+      ))}
+      "
+    </>
+  )
 }
 
 function formatDocDate(value) {
@@ -199,7 +251,8 @@ function clearStorageByPrefix(storage, prefix) {
 
 export default function App() {
   const [boards, setBoards] = useState([])
-  const [sheets, setSheets] = useState([])
+  const [gdocs, setGdocs] = useState([])
+  const [gsheets, setGsheets] = useState([])
   const [folders, setFolders] = useState([])
   const foldersRef = useRef([])
   const [expandedFolders, setExpandedFolders] = useState({})
@@ -242,14 +295,23 @@ export default function App() {
   const [newBoardOpen, setNewBoardOpen] = useState(false)
   const [newBoardName, setNewBoardName] = useState('')
   const [newBoardFolderId, setNewBoardFolderId] = useState(ROOT_FOLDER)
-  const [newSheetOpen, setNewSheetOpen] = useState(false)
-  const [newSheetName, setNewSheetName] = useState('')
-  const [newSheetFolderId, setNewSheetFolderId] = useState(ROOT_FOLDER)
+  const [newGDocOpen, setNewGDocOpen] = useState(false)
+  const [newGDocName, setNewGDocName] = useState('')
+  const [newGDocFolderId, setNewGDocFolderId] = useState(ROOT_FOLDER)
+  const [newGDocUrl, setNewGDocUrl] = useState('')
+  const [newGSheetOpen, setNewGSheetOpen] = useState(false)
+  const [newGSheetName, setNewGSheetName] = useState('')
+  const [newGSheetFolderId, setNewGSheetFolderId] = useState(ROOT_FOLDER)
+  const [newGSheetUrl, setNewGSheetUrl] = useState('')
   const [newFolderOpen, setNewFolderOpen] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
   const [newFolderParentId, setNewFolderParentId] = useState(ROOT_FOLDER)
-  const saveTimer = useRef(null)
-  const [sheetData, setSheetData] = useState(DEFAULT_SHEET)
+  const [googleAuth, setGoogleAuth] = useState({ loading: true, connected: false, email: null })
+  const [googleConnectOpen, setGoogleConnectOpen] = useState(false)
+  const [googleConnectEmail, setGoogleConnectEmail] = useState('')
+  const [googleConnectBusy, setGoogleConnectBusy] = useState(false)
+  const [driveSyncState, setDriveSyncState] = useState({ busy: false, message: null })
+  const driveSyncMessageTimer = useRef(null)
   const [tagFilter, setTagFilter] = useState(null)
   const [tagInput, setTagInput] = useState('')
   const [tagInputOpen, setTagInputOpen] = useState(false)
@@ -337,12 +399,17 @@ export default function App() {
 
   const folderById = buildFolderMap(folders)
   const folderOptions = [{ value: ROOT_FOLDER, label: 'Workspace root' }, ...buildFolderOptions(folders)]
-  const activeBoard = boards.find(b => b.id === activeId?.id)
-  const activeSheet = sheets.find(s => s.id === activeId?.id)
-  const activeDoc = activeBoard || activeSheet || null
-  const activeDocType = activeBoard ? 'board' : activeSheet ? 'sheet' : null
+  const docsByKind = useMemo(() => ({
+    board: boards,
+    gdoc: gdocs,
+    gsheet: gsheets,
+  }), [boards, gdocs, gsheets])
+  const activeDoc = activeId
+    ? (docsByKind[activeId.type] || []).find(item => item.id === activeId.id) || null
+    : null
+  const activeDocType = activeDoc ? activeId.type : null
   const deleteImpact = deleteTarget?.type === 'folder'
-    ? summarizeFolderDelete(deleteTarget, folders, boards, sheets)
+    ? summarizeFolderDelete(deleteTarget, folders, docsByKind)
     : null
 
   useEffect(() => {
@@ -437,7 +504,7 @@ export default function App() {
   const findShapeIdsByBoard = useMemo(() => {
     const acc = {}
     for (const hit of results) {
-      if (hit.kind === 'sheet' || !hit.shape_id) continue
+      if (hit.kind !== 'board' || !hit.shape_id) continue
       if (!acc[hit.doc_id]) acc[hit.doc_id] = []
       if (!acc[hit.doc_id].includes(hit.shape_id)) acc[hit.doc_id].push(hit.shape_id)
     }
@@ -451,28 +518,10 @@ export default function App() {
 
     const currentActiveId = activeIdRef.current
 
-    if (viewerMode === 'share') {
-      const data = await fetchJson(`${API}/api/share/${route.shareToken}`, {}, null)
-      if (!data) return
-      const nextBoards = data.boards || []
-      const nextSheets = data.sheets || []
-      const nextFolders = data.workspace?.folders || []
-      const scopedDoc = route.doc?.type === 'board'
-        ? nextBoards.find(item => item.id === route.doc.id)
-        : route.doc?.type === 'sheet'
-        ? nextSheets.find(item => item.id === route.doc.id)
-        : null
-      let nextActive = null
-      if (scopedDoc) {
-        nextActive = route.doc
-      } else if (data.share?.scope_type === 'board' && nextBoards[0]) {
-        nextActive = { type: 'board', id: nextBoards[0].id }
-      } else if (data.share?.scope_type === 'sheet' && nextSheets[0]) {
-        nextActive = { type: 'sheet', id: nextSheets[0].id }
-      }
-
-      setBoards(nextBoards)
-      setSheets(nextSheets)
+    const applyResult = (nextDocsByKind, nextFolders, ws) => {
+      setBoards(nextDocsByKind.board || [])
+      setGdocs(nextDocsByKind.gdoc || [])
+      setGsheets(nextDocsByKind.gsheet || [])
       setFolders(nextFolders)
       setExpandedFolders((current) => {
         const next = { ...current }
@@ -481,102 +530,79 @@ export default function App() {
         }
         return next
       })
-      setWorkspace(data.workspace || null)
+      setWorkspace(ws)
+      const routedDoc = route.doc && nextDocsByKind[route.doc.type]?.find(item => item.id === route.doc.id)
+      const nextActive = routedDoc
+        ? route.doc
+        : viewerMode === 'visitor'
+        ? null
+        : pickNextActiveDoc(currentActiveId, nextDocsByKind)
       setActiveId(nextActive)
-      if (nextActive?.type === 'board') {
-        const board = nextBoards.find(item => item.id === nextActive.id)
-        if (board?.folder_id) expandFolderPath(board.folder_id, nextFolders)
-      } else if (nextActive?.type === 'sheet') {
-        const sheet = nextSheets.find(item => item.id === nextActive.id)
-        if (sheet?.folder_id) expandFolderPath(sheet.folder_id, nextFolders)
+      if (nextActive) {
+        const item = (nextDocsByKind[nextActive.type] || []).find(d => d.id === nextActive.id)
+        if (item?.folder_id) expandFolderPath(item.folder_id, nextFolders)
       }
+    }
+
+    if (viewerMode === 'share') {
+      const data = await fetchJson(`${API}/api/share/${route.shareToken}`, {}, null)
+      if (!data) return
+      const nextDocsByKind = {
+        board: data.boards || [],
+        gdoc: data.gdocs || [],
+        gsheet: data.gsheets || [],
+      }
+      applyResult(nextDocsByKind, data.workspace?.folders || [], data.workspace || null)
       return
     }
 
     const prefix = viewerMode === 'visitor' ? 'visitor/' : ''
-    const [bs, ss, ws] = await Promise.all([
+    const [bs, gd, gs, ws] = await Promise.all([
       fetchJson(`${API}/api/${prefix}boards`, {}, []),
-      fetchJson(`${API}/api/${prefix}sheets`, {}, []),
+      fetchJson(`${API}/api/${prefix}gdocs`, {}, []),
+      fetchJson(`${API}/api/${prefix}gsheets`, {}, []),
       fetchJson(`${API}/api/${prefix}workspace`, {}, null),
     ])
 
-    const nextBoards = Array.isArray(bs) ? bs : []
-    const nextSheets = Array.isArray(ss) ? ss : []
-    const nextFolders = ws?.folders || []
-    const routedDoc = route.doc?.type === 'board'
-      ? nextBoards.find(item => item.id === route.doc.id)
-      : route.doc?.type === 'sheet'
-      ? nextSheets.find(item => item.id === route.doc.id)
-      : null
-    const nextActive = routedDoc
-      ? route.doc
-      : viewerMode === 'visitor'
-      ? null
-      : pickNextActiveDoc(currentActiveId, nextBoards, nextSheets)
-
-    setBoards(nextBoards)
-    setSheets(nextSheets)
-    setFolders(nextFolders)
-    setExpandedFolders((current) => {
-      const next = { ...current }
-      for (const folder of nextFolders) {
-        if (!(folder.id in next)) next[folder.id] = true
-      }
-      return next
-    })
-    setWorkspace(ws)
-    if (ownerMode && ws && !ws.owner && !ownerPromptDismissed) setOwnerPromptOpen(true)
-    setActiveId(nextActive)
-    if (nextActive?.type === 'board') {
-      const board = nextBoards.find(item => item.id === nextActive.id)
-      if (board?.folder_id) expandFolderPath(board.folder_id, nextFolders)
-    } else if (nextActive?.type === 'sheet') {
-      const sheet = nextSheets.find(item => item.id === nextActive.id)
-      if (sheet?.folder_id) expandFolderPath(sheet.folder_id, nextFolders)
+    const nextDocsByKind = {
+      board: Array.isArray(bs) ? bs : [],
+      gdoc: Array.isArray(gd) ? gd : [],
+      gsheet: Array.isArray(gs) ? gs : [],
     }
+    if (ownerMode && ws && !ws.owner && !ownerPromptDismissed) setOwnerPromptOpen(true)
+    applyResult(nextDocsByKind, ws?.folders || [], ws)
   }, [auth.authenticated, auth.loading, expandFolderPath, ownerMode, ownerPromptDismissed, route.doc, route.shareToken, viewerMode])
 
   useEffect(() => {
     refresh()
   }, [refresh])
 
-  const loadSheet = useCallback(async (id) => {
-    const url = viewerMode === 'share'
-      ? `${API}/api/share/${route.shareToken}/sheet/${id}`
-      : viewerMode === 'visitor'
-      ? `${API}/api/visitor/sheets/${id}`
-      : `${API}/api/sheets/${id}`
-    const data = await fetchJson(url, {}, null)
-    if (!data) return
-    setSheetData(data.data && data.data.length ? data.data : DEFAULT_SHEET)
-  }, [route.shareToken, viewerMode])
-
-  const saveSheet = useCallback(async (data) => {
-    if (readOnly) return
-    if (!activeId || activeId.type !== 'sheet') return
-    await fetch(`${API}/api/sheets/${activeId.id}`, {
-      method: 'PUT',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data }),
+  const refreshGoogleAuth = useCallback(async () => {
+    const data = await fetchJson(`${API}/api/google/status`, {}, null)
+    setGoogleAuth({
+      loading: false,
+      connected: Boolean(data?.connected),
+      email: data?.email || null,
     })
-  }, [activeId, readOnly])
-
-  const scheduleSaveSheet = useCallback((nextData) => {
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => saveSheet(nextData), 800)
-  }, [saveSheet])
+  }, [])
 
   useEffect(() => {
-    if (!activeId || activeId.type !== 'sheet') return
-    loadSheet(activeId.id)
-  }, [activeId, loadSheet])
+    if (!auth.authenticated || !ownerMode) return
+    refreshGoogleAuth()
+  }, [auth.authenticated, ownerMode, refreshGoogleAuth])
 
   const showDatabaseHome = readOnly && !activeId
 
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+      // ⌘K / Ctrl+K is the only Station 8 search shortcut. We deliberately do
+      // not bind ⌘F: the browser's find-in-page handler runs at a layer page
+      // JS can't reliably intercept (especially when a cross-origin Google
+      // iframe has focus), so trying to override it produces inconsistent
+      // results. Same pattern Notion / Linear / Slack use for the same reason.
+      // The visitor pill exposes a search button for users who don't know ⌘K.
+      const searchHotkey = (e.metaKey || e.ctrlKey) && e.key === 'k'
+      if (searchHotkey) {
         e.preventDefault()
         if (showDatabaseHome) {
           homeSearchRef.current?.focus()
@@ -596,7 +622,9 @@ export default function App() {
         setSearchScope(null)
         setCrossBoardPending(null)
         setNewBoardOpen(false)
-        setNewSheetOpen(false)
+        setNewGDocOpen(false)
+        setNewGSheetOpen(false)
+        setGoogleConnectOpen(false)
         setNewFolderOpen(false)
         setDeleteConfirmOpen(false)
         setDeleteTarget(null)
@@ -639,10 +667,18 @@ export default function App() {
     setNewBoardOpen(true)
   }
 
-  const openNewSheetModal = () => {
-    setNewSheetName('')
-    setNewSheetFolderId(activeDoc?.folder_id || ROOT_FOLDER)
-    setNewSheetOpen(true)
+  const openNewGDocModal = () => {
+    setNewGDocName('')
+    setNewGDocUrl('')
+    setNewGDocFolderId(activeDoc?.folder_id || ROOT_FOLDER)
+    setNewGDocOpen(true)
+  }
+
+  const openNewGSheetModal = () => {
+    setNewGSheetName('')
+    setNewGSheetUrl('')
+    setNewGSheetFolderId(activeDoc?.folder_id || ROOT_FOLDER)
+    setNewGSheetOpen(true)
   }
 
   const openNewFolderModal = () => {
@@ -662,16 +698,97 @@ export default function App() {
     setNewBoardOpen(false)
   }
 
-  const createSheet = async () => {
-    const name = newSheetName.trim()
+  const createGdoc = async () => {
+    const name = newGDocName.trim()
     if (!name) return
-    const sheet = await fetchJsonPost(`${API}/api/sheets`, { name, folder_id: normalizeFolderValue(newSheetFolderId) })
-    if (!sheet) return
-    setSheets(ss => [sheet, ...ss])
-    if (sheet.folder_id) expandFolderPath(sheet.folder_id)
-    openDocument('sheet', sheet.id, sheet.folder_id)
-    setNewSheetOpen(false)
+    const item = await fetchJsonPost(`${API}/api/gdocs`, {
+      name,
+      folder_id: normalizeFolderValue(newGDocFolderId),
+      embed_url: newGDocUrl.trim() || null,
+    })
+    if (!item) return
+    setGdocs(items => [item, ...items])
+    if (item.folder_id) expandFolderPath(item.folder_id)
+    openDocument('gdoc', item.id, item.folder_id)
+    setNewGDocOpen(false)
   }
+
+  const createGsheet = async () => {
+    const name = newGSheetName.trim()
+    if (!name) return
+    const item = await fetchJsonPost(`${API}/api/gsheets`, {
+      name,
+      folder_id: normalizeFolderValue(newGSheetFolderId),
+      embed_url: newGSheetUrl.trim() || null,
+    })
+    if (!item) return
+    setGsheets(items => [item, ...items])
+    if (item.folder_id) expandFolderPath(item.folder_id)
+    openDocument('gsheet', item.id, item.folder_id)
+    setNewGSheetOpen(false)
+  }
+
+  const openGoogleConnect = () => {
+    setGoogleConnectEmail(googleAuth.email || '')
+    setGoogleConnectOpen(true)
+  }
+
+  const submitGoogleConnect = async () => {
+    setGoogleConnectBusy(true)
+    try {
+      const data = await fetchJsonPost(`${API}/api/google/connect`, {
+        email: googleConnectEmail.trim() || 'you@example.com',
+      })
+      if (data) {
+        setGoogleAuth({
+          loading: false,
+          connected: Boolean(data.connected),
+          email: data.email || null,
+        })
+      }
+      setGoogleConnectOpen(false)
+    } finally {
+      setGoogleConnectBusy(false)
+    }
+  }
+
+  const disconnectGoogle = async () => {
+    const data = await fetchJsonPost(`${API}/api/google/disconnect`, {})
+    if (data) {
+      setGoogleAuth({
+        loading: false,
+        connected: Boolean(data.connected),
+        email: data.email || null,
+      })
+    }
+  }
+
+  const syncDriveContent = useCallback(async () => {
+    if (driveSyncState.busy) return
+    setDriveSyncState({ busy: true, message: null })
+    const data = await fetchJsonPost(`${API}/api/google/sync`, {})
+    if (driveSyncMessageTimer.current) clearTimeout(driveSyncMessageTimer.current)
+    let message
+    if (!data) {
+      message = 'Sync failed'
+    } else if ((data.total || 0) === 0) {
+      message = 'Nothing to sync'
+    } else {
+      const ok = (data.gdoc || 0) + (data.gsheet || 0)
+      const failed = data.failed || 0
+      message = failed
+        ? `Synced ${ok} · ${failed} couldn't be read`
+        : `Synced ${ok} ${ok === 1 ? 'item' : 'items'}`
+    }
+    setDriveSyncState({ busy: false, message })
+    driveSyncMessageTimer.current = setTimeout(() => {
+      setDriveSyncState((cur) => (cur.busy ? cur : { busy: false, message: null }))
+    }, 4000)
+  }, [driveSyncState.busy])
+
+  useEffect(() => () => {
+    if (driveSyncMessageTimer.current) clearTimeout(driveSyncMessageTimer.current)
+  }, [])
 
   const createFolder = async () => {
     const name = newFolderName.trim()
@@ -707,6 +824,12 @@ export default function App() {
     return false
   }
 
+  const setDocsForKind = (kind, updater) => {
+    if (kind === 'board') setBoards(updater)
+    else if (kind === 'gdoc') setGdocs(updater)
+    else if (kind === 'gsheet') setGsheets(updater)
+  }
+
   const togglePrivate = async (item, isFolder) => {
     const effective = isEffectivelyPrivate(item, isFolder)
     let newValue
@@ -729,17 +852,13 @@ export default function App() {
     }
     const url = isFolder
       ? `${API}/api/folders/${item.id}`
-      : item.type === 'board'
-        ? `${API}/api/boards/${item.id}`
-        : `${API}/api/sheets/${item.id}`
+      : `${API}/api/${DOC_KIND_API[item.type]}/${item.id}`
     const updated = await fetchJsonPatch(url, { private: newValue })
     if (!updated) return
     if (isFolder) {
       setFolders(fs => fs.map(f => f.id === updated.id ? updated : f))
-    } else if (item.type === 'board') {
-      setBoards(bs => bs.map(b => b.id === updated.id ? updated : b))
     } else {
-      setSheets(ss => ss.map(s => s.id === updated.id ? updated : s))
+      setDocsForKind(item.type, items => items.map(i => i.id === updated.id ? updated : i))
     }
   }
 
@@ -750,7 +869,7 @@ export default function App() {
   const openDeleteDialog = (target) => {
     setDeleteTarget(target)
     if (target.type === 'folder') {
-      const impact = summarizeFolderDelete(target, folders, boards, sheets)
+      const impact = summarizeFolderDelete(target, folders, docsByKind)
       setDeleteMode(impact.isEmpty ? 'delete' : 'move')
     } else {
       setDeleteMode('delete')
@@ -770,7 +889,8 @@ export default function App() {
       clearStorageByPrefix(sessionStorage, 's8.boardView.')
       clearStorageByPrefix(localStorage, 's8.boardCache.')
       setBoards([])
-      setSheets([])
+      setGdocs([])
+      setGsheets([])
       setFolders([])
       setActiveId(null)
       setQuery('')
@@ -797,14 +917,11 @@ export default function App() {
 
   const saveTags = async (tagsStr) => {
     if (!activeId) return
-    const endpoint = activeId.type === 'board' ? 'boards' : 'sheets'
+    const endpoint = DOC_KIND_API[activeId.type]
+    if (!endpoint) return
     const updated = await fetchJsonPatch(`${API}/api/${endpoint}/${activeId.id}`, { tags: tagsStr })
     if (!updated) return
-    if (activeId.type === 'board') {
-      setBoards(bs => bs.map(b => b.id === updated.id ? updated : b))
-    } else {
-      setSheets(ss => ss.map(s => s.id === updated.id ? updated : s))
-    }
+    setDocsForKind(activeId.type, items => items.map(i => i.id === updated.id ? updated : i))
   }
 
   const removeTagFromActive = (tag) => {
@@ -829,8 +946,11 @@ export default function App() {
 
   const allTags = (() => {
     const counts = {}
-    for (const b of boards) for (const t of (b.tags || [])) counts[t] = (counts[t] || 0) + 1
-    for (const s of sheets) for (const t of (s.tags || [])) counts[t] = (counts[t] || 0) + 1
+    for (const kind of DOC_KINDS) {
+      for (const item of (docsByKind[kind] || [])) {
+        for (const t of (item.tags || [])) counts[t] = (counts[t] || 0) + 1
+      }
+    }
     return Object.entries(counts).sort((a, b) => b[1] - a[1])
   })()
 
@@ -838,12 +958,13 @@ export default function App() {
     setTagFilter(cur => cur === tag ? null : tag)
   }
 
-  const visibleBoards = tagFilter ? boards.filter(b => (b.tags || []).includes(tagFilter)) : boards
-  const visibleSheets = tagFilter ? sheets.filter(s => (s.tags || []).includes(tagFilter)) : sheets
-  const visibleDocs = sortDocs([
-    ...visibleBoards.map(board => ({ ...board, type: 'board' })),
-    ...visibleSheets.map(sheet => ({ ...sheet, type: 'sheet' })),
-  ])
+  const visibleDocs = sortDocs(
+    DOC_KINDS.flatMap(kind => {
+      const items = docsByKind[kind] || []
+      const filtered = tagFilter ? items.filter(i => (i.tags || []).includes(tagFilter)) : items
+      return filtered.map(item => ({ ...item, type: kind }))
+    })
+  )
 
   const docsByFolder = {}
   for (const doc of visibleDocs) {
@@ -880,7 +1001,7 @@ export default function App() {
           onClick={() => openDocument(doc.type, doc.id, doc.folder_id)}
           type="button"
         >
-          {doc.type === 'board' ? <BoardIcon /> : <SheetIcon />}
+          {docKindIcon(doc.type)}
           <span className="sb-item-label">{doc.name}</span>
           {priv && <span className="sb-private-badge"><LockIcon /></span>}
         </button>
@@ -979,20 +1100,33 @@ export default function App() {
   const rootDocs = docsByFolder[ROOT_FOLDER] || []
   const hasWorkspaceItems = rootFolders.some(folder => !tagFilter || folderHasVisibleContent(folder.id)) || rootDocs.length > 0
 
+  // Map a search hit's `kind` field to our doc-type kinds.
+  // Backend returns 'board' for board hits and 'sheet' for the legacy
+  // spreadsheet (no longer creatable, but old data may still index).
+  // Future: backend will return 'gdoc' / 'gsheet' for indexed Drive content.
+  const hitKindToDocType = (kind) => {
+    if (kind === 'gdoc' || kind === 'gsheet') return kind
+    return 'board'
+  }
+
+  const findDocFromHit = (hit) => {
+    const type = hitKindToDocType(hit.kind)
+    return (docsByKind[type] || []).find(item => item.id === hit.doc_id)
+  }
+
   const databaseItems = query.trim()
     ? (() => {
       // Deduplicate by doc_id — keep the highest-scoring hit per doc,
       // but collect all snippets/sources to show the best one
       const seen = new Map()
       for (const hit of results) {
-        const doc = hit.kind === 'sheet'
-          ? sheets.find(item => item.id === hit.doc_id)
-          : boards.find(item => item.id === hit.doc_id)
+        const doc = findDocFromHit(hit)
         if (!doc) continue
+        const type = hitKindToDocType(hit.kind)
         if (!seen.has(hit.doc_id)) {
           seen.set(hit.doc_id, {
             key: hit.doc_id,
-            type: hit.kind === 'sheet' ? 'sheet' : 'board',
+            type,
             docId: hit.doc_id,
             name: hit.doc_name,
             snippet: hit.snippet,
@@ -1011,18 +1145,11 @@ export default function App() {
       }
       return [...seen.values()]
     })()
-    : sortDocs([
-      ...boards.map(board => ({ ...board, type: 'board' })),
-      ...sheets.map(sheet => ({ ...sheet, type: 'sheet' })),
-    ]).map(doc => ({
-      key: doc.id,
+    : visibleDocs.map(doc => ({
+      key: `${doc.type}-${doc.id}`,
       type: doc.type,
       docId: doc.id,
       name: doc.name,
-      // No search query → no snippet. Visitors can't edit, so SaaS-style
-      // "ready for notes, frames…" placeholders are misleading. Cards show
-      // title + folder + date + tags; snippet only appears with a real
-      // search match context.
       snippet: null,
       source: docTypeLabel(doc.type),
       createdAt: doc.created_at,
@@ -1117,9 +1244,7 @@ export default function App() {
 
     const url = dragged.type === 'folder'
       ? `${API}/api/folders/${dragged.id}`
-      : dragged.type === 'board'
-      ? `${API}/api/boards/${dragged.id}`
-      : `${API}/api/sheets/${dragged.id}`
+      : `${API}/api/${DOC_KIND_API[dragged.type]}/${dragged.id}`
     const body = dragged.type === 'folder'
       ? { parent_id: targetFolderId || null }
       : { folder_id: targetFolderId || null }
@@ -1134,10 +1259,8 @@ export default function App() {
 
     if (dragged.type === 'folder') {
       setFolders(current => current.map(folder => folder.id === updated.id ? updated : folder))
-    } else if (dragged.type === 'board') {
-      setBoards(current => current.map(board => board.id === updated.id ? updated : board))
     } else {
-      setSheets(current => current.map(sheet => sheet.id === updated.id ? updated : sheet))
+      setDocsForKind(dragged.type, items => items.map(i => i.id === updated.id ? updated : i))
     }
 
     if (targetFolderId) expandFolderPath(targetFolderId)
@@ -1177,9 +1300,7 @@ export default function App() {
     try {
       const endpoint = deleteTarget.type === 'folder'
         ? `/api/folders/${deleteTarget.id}?mode=${deleteMode}`
-        : deleteTarget.type === 'board'
-        ? `/api/boards/${deleteTarget.id}`
-        : `/api/sheets/${deleteTarget.id}`
+        : `/api/${DOC_KIND_API[deleteTarget.type]}/${deleteTarget.id}`
       const res = await fetch(`${API}${endpoint}`, { method: 'DELETE', credentials: 'include' })
       if (!res.ok) {
         showError(res.status === 404 ? 'Item not found' : 'Delete failed')
@@ -1190,11 +1311,8 @@ export default function App() {
           setActiveId(null)
         }
         await refresh()
-      } else if (deleteTarget.type === 'board') {
-        setBoards(bs => bs.filter(b => b.id !== deleteTarget.id))
-        if (activeId?.id === deleteTarget.id) goToDatabaseHome()
-      } else if (deleteTarget.type === 'sheet') {
-        setSheets(ss => ss.filter(s => s.id !== deleteTarget.id))
+      } else {
+        setDocsForKind(deleteTarget.type, items => items.filter(i => i.id !== deleteTarget.id))
         if (activeId?.id === deleteTarget.id) goToDatabaseHome()
       }
       setDeleteConfirmOpen(false)
@@ -1311,20 +1429,33 @@ export default function App() {
             <span className="sidebar-brand">Station 8</span>
           </div>
 
-          {/* Actions */}
-          <div className="sidebar-actions">
-            <button className="sidebar-action" onClick={openNewFolderModal} type="button">
-              <PlusIcon /> Folder
-            </button>
+          {/* Content actions — three doc kinds on equal footing.
+              Folder is a structural action and lives in the WORKSPACE
+              section header below, not here. */}
+          <div className="sidebar-actions sidebar-actions-3up">
             <button className="sidebar-action" onClick={openNewBoardModal} type="button">
               <BoardIcon /> Board
             </button>
-            <button className="sidebar-action" onClick={openNewSheetModal} type="button">
+            <button className="sidebar-action" onClick={openNewGDocModal} type="button">
+              <DocIcon /> Doc
+            </button>
+            <button className="sidebar-action" onClick={openNewGSheetModal} type="button">
               <SheetIcon /> Sheet
             </button>
           </div>
 
-          <div className="sb-section-row"><div className="sb-section">Workspace</div></div>
+          <div className="sb-section-row">
+            <div className="sb-section">Workspace</div>
+            <button
+              className="sb-add"
+              onClick={openNewFolderModal}
+              title="New folder"
+              aria-label="New folder"
+              type="button"
+            >
+              <PlusIcon />
+            </button>
+          </div>
           <div
             className={`workspace-tree${dropTargetFolderId === ROOT_FOLDER ? ' is-root-drop-target' : ''}`}
             onDragLeave={handleWorkspaceDragLeave}
@@ -1375,22 +1506,73 @@ export default function App() {
             setSearchOpen(true)
           }} type="button">
             <span className="search-btn-label"><SearchIcon /> Search</span>
-            <span className="kbd">⌘F</span>
+            <span className="kbd">⌘K</span>
           </button>
 
           {/* Sticky footer */}
           <div className="sidebar-footer">
-            <button
-              className="sidebar-mode-btn"
-              onClick={() => setColorMode(m => m === 'dark' ? 'light' : 'dark')}
-              title={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              type="button"
-            >
-              {colorMode === 'dark' ? '◑ Light mode' : '◑ Dark mode'}
-            </button>
-            <button className="sidebar-logout-btn" onClick={handleLogout} type="button">
-              Log out
-            </button>
+            {googleAuth.connected ? (
+              <button
+                className="sidebar-google-btn is-connected"
+                onClick={disconnectGoogle}
+                title="Disconnect Google account"
+                type="button"
+              >
+                <GoogleLogoIcon />
+                <span className="sidebar-google-label">
+                  <span className="sidebar-google-status">Google connected</span>
+                  <span className="sidebar-google-email">{googleAuth.email}</span>
+                </span>
+                <span className="sidebar-google-action">Disconnect</span>
+              </button>
+            ) : (
+              <button
+                className="sidebar-google-btn"
+                onClick={openGoogleConnect}
+                title="Connect Google account to create Docs and Sheets"
+                type="button"
+                disabled={googleAuth.loading}
+              >
+                <GoogleLogoIcon />
+                <span className="sidebar-google-label">Connect Google</span>
+              </button>
+            )}
+            {(gdocs.length > 0 || gsheets.length > 0) && (
+              <button
+                className="sidebar-google-btn sidebar-google-sync"
+                onClick={syncDriveContent}
+                title="Pull latest text from your linked Google Docs and Sheets so search reflects edits"
+                type="button"
+                disabled={driveSyncState.busy}
+              >
+                <RefreshIcon />
+                <span className="sidebar-google-label">
+                  {driveSyncState.busy
+                    ? 'Syncing Drive content…'
+                    : driveSyncState.message || 'Sync Drive content'}
+                </span>
+              </button>
+            )}
+            <div className="sidebar-utility-row">
+              <button
+                className="sidebar-utility-btn"
+                onClick={() => setColorMode(m => m === 'dark' ? 'light' : 'dark')}
+                title={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                type="button"
+              >
+                <ThemeToggleIcon />
+                <span>{colorMode === 'dark' ? 'Light' : 'Dark'}</span>
+              </button>
+              <button
+                className="sidebar-utility-btn sidebar-utility-danger"
+                onClick={handleLogout}
+                title="Log out"
+                type="button"
+              >
+                <LogoutIcon />
+                <span>Log out</span>
+              </button>
+            </div>
           </div>
         </aside>
       )}
@@ -1495,7 +1677,7 @@ export default function App() {
                       }}
                       type="button"
                     >
-                      Copy board link
+                      Copy {docTypeLabel(activeDocType).toLowerCase()} link
                     </button>
                     {activeDoc && activeDocType && (
                       <>
@@ -1505,7 +1687,7 @@ export default function App() {
                           onClick={() => { openDeleteDialog({ ...activeDoc, type: activeDocType }); setTitleMenuOpen(false) }}
                           type="button"
                         >
-                          Delete board…
+                          Delete {docTypeLabel(activeDocType).toLowerCase()}…
                         </button>
                       </>
                     )}
@@ -1530,7 +1712,10 @@ export default function App() {
               </div>
             )}
 
-            {/* Visitor / share pill — branding + read-only badge + back button */}
+            {/* Visitor / share pill — branding + read-only badge + back button.
+                Search button is here because visitors don't see the sidebar
+                (where the owner's search lives), so without this they'd have
+                no discoverable way to trigger search beyond the ⌘K shortcut. */}
             {readOnly && activeDoc && (
               <div className="pill-wrap">
                 <div className="pill">
@@ -1545,6 +1730,18 @@ export default function App() {
                   <div className="pill-sep" />
                   <span className="pill-title-text pill-title-static">{activeDoc.name}</span>
                   <span className="pill-ro-badge">Read Only</span>
+                  <div className="pill-sep" />
+                  <button
+                    className="pill-icon-btn pill-search-btn"
+                    onClick={() => {
+                      setSearchScope(null)
+                      setFindQuery(null)
+                      setSearchOpen(true)
+                    }}
+                    title="Search Station 8 (⌘K)"
+                    aria-label="Search Station 8"
+                    type="button"
+                  ><SearchIcon /></button>
                 </div>
               </div>
             )}
@@ -1571,27 +1768,26 @@ export default function App() {
                   />
                 </>
               )}
-              {activeId?.type === 'sheet' && (
-                <div className="sheet-wrap" key={activeId.id}>
-                  {readOnly ? (
-                    <ReadOnlySheet data={sheetData} />
-                  ) : (
-                    <Spreadsheet
-                      data={sheetData}
-                      onChange={(d) => { setSheetData(d); scheduleSaveSheet(d) }}
-                    />
-                  )}
-                </div>
+              {(activeId?.type === 'gdoc' || activeId?.type === 'gsheet') && activeDoc && (
+                <GoogleEmbed
+                  key={activeId.id}
+                  kind={activeId.type}
+                  doc={activeDoc}
+                  readOnly={readOnly}
+                  googleConnected={googleAuth.connected}
+                  onConnectGoogle={openGoogleConnect}
+                />
               )}
               {!activeId && ownerMode && (
                 <div className="empty-main">
                   <div>
                     <div className="big">Nothing open</div>
-                    <div className="small">Create folders, boards, and sheets to organize your research.</div>
-                    <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'center' }}>
+                    <div className="small">Create folders, boards, docs, and sheets to organize your research.</div>
+                    <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
                       <button className="cta" onClick={openNewFolderModal} type="button">New folder</button>
                       <button className="cta" onClick={openNewBoardModal} type="button">New board</button>
-                      <button className="cta" onClick={openNewSheetModal} type="button">New sheet</button>
+                      <button className="cta" onClick={openNewGDocModal} type="button">New doc</button>
+                      <button className="cta" onClick={openNewGSheetModal} type="button">New sheet</button>
                     </div>
                   </div>
                 </div>
@@ -1615,17 +1811,69 @@ export default function App() {
         </Modal>
       )}
 
-      {newSheetOpen && (
-        <Modal onClose={() => setNewSheetOpen(false)} title="New sheet">
+      {newGDocOpen && (
+        <Modal onClose={() => setNewGDocOpen(false)} title="New Google Doc">
           <input
             autoFocus
-            value={newSheetName}
-            onChange={e => setNewSheetName(e.target.value)}
-            placeholder="Name this sheet"
-            onKeyDown={e => { if (e.key === 'Enter') createSheet() }}
+            value={newGDocName}
+            onChange={e => setNewGDocName(e.target.value)}
+            placeholder="Name this doc"
+            onKeyDown={e => { if (e.key === 'Enter') createGdoc() }}
           />
-          <FolderField label="Create in" value={newSheetFolderId} options={folderOptions} onChange={setNewSheetFolderId} />
-          <ModalFooter onCancel={() => setNewSheetOpen(false)} onConfirm={createSheet} disabled={!newSheetName.trim()} />
+          <FolderField label="Create in" value={newGDocFolderId} options={folderOptions} onChange={setNewGDocFolderId} />
+          <GDriveUrlField
+            value={newGDocUrl}
+            onChange={setNewGDocUrl}
+            googleConnected={googleAuth.connected}
+            placeholder="https://docs.google.com/document/d/…"
+            kindLabel="doc"
+          />
+          <ModalFooter onCancel={() => setNewGDocOpen(false)} onConfirm={createGdoc} disabled={!newGDocName.trim()} />
+        </Modal>
+      )}
+
+      {newGSheetOpen && (
+        <Modal onClose={() => setNewGSheetOpen(false)} title="New Google Sheet">
+          <input
+            autoFocus
+            value={newGSheetName}
+            onChange={e => setNewGSheetName(e.target.value)}
+            placeholder="Name this sheet"
+            onKeyDown={e => { if (e.key === 'Enter') createGsheet() }}
+          />
+          <FolderField label="Create in" value={newGSheetFolderId} options={folderOptions} onChange={setNewGSheetFolderId} />
+          <GDriveUrlField
+            value={newGSheetUrl}
+            onChange={setNewGSheetUrl}
+            googleConnected={googleAuth.connected}
+            placeholder="https://docs.google.com/spreadsheets/d/…"
+            kindLabel="sheet"
+          />
+          <ModalFooter onCancel={() => setNewGSheetOpen(false)} onConfirm={createGsheet} disabled={!newGSheetName.trim()} />
+        </Modal>
+      )}
+
+      {googleConnectOpen && (
+        <Modal onClose={() => setGoogleConnectOpen(false)} title="Connect Google">
+          <p style={{ fontSize: 13, color: 'var(--s8-text-mid)', marginBottom: 12, lineHeight: 1.5 }}>
+            <strong style={{ color: 'var(--s8-text)' }}>Stub mode.</strong> Real Google OAuth isn't wired up yet — for now this just lets you mark Station 8 as "connected" so you can see what the UX looks like once OAuth ships.
+          </p>
+          <p style={{ fontSize: 12, color: 'var(--s8-text-mid)', marginBottom: 12 }}>
+            Once OAuth lands: clicking this button will redirect you to Google, you'll grant Drive access, and Station 8 will create new Docs and Sheets in your Drive automatically. You won't paste URLs anymore.
+          </p>
+          <input
+            autoFocus
+            value={googleConnectEmail}
+            onChange={e => setGoogleConnectEmail(e.target.value)}
+            placeholder="you@example.com (placeholder)"
+            onKeyDown={e => { if (e.key === 'Enter') submitGoogleConnect() }}
+          />
+          <div className="modal-footer">
+            <button className="btn-ghost" onClick={() => setGoogleConnectOpen(false)} type="button">Cancel</button>
+            <button className="btn-primary" onClick={submitGoogleConnect} disabled={googleConnectBusy} type="button">
+              {googleConnectBusy ? 'Connecting…' : 'Pretend connected'}
+            </button>
+          </div>
         </Modal>
       )}
 
@@ -1771,7 +2019,7 @@ export default function App() {
               <p className="delete-dialog-note">
                 {deleteTarget.type === 'board'
                   ? 'Its canvas data will be removed, and uploaded images tied only to this board will be cleaned up too.'
-                  : 'Its spreadsheet data will be removed.'}
+                  : 'It will be removed from Station 8. The underlying file in your Google Drive is not deleted.'}
               </p>
             )}
           </div>
@@ -1799,13 +2047,16 @@ export default function App() {
               </div>
             </div>
           )}
-          <input
-            autoFocus
-            className="search-input"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder={searchScope ? 'Search in this board…' : 'Search across everything…'}
-          />
+          <div className="search-input-wrap">
+            <SearchIcon className="search-input-icon" />
+            <input
+              autoFocus
+              className="search-input"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder={searchScope ? 'Search in this board…' : 'Search across everything…'}
+            />
+          </div>
           {searchScope && (
             <button
               className="search-all-link"
@@ -1813,7 +2064,7 @@ export default function App() {
               type="button"
             >Search all boards</button>
           )}
-          <div className="hint">Text, shapes, sticky notes, sheet cells, OCR — across all boards and sheets.</div>
+          {!query && <div className="hint">Text, shapes, sticky notes, sheet cells, OCR — across all boards and sheets.</div>}
           {crossBoardPending ? (
             <div className="cross-board-confirm">
               <div className="cross-board-confirm-heading">Navigate to "{crossBoardPending.docName}"?</div>
@@ -1846,28 +2097,25 @@ export default function App() {
                   onClick={() => {
                     if (activeId?.type === 'board' && r.doc_id !== activeId.id) {
                       // Cross-board navigation — show confirmation first
-                      const folderId = r.kind === 'sheet'
-                        ? sheets.find(item => item.id === r.doc_id)?.folder_id ?? null
-                        : boards.find(item => item.id === r.doc_id)?.folder_id ?? null
+                      const hitType = hitKindToDocType(r.kind)
+                      const hitDoc = (docsByKind[hitType] || []).find(item => item.id === r.doc_id)
                       setCrossBoardPending({
                         docId: r.doc_id,
                         docName: r.doc_name,
-                        folderId,
-                        kind: r.kind === 'sheet' ? 'sheet' : 'board',
+                        folderId: hitDoc?.folder_id ?? null,
+                        kind: hitType,
                       })
                     } else {
                       // Same board, or activeId is null (database home) — navigate directly
-                      if (r.kind === 'sheet') {
-                        const sheet = sheets.find(item => item.id === r.doc_id)
-                        openDocument('sheet', r.doc_id, sheet?.folder_id)
-                      } else {
-                        const board = boards.find(item => item.id === r.doc_id)
-                        openDocument('board', r.doc_id, board?.folder_id)
+                      const hitType = hitKindToDocType(r.kind)
+                      const hitDoc = (docsByKind[hitType] || []).find(item => item.id === r.doc_id)
+                      openDocument(hitType, r.doc_id, hitDoc?.folder_id)
+                      if (hitType === 'board') {
                         // Always set findQuery for board results so FindBar activates
                         // whether we're already on this board or navigating to it
                         setFindQuery(query)
                         const boardIds = [...new Set(
-                          results.filter(r2 => r2.kind !== 'sheet').map(r2 => r2.doc_id)
+                          results.filter(r2 => r2.kind === 'board').map(r2 => r2.doc_id)
                         )]
                         setFindBoards(boardIds)
                       }
@@ -1875,9 +2123,15 @@ export default function App() {
                     }
                   }}
                 >
-                  <div className="result-title">{r.doc_name}</div>
-                  <div className="result-snippet">{r.snippet}</div>
-                  <div className="result-meta">{r.source}</div>
+                  <span className={`result-kind-pill kind-${r.kind}`}>{KIND_PILL_LABEL[r.kind] || r.kind.toUpperCase()}</span>
+                  <div className="result-body">
+                    <div className="result-quote">{renderHighlightedSnippet(r.snippet, query)}</div>
+                    <div className="result-breadcrumb">
+                      <span className="crumb">{r.doc_name}</span>
+                      <span className="crumb-sep">→</span>
+                      <span className="crumb crumb-tail">{r.source}</span>
+                    </div>
+                  </div>
                 </div>
               ))}
               {query && !searchLoading && results.length === 0 && <div className="result-empty">No hits</div>}
@@ -2052,7 +2306,7 @@ function DatabaseHome({
             type="button"
           >
             <div className={`database-thumb database-thumb-${item.type}`}>
-              {item.type === 'board' ? <BoardIcon /> : <SheetIcon />}
+              {item.type === 'board' ? <BoardIcon /> : item.type === 'gdoc' ? <DocIcon /> : <SheetIcon />}
               <span>{docTypeLabel(item.type)}</span>
             </div>
             <div className="database-card-body">
@@ -2133,16 +2387,83 @@ function FolderField({ label, value, onChange, options }) {
   )
 }
 
-function ReadOnlySheet({ data }) {
+function GoogleEmbed({ kind, doc, readOnly, googleConnected, onConnectGoogle }) {
+  // Embed URLs:
+  //   - /edit?usp=…  → full editor UI inside the iframe (owner)
+  //   - /preview     → clean read-only render (visitor)
+  //
+  // Google's /preview view still draws a thin top bar with doc name + "Open in
+  // Google" link. We crop that off via CSS (`.is-readonly` on the wrapper) so
+  // visitors see only the doc body — Station 8's pill already shows the title.
+  //
+  // We do NOT try to intercept keyboard shortcuts inside the iframe. Cross-
+  // origin iframes own their own keyboard; ⌘F inside a Google Doc goes to
+  // Google's in-doc find, and that's fine. Station 8 search is on ⌘K + the
+  // visitor-pill search button — both work regardless of focus.
+  const url = doc.embed_url
+  if (!url) {
+    const kindLabel = kind === 'gdoc' ? 'Google Doc' : 'Google Sheet'
+    return (
+      <div className="gdrive-empty">
+        <div className="gdrive-empty-card">
+          <div className="gdrive-empty-icon"><GoogleLogoIcon /></div>
+          <div className="gdrive-empty-title">{kindLabel} not linked yet</div>
+          <div className="gdrive-empty-copy">
+            {googleConnected
+              ? 'This item was created without a Google file attached. Once OAuth is fully wired up, new docs and sheets will be created in Drive automatically.'
+              : 'Connect your Google account once and Station 8 will create this file in your Drive automatically.'}
+          </div>
+          {!googleConnected && (
+            <button className="gdrive-empty-cta" onClick={onConnectGoogle} type="button">
+              <GoogleLogoIcon /> <span>Connect Google</span>
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+  const embedUrl = readOnly ? toPreviewUrl(url) : url
   return (
-    <table className="ro-sheet">
-      <tbody>
-        {data.map((row, i) => (
-          <tr key={i}>
-            {row.map((cell, j) => <td key={j}>{cell?.value || ''}</td>)}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div
+      className={`gdrive-embed-wrap${readOnly ? ' is-readonly' : ''}`}
+      data-kind={kind}
+    >
+      <iframe
+        className="gdrive-embed-frame"
+        src={embedUrl}
+        title={doc.name}
+        allow="clipboard-write; clipboard-read"
+      />
+    </div>
+  )
+}
+
+// Best-effort rewrite of any Drive doc/sheet URL to the clean /preview form.
+// Handles /edit, /edit?…, and already-preview URLs. Leaves unknown formats alone.
+function toPreviewUrl(url) {
+  return url
+    .replace(/\/edit(\?.*)?$/, '/preview')
+    .replace(/\?embedded=true.*$/, '')
+}
+
+function GDriveUrlField({ value, onChange, googleConnected, placeholder, kindLabel }) {
+  return (
+    <label className="modal-field gdrive-url-field">
+      <span className="modal-field-label">
+        Google Drive URL
+        {googleConnected ? (
+          <span className="gdrive-url-hint">Optional — once OAuth is wired up, new {kindLabel}s will be created automatically.</span>
+        ) : (
+          <span className="gdrive-url-hint">Paste a Drive URL you've shared as "anyone with link." Required until Google is connected.</span>
+        )}
+      </span>
+      <input
+        type="url"
+        className="gdrive-url-input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    </label>
   )
 }

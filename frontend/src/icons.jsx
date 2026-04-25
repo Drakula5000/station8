@@ -32,6 +32,30 @@ export function SheetIcon(props) {
   )
 }
 
+export function DocIcon(props) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M3.2 1.5h4.6l3 3V12a1 1 0 0 1-1 1H3.2a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round"/>
+      <path d="M7.8 1.5v3h3" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round"/>
+      <line x1="4.2" y1="7.4" x2="9.8" y2="7.4" stroke="currentColor" strokeWidth=".9" strokeLinecap="round"/>
+      <line x1="4.2" y1="9.2" x2="9.8" y2="9.2" stroke="currentColor" strokeWidth=".9" strokeLinecap="round"/>
+      <line x1="4.2" y1="11" x2="7.8" y2="11" stroke="currentColor" strokeWidth=".9" strokeLinecap="round"/>
+    </svg>
+  )
+}
+
+// Monochrome Google G — uses currentColor so it inherits the parent's color
+// and stays on-theme. The path is the canonical Google G outline merged into
+// a single shape, then notched on the right where the brand mark has its
+// horizontal bar (the bar that gives the G its negative space).
+export function GoogleLogoIcon(props) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 18 18" fill="currentColor" {...props}>
+      <path d="M9 0a9 9 0 1 0 8.79 10.91H9V7.06h8.57Q18 8.06 18 9A9 9 0 0 0 9 0Zm0 14.4A5.4 5.4 0 1 1 12.6 5.04L15.16 2.5A8.97 8.97 0 0 0 9 0a9 9 0 0 0 0 18 8.93 8.93 0 0 0 5.94-2.18L12.05 13.55A5.36 5.36 0 0 1 9 14.4Z"/>
+    </svg>
+  )
+}
+
 export function FolderIcon(props) {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...props}>
@@ -44,6 +68,17 @@ export function PlusIcon(props) {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" {...props}>
       <path d="M6 1V11M1 6H11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  )
+}
+
+export function RefreshIcon(props) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M2.2 6.6a4.8 4.8 0 0 1 8.5-2.6" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+      <path d="M11.8 7.4a4.8 4.8 0 0 1-8.5 2.6" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+      <path d="M8.4 4h2.6V1.4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M5.6 10H3v2.6" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   )
 }
@@ -92,6 +127,26 @@ export function CloseIcon(props) {
   return (
     <svg {...common} {...props}>
       <path d="M5 5l10 10M15 5L5 15"/>
+    </svg>
+  )
+}
+
+export function ThemeToggleIcon(props) {
+  return (
+    <svg {...common} {...props}>
+      <circle cx="10" cy="10" r="6"/>
+      <path d="M10 4v12" />
+      <path d="M10 4a6 6 0 0 0 0 12z" fill="currentColor" stroke="none"/>
+    </svg>
+  )
+}
+
+export function LogoutIcon(props) {
+  return (
+    <svg {...common} {...props}>
+      <path d="M11.5 4.5h-5a1.5 1.5 0 0 0-1.5 1.5v8a1.5 1.5 0 0 0 1.5 1.5h5"/>
+      <path d="M9 10h7"/>
+      <path d="M13.5 7l3 3-3 3"/>
     </svg>
   )
 }

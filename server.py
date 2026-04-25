@@ -41,6 +41,10 @@ UPLOADS_DIR = os.path.abspath(os.getenv('S8_UPLOADS_DIR') or os.path.join(STORAG
 
 BOARDS_FILE = os.path.join(DATA_DIR, 'boards.json')
 SHEETS_FILE = os.path.join(DATA_DIR, 'sheets.json')
+GDOCS_FILE = os.path.join(DATA_DIR, 'gdocs.json')
+GSHEETS_FILE = os.path.join(DATA_DIR, 'gsheets.json')
+GOOGLE_AUTH_FILE = os.path.join(DATA_DIR, 'google_auth.json')
+GDRIVE_CONTENTS_FILE = os.path.join(DATA_DIR, 'gdrive_contents.json')
 OCR_FILE = os.path.join(DATA_DIR, 'ocr.json')
 WORKSPACE_FILE = os.path.join(DATA_DIR, 'workspace.json')
 SHARES_FILE = os.path.join(DATA_DIR, 'shares.json')
@@ -375,6 +379,145 @@ def _load_sheets():
 def _save_sheets(sheets):
     folders = _get_workspace().get('folders', [])
     _save(SHEETS_FILE, [_normalize_doc(sheet, folders) for sheet in sheets])
+
+
+def _normalize_gdrive_doc(doc, folders):
+    """_normalize_doc + Drive-specific fields preserved."""
+    item = _normalize_doc(doc, folders)
+    item['drive_file_id'] = doc.get('drive_file_id') or None
+    item['embed_url'] = doc.get('embed_url') or None
+    return item
+
+
+def _load_gdocs():
+    folders = _get_workspace().get('folders', [])
+    return [_normalize_gdrive_doc(d, folders) for d in _load(GDOCS_FILE, [])]
+
+
+def _save_gdocs(gdocs):
+    folders = _get_workspace().get('folders', [])
+    _save(GDOCS_FILE, [_normalize_gdrive_doc(d, folders) for d in gdocs])
+
+
+def _load_gsheets():
+    folders = _get_workspace().get('folders', [])
+    return [_normalize_gdrive_doc(d, folders) for d in _load(GSHEETS_FILE, [])]
+
+
+def _save_gsheets(gsheets):
+    folders = _get_workspace().get('folders', [])
+    _save(GSHEETS_FILE, [_normalize_gdrive_doc(d, folders) for d in gsheets])
+
+
+# ── Google Drive content sync (no-OAuth path) ────────────────────────────────
+#
+# Drive serves a public plaintext export of any file shared as "anyone with
+# the link can view/edit" — no OAuth required:
+#
+#   docs:    https://docs.google.com/document/d/<id>/export?format=txt
+#   sheets:  https://docs.google.com/spreadsheets/d/<id>/export?format=csv
+#
+# We snapshot that text into Supabase (`gdrive_contents.json`) and feed it
+# into the existing TF-IDF search corpus alongside board / sheet text, so a
+# search for content that lives inside a Google Doc actually matches.
+
+import re as _re
+import urllib.request as _urllib_request
+import urllib.error as _urllib_error
+
+_DRIVE_DOC_ID_RE = _re.compile(r'/document/d/([a-zA-Z0-9_-]+)')
+_DRIVE_SHEET_ID_RE = _re.compile(r'/spreadsheets/d/([a-zA-Z0-9_-]+)')
+
+
+def _extract_drive_file_id(url, kind):
+    if not url:
+        return None
+    pattern = _DRIVE_DOC_ID_RE if kind == 'gdoc' else _DRIVE_SHEET_ID_RE
+    match = pattern.search(url)
+    return match.group(1) if match else None
+
+
+def _fetch_gdrive_text(file_id, kind, timeout=15):
+    """Fetch plaintext content of a publicly-shared Drive file. Returns text
+    on success, None on failure (network error, file not shared publicly,
+    Google rate-limit, etc.). Network call — call from a sync context."""
+    if not file_id:
+        return None
+    if kind == 'gdoc':
+        url = f'https://docs.google.com/document/d/{file_id}/export?format=txt'
+    elif kind == 'gsheet':
+        url = f'https://docs.google.com/spreadsheets/d/{file_id}/export?format=csv'
+    else:
+        return None
+    try:
+        req = _urllib_request.Request(url, headers={'User-Agent': 'Station8/1.0'})
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            data = resp.read()
+            # Strip UTF-8 BOM Google sometimes prepends.
+            if data.startswith(b'\xef\xbb\xbf'):
+                data = data[3:]
+            text = data.decode('utf-8', errors='replace').strip()
+            return text or None
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError):
+        return None
+
+
+def _load_gdrive_contents():
+    contents = _load(GDRIVE_CONTENTS_FILE, {})
+    return contents if isinstance(contents, dict) else {}
+
+
+def _save_gdrive_contents(contents):
+    _save(GDRIVE_CONTENTS_FILE, contents)
+
+
+def _sync_one_gdrive_doc(item, kind, contents):
+    """Pull text for a single doc/sheet and update `contents` in place. Returns
+    True if content was refreshed, False if the fetch failed (existing cached
+    content, if any, is preserved on failure)."""
+    file_id = _extract_drive_file_id(item.get('embed_url'), kind)
+    if not file_id:
+        return False
+    text = _fetch_gdrive_text(file_id, kind)
+    if text is None:
+        return False
+    contents[f'{kind}-{item["id"]}'] = {
+        'kind': kind,
+        'doc_id': item['id'],
+        'doc_name': item['name'],
+        'text': text,
+        'synced_at': datetime.now().isoformat(),
+    }
+    return True
+
+
+def _sync_gdrive_contents():
+    """Sync all linked gdocs and gsheets. Drops cached entries for items that
+    no longer exist. Returns a counts dict for the response payload."""
+    contents = _load_gdrive_contents()
+    counts = {'gdoc': 0, 'gsheet': 0, 'failed': 0, 'total': 0}
+    valid_keys = set()
+    for item in _load_gdocs():
+        counts['total'] += 1
+        valid_keys.add(f'gdoc-{item["id"]}')
+        if _sync_one_gdrive_doc(item, 'gdoc', contents):
+            counts['gdoc'] += 1
+        else:
+            counts['failed'] += 1
+    for item in _load_gsheets():
+        counts['total'] += 1
+        valid_keys.add(f'gsheet-{item["id"]}')
+        if _sync_one_gdrive_doc(item, 'gsheet', contents):
+            counts['gsheet'] += 1
+        else:
+            counts['failed'] += 1
+    for key in list(contents.keys()):
+        if key not in valid_keys:
+            del contents[key]
+    _save_gdrive_contents(contents)
+    return counts
 
 
 def _list_docs_sorted(docs, *, visitor=False):
@@ -1232,6 +1375,265 @@ def update_sheet(sheet_id):
     return '', 204
 
 
+# ── Google Drive integration (gdocs + gsheets) ───────────────────────────────
+#
+# Stub implementation. Real OAuth + Drive API wiring lands in a later phase.
+# For now the create endpoint accepts an optional `embed_url` from the client
+# so the owner can paste a Drive URL they already shared as "anyone with link"
+# and validate the embed UX. After OAuth ships, the backend will create the
+# file and set this field automatically.
+
+def _google_auth_state():
+    state = _load(GOOGLE_AUTH_FILE, {}) or {}
+    return {
+        'connected': bool(state.get('connected')),
+        'email': state.get('email') or None,
+    }
+
+
+@app.route('/api/google/status', methods=['GET'])
+@_viewer_auth_required
+def google_status():
+    return jsonify(_google_auth_state())
+
+
+@app.route('/api/google/connect', methods=['POST'])
+@_studio_auth_required
+def google_connect():
+    """Stub: pretends OAuth succeeded with a fake email. Real OAuth flow later."""
+    data = request.json or {}
+    email = (data.get('email') or 'you@example.com').strip()
+    _save(GOOGLE_AUTH_FILE, {'connected': True, 'email': email})
+    return jsonify(_google_auth_state())
+
+
+@app.route('/api/google/disconnect', methods=['POST'])
+@_studio_auth_required
+def google_disconnect():
+    _save(GOOGLE_AUTH_FILE, {'connected': False, 'email': None})
+    return jsonify(_google_auth_state())
+
+
+@app.route('/api/google/sync', methods=['POST'])
+@_studio_auth_required
+def google_sync():
+    """Pull latest text from every linked Drive doc/sheet so search reflects
+    edits made inside Google. Auto-runs on create; user triggers manually
+    after editing existing docs."""
+    return jsonify(_sync_gdrive_contents())
+
+
+def _maybe_sync_one(item, kind):
+    """Best-effort single-item sync — used after create/patch so newly-linked
+    content lands in search without the user having to hit the sync button.
+    Swallows errors so a Drive flake never breaks doc creation."""
+    try:
+        contents = _load_gdrive_contents()
+        if _sync_one_gdrive_doc(item, kind, contents):
+            _save_gdrive_contents(contents)
+    except Exception:
+        pass
+
+
+def _drop_gdrive_content(kind, item_id):
+    """Drop any cached content for a deleted gdoc/gsheet so search doesn't
+    surface ghost hits. Safe to call even if no cache entry exists."""
+    try:
+        contents = _load_gdrive_contents()
+        key = f'{kind}-{item_id}'
+        if key in contents:
+            del contents[key]
+            _save_gdrive_contents(contents)
+    except Exception:
+        pass
+
+
+def _sync_missing_only():
+    """Backfill the cache for any gdoc/gsheet that has no entry yet. Runs
+    ahead of every search so the first search after fixing a doc's sharing
+    settings (or after a flaky network during create-time sync) picks up
+    the content automatically — no manual Sync button required.
+
+    Already-cached items are left alone; stale-cache refresh stays on the
+    explicit Sync button to avoid hammering Google on every keystroke."""
+    try:
+        contents = _load_gdrive_contents()
+        changed = False
+        for item in _load_gdocs():
+            if not (contents.get(f'gdoc-{item["id"]}') or {}).get('text'):
+                if _sync_one_gdrive_doc(item, 'gdoc', contents):
+                    changed = True
+        for item in _load_gsheets():
+            if not (contents.get(f'gsheet-{item["id"]}') or {}).get('text'):
+                if _sync_one_gdrive_doc(item, 'gsheet', contents):
+                    changed = True
+        if changed:
+            _save_gdrive_contents(contents)
+    except Exception:
+        pass
+
+
+def _create_gdrive_doc(load_fn, save_fn, request_data):
+    name = (request_data.get('name') or 'Untitled').strip() or 'Untitled'
+    folders = _get_workspace().get('folders', [])
+    item = {
+        'id': str(uuid.uuid4())[:8],
+        'name': name,
+        'tags': _parse_tags(request_data.get('tags')),
+        'folder_id': _normalize_folder_id(request_data.get('folder_id'), folders),
+        'created_at': datetime.now().isoformat(),
+        'drive_file_id': (request_data.get('drive_file_id') or '').strip() or None,
+        'embed_url': (request_data.get('embed_url') or '').strip() or None,
+    }
+    items = load_fn()
+    items.append(item)
+    save_fn(items)
+    return item
+
+
+def _patch_gdrive_doc(load_fn, save_fn, item_id, data):
+    items = load_fn()
+    folders = _get_workspace().get('folders', [])
+    for item in items:
+        if item['id'] != item_id:
+            continue
+        if 'name' in data:
+            item['name'] = (data['name'] or '').strip() or item.get('name', 'Untitled')
+        if 'tags' in data:
+            item['tags'] = _parse_tags(data['tags'])
+        if 'folder_id' in data:
+            item['folder_id'] = _normalize_folder_id(data.get('folder_id'), folders)
+        if 'private' in data:
+            item['private'] = True if data['private'] is True else (False if data['private'] is False else None)
+        if 'embed_url' in data:
+            item['embed_url'] = (data.get('embed_url') or '').strip() or None
+        if 'drive_file_id' in data:
+            item['drive_file_id'] = (data.get('drive_file_id') or '').strip() or None
+        save_fn(items)
+        return item
+    return None
+
+
+@app.route('/api/gdocs', methods=['GET'])
+@_studio_auth_required
+def list_gdocs():
+    return jsonify(_list_docs_sorted(_load_gdocs()))
+
+
+@app.route('/api/visitor/gdocs', methods=['GET'])
+@_viewer_auth_required
+def list_visitor_gdocs():
+    return jsonify(_list_docs_sorted(_load_gdocs(), visitor=True))
+
+
+@app.route('/api/gdocs', methods=['POST'])
+@_studio_auth_required
+def create_gdoc():
+    item = _create_gdrive_doc(_load_gdocs, _save_gdocs, request.json or {})
+    _maybe_sync_one(item, 'gdoc')
+    return jsonify(item), 201
+
+
+@app.route('/api/gdocs/<gdoc_id>', methods=['PATCH'])
+@_studio_auth_required
+def patch_gdoc(gdoc_id):
+    body = request.json or {}
+    item = _patch_gdrive_doc(_load_gdocs, _save_gdocs, gdoc_id, body)
+    if item is None:
+        return jsonify({'error': 'Not found'}), 404
+    if 'embed_url' in body:
+        _maybe_sync_one(item, 'gdoc')
+    return jsonify(item)
+
+
+@app.route('/api/gdocs/<gdoc_id>', methods=['DELETE'])
+@_studio_auth_required
+def delete_gdoc(gdoc_id):
+    items = [d for d in _load_gdocs() if d['id'] != gdoc_id]
+    _save_gdocs(items)
+    _drop_gdrive_content('gdoc', gdoc_id)
+    return '', 204
+
+
+@app.route('/api/gdocs/<gdoc_id>', methods=['GET'])
+@_studio_auth_required
+def get_gdoc(gdoc_id):
+    for d in _load_gdocs():
+        if d['id'] == gdoc_id:
+            return jsonify(d)
+    return jsonify({'error': 'Not found'}), 404
+
+
+@app.route('/api/visitor/gdocs/<gdoc_id>', methods=['GET'])
+@_viewer_auth_required
+def get_visitor_gdoc(gdoc_id):
+    folders = _get_workspace().get('folders', [])
+    for d in _load_gdocs():
+        if d['id'] == gdoc_id and _doc_is_visitor_visible(d, folders):
+            return jsonify(d)
+    return jsonify({'error': 'Not found'}), 404
+
+
+@app.route('/api/gsheets', methods=['GET'])
+@_studio_auth_required
+def list_gsheets():
+    return jsonify(_list_docs_sorted(_load_gsheets()))
+
+
+@app.route('/api/visitor/gsheets', methods=['GET'])
+@_viewer_auth_required
+def list_visitor_gsheets():
+    return jsonify(_list_docs_sorted(_load_gsheets(), visitor=True))
+
+
+@app.route('/api/gsheets', methods=['POST'])
+@_studio_auth_required
+def create_gsheet():
+    item = _create_gdrive_doc(_load_gsheets, _save_gsheets, request.json or {})
+    _maybe_sync_one(item, 'gsheet')
+    return jsonify(item), 201
+
+
+@app.route('/api/gsheets/<gsheet_id>', methods=['PATCH'])
+@_studio_auth_required
+def patch_gsheet(gsheet_id):
+    body = request.json or {}
+    item = _patch_gdrive_doc(_load_gsheets, _save_gsheets, gsheet_id, body)
+    if item is None:
+        return jsonify({'error': 'Not found'}), 404
+    if 'embed_url' in body:
+        _maybe_sync_one(item, 'gsheet')
+    return jsonify(item)
+
+
+@app.route('/api/gsheets/<gsheet_id>', methods=['DELETE'])
+@_studio_auth_required
+def delete_gsheet(gsheet_id):
+    items = [d for d in _load_gsheets() if d['id'] != gsheet_id]
+    _save_gsheets(items)
+    _drop_gdrive_content('gsheet', gsheet_id)
+    return '', 204
+
+
+@app.route('/api/gsheets/<gsheet_id>', methods=['GET'])
+@_studio_auth_required
+def get_gsheet(gsheet_id):
+    for d in _load_gsheets():
+        if d['id'] == gsheet_id:
+            return jsonify(d)
+    return jsonify({'error': 'Not found'}), 404
+
+
+@app.route('/api/visitor/gsheets/<gsheet_id>', methods=['GET'])
+@_viewer_auth_required
+def get_visitor_gsheet(gsheet_id):
+    folders = _get_workspace().get('folders', [])
+    for d in _load_gsheets():
+        if d['id'] == gsheet_id and _doc_is_visitor_visible(d, folders):
+            return jsonify(d)
+    return jsonify({'error': 'Not found'}), 404
+
+
 # ── Uploads + OCR ────────────────────────────────────────────────────────────
 
 # Images render on the canvas at a few hundred pixels wide at most. Full-res
@@ -1697,9 +2099,12 @@ def _text_from_sheet(data):
     return out
 
 
-def _all_items(boards=None, sheets=None):
+def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None):
     board_items = boards if boards is not None else _load_boards()
     sheet_items = sheets if sheets is not None else _load_sheets()
+    gdoc_items = gdocs if gdocs is not None else _load_gdocs()
+    gsheet_items = gsheets if gsheets is not None else _load_gsheets()
+    drive_contents = _load_gdrive_contents()
     for board in board_items:
         data = _load(_board_file(board['id']), {'snapshot': None})
         snap = data.get('snapshot') or {}
@@ -1721,6 +2126,36 @@ def _all_items(boards=None, sheets=None):
                 'doc_name': sheet['name'],
                 'kind': 'sheet',
                 'text': text,
+            }
+    for gdoc in gdoc_items:
+        cached = drive_contents.get(f'gdoc-{gdoc["id"]}') or {}
+        text = (cached.get('text') or '').strip()
+        if not text:
+            continue
+        yield {
+            'doc_type': 'gdoc',
+            'doc_id': gdoc['id'],
+            'doc_name': gdoc['name'],
+            'kind': 'gdoc',
+            'text': text,
+        }
+    for gsheet in gsheet_items:
+        cached = drive_contents.get(f'gsheet-{gsheet["id"]}') or {}
+        raw = (cached.get('text') or '').strip()
+        if not raw:
+            continue
+        import csv as _csv, io as _io
+        try:
+            cells = [c.strip() for row in _csv.reader(_io.StringIO(raw)) for c in row if c.strip()]
+        except Exception:
+            cells = [raw]
+        for cell in cells:
+            yield {
+                'doc_type': 'gsheet',
+                'doc_id': gsheet['id'],
+                'doc_name': gsheet['name'],
+                'kind': 'gsheet',
+                'text': cell,
             }
 
 
@@ -1778,40 +2213,51 @@ def _keyword(text, query):
     return score
 
 
-def _search_payload(boards=None, sheets=None):
+def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None):
     body = request.json or {}
     query = (body.get('query') or '').strip()
     if not query:
         return {'hits': []}
 
-    items = list(_all_items(boards=boards, sheets=sheets))
+    items = list(_all_items(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets))
     if not items:
         return {'hits': []}
 
     # Rebuild TF-IDF index on each search (corpus changes frequently)
     _rebuild_tfidf_index(items)
 
+    def _snippet(text, q, max_len=200):
+        pos = text.lower().find(q.lower())
+        if pos < 0:
+            return text[:max_len]
+        start = max(0, pos - 60)
+        end = min(len(text), pos + len(q) + 140)
+        chunk = text[start:end]
+        return ('…' if start > 0 else '') + chunk + ('…' if end < len(text) else '')
+
     hits = []
     for idx, item in enumerate(items):
         keyword_score = _keyword(item['text'], query)
         tfidf_score = _tfidf_score(query, idx)
-        
+
         # Combine keyword (exact match) and TF-IDF (semantic similarity)
         combined = keyword_score * 2.0 + tfidf_score * 3.0
-        
+
         if keyword_score > 0 or tfidf_score > 0.1:
             hits.append({
                 'doc_type': item['doc_type'],
                 'doc_id': item['doc_id'],
                 'doc_name': item['doc_name'],
                 'kind': item['kind'],
-                'snippet': item['text'][:220],
+                'snippet': _snippet(item['text'], query),
                 'source': {
                     'text': 'text',
                     'frame': 'section',
                     'ocr': 'OCR from image',
                     'alt': 'image alt text',
                     'sheet': 'spreadsheet cell',
+                    'gdoc': 'Doc',
+                    'gsheet': 'Sheet',
                 }.get(item['kind'], item['kind']),
                 'score': combined,
                 'shape_id': item.get('shape_id'),
@@ -1823,16 +2269,20 @@ def _search_payload(boards=None, sheets=None):
 @app.route('/api/search', methods=['POST'])
 @_studio_auth_required
 def search():
+    _sync_missing_only()
     return jsonify(_search_payload())
 
 
 @app.route('/api/visitor/search', methods=['POST'])
 @_viewer_auth_required
 def visitor_search():
+    _sync_missing_only()
     folders = _get_workspace().get('folders', [])
     boards = [b for b in _load_boards() if _doc_is_visitor_visible(b, folders)]
     sheets = [s for s in _load_sheets() if _doc_is_visitor_visible(s, folders)]
-    return jsonify(_search_payload(boards=boards, sheets=sheets))
+    gdocs = [d for d in _load_gdocs() if _doc_is_visitor_visible(d, folders)]
+    gsheets = [d for d in _load_gsheets() if _doc_is_visitor_visible(d, folders)]
+    return jsonify(_search_payload(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets))
 
 
 @app.route('/api/share/<token>/search', methods=['POST'])
