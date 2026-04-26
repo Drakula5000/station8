@@ -63,6 +63,12 @@ ops/.deploy-hook
 .env
 .env.local
 
+# Local macOS launcher scripts (live in private/)
+*.command
+
+# pyenv version pin (local toolchain)
+.python-version
+
 # Internal docs and mockups (not for public repo)
 docs/
 mockups/
