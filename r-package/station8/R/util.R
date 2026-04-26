@@ -17,9 +17,9 @@ station8_token <- function() {
 #' @keywords internal
 station8_hub_url <- function() {
   cfg_path <- file.path(station8_config_dir(), "config.json")
-  if (!file.exists(cfg_path)) return("https://YOUR_API_DOMAIN")
+  if (!file.exists(cfg_path)) return(NULL)
   cfg <- jsonlite::fromJSON(cfg_path)
-  cfg$hub_url %||% "https://YOUR_API_DOMAIN"
+  cfg$hub_url %||% NULL
 }
 
 #' @keywords internal

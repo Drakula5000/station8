@@ -1,15 +1,17 @@
 #' Interactive one-time setup. Prompts for hub URL + owner password,
 #' exchanges them for a long-lived token, stores both at ~/.station8/.
 #'
-#' @param hub_url Optional hub URL. If NULL, prompts interactively (default: \code{https://YOUR_API_DOMAIN}).
+#' @param hub_url Optional hub URL (your Render backend URL). If NULL, prompts interactively.
 #' @param password Optional password. If NULL, prompts interactively via \code{getPass::getPass}.
 #' @export
 configure <- function(hub_url = NULL, password = NULL) {
   if (is.null(hub_url)) {
-    default_url <- "https://YOUR_API_DOMAIN"
-    cat(sprintf("Hub URL [%s]: ", default_url))
+    cat("Hub URL (your Render backend URL, e.g. https://your-app.onrender.com): ")
     hub_url <- trimws(readLines(con = "stdin", n = 1))
-    if (!nzchar(hub_url)) hub_url <- default_url
+    if (!nzchar(hub_url)) {
+      message("[station8] hub URL required; aborted")
+      return(invisible(FALSE))
+    }
   }
 
   if (is.null(password)) {
