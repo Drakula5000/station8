@@ -34,6 +34,17 @@ auto_push <- function() {
     output
   }
   attr(new_render, "station8_wrapped") <- TRUE
+
+  # Pre-create rmarkdown's expected `metadata` binding in the wrapper's env so
+  # rmarkdown's internal unlockBinding("metadata", env) call doesn't throw.
+  local({
+    e <- environment(new_render)
+    if (!exists("metadata", envir = e, inherits = FALSE)) {
+      assign("metadata", NULL, envir = e)
+      lockBinding("metadata", e)
+    }
+  })
+
   assignInNamespace("render", new_render, ns = "rmarkdown")
   message("[station8] auto-push enabled")
   invisible(TRUE)
