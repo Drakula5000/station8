@@ -2,14 +2,10 @@
 
 <div align="center">
 
-[![CI](https://github.com/Drakula5000/station8/actions/workflows/ci.yml/badge.svg)](https://github.com/Drakula5000/station8/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/Drakula5000/station8/ci.yml?style=flat&labelColor=black&color=ccffff&label=CI)](https://github.com/Drakula5000/station8/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-black?style=flat&labelColor=black&color=aaffff)](./LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11-black?style=flat&labelColor=black&color=66ffff&logo=python&logoColor=white)](https://www.python.org/)
-[![Flask](https://img.shields.io/badge/Flask-3.1-black?style=flat&labelColor=black&color=33ffff&logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
-[![React](https://img.shields.io/badge/React-19-black?style=flat&labelColor=black&color=00ddff&logo=react&logoColor=white)](https://react.dev/)
 [![tldraw](https://img.shields.io/badge/tldraw-4.x-black?style=flat&labelColor=black&color=00aaff)](https://tldraw.dev/)
-[![Vercel](https://img.shields.io/badge/Vercel-frontend-black?style=flat&labelColor=black&color=0066dd&logo=vercel&logoColor=white)](https://vercel.com/)
-[![Render](https://img.shields.io/badge/Render-backend-black?style=flat&labelColor=black&color=0033aa&logo=render&logoColor=white)](https://render.com/)
 
 <br>
 <br>
@@ -25,7 +21,7 @@ Whiteboards beat walls of text. But FigJam and Miro can't search the images on t
 
 I use whiteboards for research, because people prefer it to reading pages of analysis and findings. But FigJam, Miro, et al. don't have the kind of searchability you get with documents. So a photo from a slide at a conference or a picture of a jellyfish is invisible to their search.
 
-Station 8 is my fix — a searchable database for everything in my canvas-based research. Drop an image on a board and OCR runs in your browser, words printed inside the image become findable immediately. Tag the image with alt text and that's searchable too. Stickies, docs, spreadsheet cells, all of it indexed in one place.
+Station 8 fixes that for me -- a searchable database for everything in my canvas-based research. Drop an image on a board and OCR runs in your browser, words printed inside the image become findable immediately. Tag the image with alt text and that's searchable too. Stickies, docs, spreadsheet cells, all of it indexed in one place.
 
 The search results also take you directly to the search hits, zooming your camera for you, and lighting up your find. Search specific boards or the whole database, our search will take you on the guided tour of your hits.
 
@@ -59,7 +55,7 @@ What I needed, and most independent researchers do too: a workspace that lives o
 
 ### The trade-off for being free
 
-Search uses TF-IDF, not LLM embeddings. It finds exact matches and statistically related terms based on what's in your corpus — so "sea creatures" can surface jellyfish content if that's what your boards talk about. It won't make conceptual leaps a language model would, but it's fast, private, runs on tiny hardware, and never sends your data anywhere.
+Search uses TF-IDF, not LLM embeddings. It finds exact matches and statistically related terms based on what's in your corpus -- so "sea creatures" can surface jellyfish content if that's what your boards talk about. It won't make conceptual leaps a language model would, but it's fast, private, runs on tiny hardware, and never sends your data anywhere.
 
 One login, two access levels: the owner password lets you edit everything, the visitor password is read-only. You can share individual boards with a private link too.
 
@@ -144,12 +140,17 @@ Restart the dev server (`.env` is loaded by `start.sh` on launch — running ser
 </details>
 
 <br>
+<br>
 
 ![Acknowledgements](./.github/assets/h-acknowledgements.svg)
 
 [tldraw](https://tldraw.dev), [Tesseract.js](https://tesseract.projectnaptha.com/), and [react-spreadsheet](https://github.com/iddan/react-spreadsheet) do the heavy lifting.
 
-The header adapts the [ASCII Horizon](https://www.asciiart.eu/animations/ascii-horizon) animation from asciiart.eu — palette and structure taken directly from their work.
+<br>
+
+![AI Transparency](./.github/assets/h-ai-transparency.svg)
+
+I vibecoded this app. AI transparency matters to understand security, safety, and the longevity of a software. You might ask your own AI agents or, even better, an engineering friend to review this code before you use it.
 
 <br>
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo, Fragment } from 'react'
 import TldrawCanvas from './TldrawCanvas'
 import {
   BoardIcon, SheetIcon, DocIcon, GoogleLogoIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon, ThemeToggleIcon, LogoutIcon,
@@ -2234,10 +2234,42 @@ function DatabaseHome({
   onToggleColorMode,
 }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
-  const [selectedFolder, setSelectedFolder] = useState('all')
+  const [folderPath, setFolderPath] = useState([])
   const [selectedTags, setSelectedTags] = useState(() => new Set())
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef(null)
+  const [resultsExpanded, setResultsExpanded] = useState(false)
+  const [isPhone, setIsPhone] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 599px)').matches
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 599px)')
+    const handler = (e) => setIsPhone(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  const resultsThreshold = isPhone ? 3 : 6
   const isReady = backendStatus === 'ready'
   const hasQuery = !!query.trim()
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setMenuOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
+
+  useEffect(() => {
+    setResultsExpanded(false)
+  }, [folderPath, selectedTags, query])
 
   useEffect(() => {
     if (isReady) return
@@ -2259,60 +2291,66 @@ function DatabaseHome({
     return m
   }, [folders])
 
-  const rootFolderIdOf = useCallback((folderId) => {
-    let cursor = folderId
-    const seen = new Set()
-    while (cursor && folderById[cursor] && !seen.has(cursor)) {
-      seen.add(cursor)
-      const parent = folderById[cursor].parent_id
-      if (!parent) return cursor
-      cursor = parent
+  // Map parent_id → sorted child folders
+  const childFoldersOf = useMemo(() => {
+    const m = new Map()
+    for (const f of (folders || [])) {
+      const pid = f.parent_id || null
+      if (!m.has(pid)) m.set(pid, [])
+      m.get(pid).push(f)
     }
-    return null
-  }, [folderById])
+    for (const [, arr] of m) arr.sort((a, b) => a.name.localeCompare(b.name))
+    return m
+  }, [folders])
 
-  const folderRail = useMemo(() => {
-    const counts = new Map()
-    let unfiled = 0
-    for (const item of items) {
-      const root = rootFolderIdOf(item.folderId)
-      if (root) counts.set(root, (counts.get(root) || 0) + 1)
-      else unfiled += 1
-    }
-    const topLevel = (folders || [])
-      .filter(f => !f.parent_id)
-      .map(f => ({ id: f.id, name: f.name, count: counts.get(f.id) || 0 }))
-      .filter(f => f.count > 0)
-      .sort((a, b) => a.name.localeCompare(b.name))
-    if (unfiled > 0) topLevel.push({ id: '__unfiled__', name: 'Unfiled', count: unfiled })
-    return topLevel
-  }, [items, folders, rootFolderIdOf])
+  const currentFolderId = folderPath.length > 0 ? folderPath[folderPath.length - 1] : null
+  const isDrilledIn = folderPath.length > 0
 
-  const filteredItems = useMemo(() => {
-    return items.filter(item => {
-      let folderOk = selectedFolder === 'all'
-      if (!folderOk) {
-        if (selectedFolder === '__unfiled__') folderOk = !item.folderId
-        else folderOk = rootFolderIdOf(item.folderId) === selectedFolder
+  // BFS to collect all descendant folder IDs (including self)
+  const descendantFolderIds = useCallback((folderId) => {
+    const result = new Set([folderId])
+    const queue = [folderId]
+    while (queue.length > 0) {
+      const cur = queue.shift()
+      for (const c of (childFoldersOf.get(cur) || [])) {
+        if (!result.has(c.id)) { result.add(c.id); queue.push(c.id) }
       }
-      if (!folderOk) return false
+    }
+    return result
+  }, [childFoldersOf])
+
+  // Folder rail: always shows top-level folders. Clicking one drills in.
+  const folderRail = useMemo(() => {
+    const topLevel = (childFoldersOf.get(null) || []).map(f => {
+      const descIds = descendantFolderIds(f.id)
+      const count = items.filter(item => descIds.has(item.folderId)).length
+      return { id: f.id, name: f.name, count }
+    }).filter(f => f.count > 0)
+    topLevel.sort((a, b) => a.name.localeCompare(b.name))
+    return topLevel
+  }, [items, childFoldersOf, descendantFolderIds])
+
+  // Tag-filtered items scoped to current folder (all descendants)
+  const filteredItems = useMemo(() => {
+    const descIds = currentFolderId ? descendantFolderIds(currentFolderId) : null
+    return items.filter(item => {
+      if (descIds && !descIds.has(item.folderId)) return false
       if (selectedTags.size === 0) return true
       const itemTags = item.tags || []
       for (const t of selectedTags) if (!itemTags.includes(t)) return false
       return true
     })
-  }, [items, selectedFolder, selectedTags, rootFolderIdOf])
+  }, [items, currentFolderId, selectedTags, descendantFolderIds])
 
   const recentItems = useMemo(() => {
-    if (hasQuery || selectedFolder !== 'all' || selectedTags.size > 0) return []
+    if (hasQuery) return []
     const sorted = [...items].sort((a, b) => {
       const av = a.createdAt || ''
       const bv = b.createdAt || ''
-      if (av === bv) return 0
-      return av < bv ? 1 : -1
+      return av < bv ? 1 : av > bv ? -1 : 0
     })
     return sorted.slice(0, 4)
-  }, [items, hasQuery, selectedFolder, selectedTags])
+  }, [items, hasQuery])
 
   const toggleTag = (tag) => {
     setSelectedTags(prev => {
@@ -2323,18 +2361,64 @@ function DatabaseHome({
     })
   }
 
+  // Direct docs: items whose folderId matches the current folder exactly
+  const directDocs = useMemo(() => {
+    if (!isDrilledIn) return []
+    return items.filter(item => {
+      if (item.folderId !== currentFolderId) return false
+      if (selectedTags.size === 0) return true
+      const itemTags = item.tags || []
+      for (const t of selectedTags) if (!itemTags.includes(t)) return false
+      return true
+    })
+  }, [items, isDrilledIn, currentFolderId, selectedTags])
+
+  // Child subfolders with doc counts (for rendering as folder cards in drilldown)
+  const childFolders = useMemo(() => {
+    if (!isDrilledIn) return []
+    return (childFoldersOf.get(currentFolderId) || []).map(f => {
+      const descIds = descendantFolderIds(f.id)
+      const count = items.filter(item => {
+        if (!descIds.has(item.folderId)) return false
+        if (selectedTags.size === 0) return true
+        const itemTags = item.tags || []
+        for (const t of selectedTags) if (!itemTags.includes(t)) return false
+        return true
+      }).length
+      return { ...f, count }
+    }).filter(f => f.count > 0)
+  }, [items, isDrilledIn, currentFolderId, childFoldersOf, descendantFolderIds, selectedTags])
+
+  // Breadcrumb segments
+  const breadcrumbSegments = useMemo(() => {
+    const segs = [{ id: null, name: 'All' }]
+    for (const fid of folderPath) {
+      const f = folderById[fid]
+      if (f) segs.push({ id: fid, name: f.name })
+    }
+    return segs
+  }, [folderPath, folderById])
+
+  // Divider label
   const dividerLabel = (() => {
-    let folderTitle = 'ALL'
-    if (selectedFolder !== 'all') {
-      const f = folderRail.find(x => x.id === selectedFolder)
-      folderTitle = (f ? f.name : 'ALL').toUpperCase()
+    if (isDrilledIn) {
+      const f = folderById[currentFolderId]
+      const title = (f ? f.name : 'ALL').toUpperCase()
+      let tagSuffix = ''
+      if (selectedTags.size > 0) {
+        tagSuffix = ' / ' + [...selectedTags].map(t => '#' + t.toUpperCase()).join(' + ')
+      }
+      const total = filteredItems.length
+      const unit = total === 1 ? 'DOCUMENT' : 'DOCUMENTS'
+      return `${title}${tagSuffix} · ${total} ${unit}`
     }
     let tagSuffix = ''
     if (selectedTags.size > 0) {
       tagSuffix = ' / ' + [...selectedTags].map(t => '#' + t.toUpperCase()).join(' + ')
     }
-    const unit = filteredItems.length === 1 ? 'DOCUMENT' : 'DOCUMENTS'
-    return `${folderTitle}${tagSuffix} · ${filteredItems.length} ${unit}`
+    const total = filteredItems.length
+    const unit = total === 1 ? 'DOCUMENT' : 'DOCUMENTS'
+    return `ALL${tagSuffix} · ${total} ${unit}`
   })()
 
   return (
@@ -2374,6 +2458,44 @@ function DatabaseHome({
           </button>
         )}
         <button className="database-logout" onClick={onLogout} type="button">Logout</button>
+        <div className="database-overflow" ref={menuRef}>
+          <button
+            className="database-overflow-btn"
+            onClick={() => setMenuOpen(o => !o)}
+            aria-label="More actions"
+            aria-expanded={menuOpen}
+            type="button"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="3" cy="8" r="1.4" fill="currentColor" />
+              <circle cx="8" cy="8" r="1.4" fill="currentColor" />
+              <circle cx="13" cy="8" r="1.4" fill="currentColor" />
+            </svg>
+          </button>
+          {menuOpen && (
+            <div className="database-overflow-menu" role="menu">
+              {onToggleColorMode && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="database-overflow-item"
+                  onClick={() => { onToggleColorMode(); setMenuOpen(false) }}
+                >
+                  <ThemeToggleIcon />
+                  <span>{colorMode === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                className="database-overflow-item database-overflow-item--danger"
+                onClick={() => { setMenuOpen(false); onLogout() }}
+              >
+                <span>Logout</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {hasQuery && (
@@ -2448,8 +2570,8 @@ function DatabaseHome({
               <div className="database-folder-chips">
                 <button
                   type="button"
-                  className={`database-folder-chip${selectedFolder === 'all' ? ' is-active' : ''}`}
-                  onClick={() => setSelectedFolder('all')}
+                  className={`database-folder-chip${!isDrilledIn ? ' is-active' : ''}`}
+                  onClick={() => setFolderPath([])}
                 >
                   All <span className="database-chip-count">{items.length}</span>
                 </button>
@@ -2457,8 +2579,8 @@ function DatabaseHome({
                   <button
                     key={f.id}
                     type="button"
-                    className={`database-folder-chip${selectedFolder === f.id ? ' is-active' : ''}`}
-                    onClick={() => setSelectedFolder(f.id)}
+                    className={`database-folder-chip${currentFolderId === f.id ? ' is-active' : ''}`}
+                    onClick={() => setFolderPath([f.id])}
                   >
                     {f.name} <span className="database-chip-count">{f.count}</span>
                   </button>
@@ -2486,67 +2608,186 @@ function DatabaseHome({
         </div>
       )}
 
+      {isDrilledIn && (
+        <nav className="database-breadcrumb">
+          {breadcrumbSegments.map((seg, i) => {
+            const isLast = i === breadcrumbSegments.length - 1
+            return (
+              <Fragment key={seg.id ?? 'all'}>
+                {i > 0 && <span className="database-breadcrumb-sep">›</span>}
+                {isLast ? (
+                  <span className="database-breadcrumb-segment is-current">{seg.name}</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="database-breadcrumb-segment"
+                    onClick={() => seg.id === null
+                      ? setFolderPath([])
+                      : setFolderPath(folderPath.slice(0, i))
+                    }
+                  >{seg.name}</button>
+                )}
+              </Fragment>
+            )
+          })}
+        </nav>
+      )}
+
       <div className="database-divider">
         <span className="database-divider-label">{dividerLabel}</span>
         <span className="database-divider-line" />
       </div>
 
-      <div className="database-results">
-        {filteredItems.map((item) => (
-          <button
-            key={item.key}
-            className="database-card"
-            onClick={() => onOpenItem(item.type, item.docId)}
-            type="button"
-          >
-            <div className="database-card-top">
-              <span className="database-card-type">{docTypeLabel(item.type)}</span>
-              <span className="database-card-date">{formatDocDate(item.createdAt)}</span>
+      {isDrilledIn ? (
+        /* ── Drilldown view: Finder pattern — subfolder cards first, then files ── */
+        <>
+          {childFolders.length > 0 && (
+            <div className="database-results is-expanded">
+              {childFolders.map(sf => (
+                <button
+                  key={sf.id}
+                  type="button"
+                  className="database-card"
+                  data-card-type="folder"
+                  onClick={() => setFolderPath(prev => [...prev, sf.id])}
+                >
+                  <div className="database-card-top">
+                    <span className="database-card-type database-card-type--folder"><FolderIcon /><span>Folder</span></span>
+                    <span className="database-card-date">{sf.count} {sf.count === 1 ? 'item' : 'items'}</span>
+                  </div>
+                  <div className="database-card-title">{sf.name}</div>
+                </button>
+              ))}
             </div>
-            <div className="database-card-title">{item.name}</div>
-            {item.snippet && (
-              <div className="database-card-snippet">{item.snippet}</div>
-            )}
-            <div className="database-card-meta">
-              <span className="database-card-folder">{item.folderPath || 'Workspace root'}</span>
-              {item.tags.slice(0, 4).map((tag) => {
-                const c = tagColor(tag)
-                return (
-                  <span key={tag} className="tag-pill" style={{ background: c.bg, color: c.fg }}>
-                    #{tag}
-                  </span>
-                )
-              })}
+          )}
+          {directDocs.length > 0 && (
+            <div className="database-results is-expanded">
+              {directDocs.map((item) => (
+                <button
+                  key={item.key}
+                  className="database-card"
+                  onClick={() => onOpenItem(item.type, item.docId)}
+                  type="button"
+                >
+                  <div className="database-card-top">
+                    <span className="database-card-type">{docTypeLabel(item.type)}</span>
+                    <span className="database-card-date">{formatDocDate(item.createdAt)}</span>
+                  </div>
+                  <div className="database-card-title">{item.name}</div>
+                  {item.snippet && <div className="database-card-snippet">{item.snippet}</div>}
+                  <div className="database-card-meta">
+                    {item.tags.slice(0, 4).map((tag) => {
+                      const c = tagColor(tag)
+                      return (
+                        <span key={tag} className="tag-pill" style={{ background: c.bg, color: c.fg }}>
+                          #{tag}
+                        </span>
+                      )
+                    })}
+                  </div>
+                </button>
+              ))}
             </div>
-          </button>
-        ))}
-        {filteredItems.length === 0 && (
-          <div className="database-empty">
-            {searchLoading ? (
-              <>
-                <div className="database-empty-title">Searching…</div>
-                <div className="database-empty-copy">Hang tight.</div>
-              </>
-            ) : hasQuery ? (
-              <>
-                <div className="database-empty-title">Nothing public matched that search.</div>
-                <div className="database-empty-copy">Clear the query or add more public material to the workspace.</div>
-              </>
-            ) : (selectedFolder !== 'all' || selectedTags.size > 0) ? (
-              <>
-                <div className="database-empty-title">No documents match this filter.</div>
-                <div className="database-empty-copy">
-                  <button
-                    type="button"
-                    className="database-empty-reset"
-                    onClick={() => { setSelectedFolder('all'); setSelectedTags(new Set()) }}
-                  >Clear filters</button>
+          )}
+          {directDocs.length === 0 && childFolders.length === 0 && (
+            <div className="database-empty">
+              {selectedTags.size > 0 ? (
+                <>
+                  <div className="database-empty-title">No documents match this filter.</div>
+                  <div className="database-empty-copy">
+                    <button
+                      type="button"
+                      className="database-empty-reset"
+                      onClick={() => { setFolderPath([]); setSelectedTags(new Set()) }}
+                    >Clear filters</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="database-empty-title">This folder is empty.</div>
+                  <div className="database-empty-copy">
+                    <button
+                      type="button"
+                      className="database-empty-reset"
+                      onClick={() => setFolderPath([])}
+                    >Back to all</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </>
+      ) : (
+        /* ── Top-level view: flat card grid ── */
+        <>
+          <div className={`database-results${resultsExpanded ? ' is-expanded' : ''}`}>
+            {filteredItems.map((item) => (
+              <button
+                key={item.key}
+                className="database-card"
+                onClick={() => onOpenItem(item.type, item.docId)}
+                type="button"
+              >
+                <div className="database-card-top">
+                  <span className="database-card-type">{docTypeLabel(item.type)}</span>
+                  <span className="database-card-date">{formatDocDate(item.createdAt)}</span>
                 </div>
-              </>
-            ) : null}
+                <div className="database-card-title">{item.name}</div>
+                {item.snippet && <div className="database-card-snippet">{item.snippet}</div>}
+                <div className="database-card-meta">
+                  <span className="database-card-folder">{item.folderPath || 'Workspace root'}</span>
+                  {item.tags.slice(0, 4).map((tag) => {
+                    const c = tagColor(tag)
+                    return (
+                      <span key={tag} className="tag-pill" style={{ background: c.bg, color: c.fg }}>
+                        #{tag}
+                      </span>
+                    )
+                  })}
+                </div>
+              </button>
+            ))}
+            {filteredItems.length > resultsThreshold && (
+              <button
+                type="button"
+                className="database-results-expand"
+                onClick={() => setResultsExpanded(e => !e)}
+                aria-expanded={resultsExpanded}
+              >
+                <span className="database-results-expand-label">
+                  {resultsExpanded ? 'Collapse' : `${filteredItems.length - resultsThreshold} More`}
+                </span>
+              </button>
+            )}
+            {filteredItems.length === 0 && (
+              <div className="database-empty">
+                {searchLoading ? (
+                  <>
+                    <div className="database-empty-title">Searching…</div>
+                    <div className="database-empty-copy">Hang tight.</div>
+                  </>
+                ) : hasQuery ? (
+                  <>
+                    <div className="database-empty-title">Nothing public matched that search.</div>
+                    <div className="database-empty-copy">Clear the query or add more public material to the workspace.</div>
+                  </>
+                ) : selectedTags.size > 0 ? (
+                  <>
+                    <div className="database-empty-title">No documents match this filter.</div>
+                    <div className="database-empty-copy">
+                      <button
+                        type="button"
+                        className="database-empty-reset"
+                        onClick={() => setSelectedTags(new Set())}
+                      >Clear filters</button>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </>
+      )}
 
       {recentItems.length > 0 && (
         <>
@@ -2559,11 +2800,12 @@ function DatabaseHome({
               <button
                 key={`recent-${item.key}`}
                 className="database-feed-card"
+                data-doc-type={item.type}
                 onClick={() => onOpenItem(item.type, item.docId)}
                 type="button"
               >
                 <div className="database-feed-title">{item.name}</div>
-                <div className="database-feed-meta">{item.folderPath || 'Workspace root'} · {formatDocDate(item.createdAt)}</div>
+                <div className="database-feed-meta">{formatDocDate(item.createdAt)}</div>
               </button>
             ))}
           </div>

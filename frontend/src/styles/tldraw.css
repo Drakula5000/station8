@@ -314,6 +314,70 @@ html[data-mode="light"] .database-search-hint { background: rgba(0, 0, 0, 0.05);
 .database-theme-btn:hover { color: var(--s8-accent); border-color: var(--s8-accent-border); }
 .database-logout:hover { color: var(--s8-danger); border-color: var(--s8-danger); }
 
+/* Overflow `⋯` menu — phone-only. Hidden on desktop; the base
+   `display: none` is overridden inside the @media (max-width: 599px)
+   block in responsive.css where it becomes the topbar control. */
+.database-overflow {
+  display: none;
+}
+
+/* Results-list expander — "N MORE" / "COLLAPSE".
+
+   Desktop: shows the 7th card and beyond behind a centered hairline-
+   rule label (mono caps, dim, no boxed chrome). Threshold: 6 cards
+   visible by default, computed in JSX via `resultsThreshold`.
+   Phone block in responsive.css uses threshold 3 and overrides the
+   nth-child slice.
+
+   Visual: ─────────────  4 MORE  ─────────────
+   Tap target spans the full row width. */
+.database-home .database-results:not(.is-expanded) .database-card:nth-of-type(n+7) {
+  display: none;
+}
+.database-results-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  grid-column: 1 / -1;
+  width: 100%;
+  margin: 0.25rem 0 -0.5rem;
+  padding: 0.25rem 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--s8-text-mid);
+  opacity: 0.55;
+  transition: color 0.18s, opacity 0.18s;
+}
+.database-results-expand-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+.database-results-expand-label::before {
+  content: '·';
+  margin-right: 0.5em;
+  font-size: 1.4em;
+  line-height: 0;
+  opacity: 0.6;
+}
+.database-results-expand-label::after {
+  content: '·';
+  margin-left: 0.5em;
+  font-size: 1.4em;
+  line-height: 0;
+  opacity: 0.6;
+}
+.database-results-expand:hover {
+  color: var(--s8-accent);
+  opacity: 0.85;
+}
+
 /* Hero */
 .database-home .database-hero {
   text-align: center;
@@ -465,6 +529,33 @@ html[data-mode="light"] .database-search-hint { background: rgba(0, 0, 0, 0.05);
   flex: 1;
   height: 0.0625rem;
   background: var(--s8-accent-border);
+  position: relative;
+  overflow: hidden;
+}
+/* Dark mode: traveling pulse */
+.database-home .database-divider-line::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4rem;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--s8-accent), transparent);
+  animation: s8-divider-pulse 4s ease-in-out infinite;
+}
+@keyframes s8-divider-pulse {
+  0%   { left: -4rem; opacity: 0; }
+  10%  { opacity: 0.6; }
+  90%  { opacity: 0.6; }
+  100% { left: 100%; opacity: 0; }
+}
+/* Light mode: thicker line, stronger color, no pulse — use a gradient fade from accent to transparent instead */
+html[data-mode="light"] .database-home .database-divider-line {
+  height: 0.125rem;
+  background: linear-gradient(90deg, var(--s8-accent), transparent 80%);
+}
+html[data-mode="light"] .database-home .database-divider-line::after {
+  display: none;
 }
 
 /* Doc grid */
@@ -472,7 +563,7 @@ html[data-mode="light"] .database-search-hint { background: rgba(0, 0, 0, 0.05);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
   gap: 0.75rem;
-  padding: 0.25rem 0 1rem;
+  padding: 0.25rem 0 0;
   overflow: visible;
 }
 .database-home .database-card {

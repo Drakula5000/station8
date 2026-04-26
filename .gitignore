@@ -71,3 +71,7 @@ AGENTS.md
 AGENTS.MD
 CLAUDE.md
 CLAUDE.MD
+
+# Demo build artifacts and deps (not for the repo)
+.github/demo/node_modules/
+.github/demo/dist/

@@ -168,7 +168,7 @@ html[data-mode="dark"], html:not([data-mode]) {
   --s8-kind-tag-dim:      rgba(255, 102, 204, 0.12);
   --s8-kind-tag-border:   rgba(255, 102, 204, 0.40);
 
-  --s8-grid-overlay: rgba(8, 12, 24, 0.55);
+  --s8-grid-overlay: rgba(8, 12, 24, 0.35);
 }
 
 /* ── Aurora light ──
@@ -243,6 +243,6 @@ html[data-mode="light"] {
   --s8-kind-tag-dim:      rgba(192, 32, 160, 0.10);
   --s8-kind-tag-border:   rgba(192, 32, 160, 0.36);
 
-  --s8-grid-overlay: rgba(248, 250, 252, 0.45);
+  --s8-grid-overlay: rgba(248, 250, 252, 0.05);
 }
 
