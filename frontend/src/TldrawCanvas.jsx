@@ -5,6 +5,7 @@ import { ShapeInspector } from './components/ShapeInspector'
 import { ImageLightbox } from './components/ImageLightbox'
 import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
+import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'
 import { FrameCornerStyles, GeoCornerStyles, ImageShapeStyles, ListStyles } from './canvas/ShapeStyles'
 import { BrokenImageRetry } from './canvas/BrokenImageRetry'
 import { FindBar } from './canvas/FindBar'
@@ -79,7 +80,13 @@ const NOTE_PREVIEW_SIZE = 200
 const MAX_DROPPED_IMAGE_VIEWPORT_FRACTION = 0.2
 const MAX_DROPPED_IMAGE_FRAME_FRACTION = 0.2
 const FRAME_DROPPED_IMAGE_INSET = 32
-const FRAME_SHAPE_UTILS = [FrameShapeUtil.configure({ showColors: true })]
+// StationNoteShapeUtil replaces tldraw's default note: instead of growing
+// vertically when text overflows, it keeps a fixed square and shrinks the
+// font to fit. See StationNoteShapeUtil.js for the rationale.
+const STATION_SHAPE_UTILS = [
+  FrameShapeUtil.configure({ showColors: true }),
+  StationNoteShapeUtil,
+]
 const FIGMA_REORDER_SHORTCUTS = {
   bringForward: 'cmd+],ctrl+]',
   bringToFront: 'cmd+alt+],ctrl+shift+]',
@@ -645,7 +652,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         assets={assetStore}
         options={tldrawOptions}
         overrides={TLDRAW_UI_OVERRIDES}
-        shapeUtils={FRAME_SHAPE_UTILS}
+        shapeUtils={STATION_SHAPE_UTILS}
       >
         {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} onOpenLightbox={openLightbox} onToolChange={setActiveTool} />}
         {!readOnly && <ShapeInspector />}

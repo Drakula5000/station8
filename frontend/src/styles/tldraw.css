@@ -81,6 +81,39 @@
   background-color: var(--s8-tl-white) !important;
 }
 
+/* Note text — Aurora notes contrast against the swatch bg, not the
+   tldraw default. Stock tldraw maps `labelColor='black'` (note default) to
+   `getColorValue(theme, color, 'noteText')`, which in dark mode resolves
+   to #f2f2f2 — fine on tldraw's own dark note fills (#7a3333, #014429,
+   etc.), but illegible on Aurora's pastel pastels (#90BCE8 blue, #C8B0F5
+   lavender). Likewise in light mode the `black` swatch bg is overridden
+   to #000 here, but tldraw's noteText for `black` is also #000 →
+   black-on-black. Force the contrasting color per swatch via the inline
+   `color` style on `.tl-text-content__wrapper`.
+
+   Identical in both modes — the swatch palette itself is theme-agnostic
+   (see "Note backgrounds" block above). The disabled-mode legacy cases
+   (black-in-dark, white-in-light, where bg is overridden to text-dim)
+   keep the `var(--s8-tl-white)` rule for black and `var(--s8-tl-text-on-light)`
+   for white, both of which still pass against the medium dim shade. */
+.tldraw-wrap [data-tl-color='light-violet'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='yellow'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='violet'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='light-red'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='red'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='light-blue'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='blue'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='light-green'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='green'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='orange'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='grey'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='white'] .tl-note__container .tl-text-content__wrapper {
+  color: var(--s8-tl-text-on-light) !important;
+}
+.tldraw-wrap [data-tl-color='black'] .tl-note__container .tl-text-content__wrapper {
+  color: var(--s8-tl-white) !important;
+}
+
 /* ─── Frame body / stroke / heading — Aurora override ─────────────────────
    tldraw's default `frameFill` is mode-aware: in dark mode the body becomes
    a near-black tint (e.g. #181212 for red), in light mode a near-white
