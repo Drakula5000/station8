@@ -1,0 +1,14 @@
+# Dependencies
+node_modules
+
+# Build output (goes to ../../docs/demo/)
+dist
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.DS_Store
+.vscode
+.idea

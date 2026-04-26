@@ -6,7 +6,7 @@ import re
 import secrets
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta as _timedelta
 from functools import wraps
 
 from flask import Flask, jsonify, request, send_from_directory, session, redirect
@@ -438,11 +438,35 @@ def _extract_drive_file_id(url, kind):
 
 
 def _fetch_gdrive_text(file_id, kind, timeout=15):
-    """Fetch plaintext content of a publicly-shared Drive file. Returns text
-    on success, None on failure (network error, file not shared publicly,
-    Google rate-limit, etc.). Network call — call from a sync context."""
+    """Fetch plaintext content of a Drive file. If the owner has connected
+    their Google account, uses the Drive API with their access token (works
+    for private files too). Otherwise falls back to the public export URL,
+    which only works for "anyone with link" files. Returns text on success,
+    None on failure."""
     if not file_id:
         return None
+
+    access_token = _get_google_access_token()
+    if access_token:
+        mime = 'text/plain' if kind == 'gdoc' else 'text/csv' if kind == 'gsheet' else None
+        if not mime:
+            return None
+        url = f'https://www.googleapis.com/drive/v3/files/{file_id}/export?mimeType={mime}'
+        try:
+            req = _urllib_request.Request(url, headers={
+                'User-Agent': 'Station8/1.0',
+                'Authorization': f'Bearer {access_token}',
+            })
+            with _urllib_request.urlopen(req, timeout=timeout) as resp:
+                if resp.status == 200:
+                    data = resp.read()
+                    if data.startswith(b'\xef\xbb\xbf'):
+                        data = data[3:]
+                    text = data.decode('utf-8', errors='replace').strip()
+                    return text or None
+        except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError):
+            pass  # Fall through to public export URL.
+
     if kind == 'gdoc':
         url = f'https://docs.google.com/document/d/{file_id}/export?format=txt'
     elif kind == 'gsheet':
@@ -455,7 +479,6 @@ def _fetch_gdrive_text(file_id, kind, timeout=15):
             if resp.status != 200:
                 return None
             data = resp.read()
-            # Strip UTF-8 BOM Google sometimes prepends.
             if data.startswith(b'\xef\xbb\xbf'):
                 data = data[3:]
             text = data.decode('utf-8', errors='replace').strip()
@@ -491,33 +514,6 @@ def _sync_one_gdrive_doc(item, kind, contents):
         'synced_at': datetime.now().isoformat(),
     }
     return True
-
-
-def _sync_gdrive_contents():
-    """Sync all linked gdocs and gsheets. Drops cached entries for items that
-    no longer exist. Returns a counts dict for the response payload."""
-    contents = _load_gdrive_contents()
-    counts = {'gdoc': 0, 'gsheet': 0, 'failed': 0, 'total': 0}
-    valid_keys = set()
-    for item in _load_gdocs():
-        counts['total'] += 1
-        valid_keys.add(f'gdoc-{item["id"]}')
-        if _sync_one_gdrive_doc(item, 'gdoc', contents):
-            counts['gdoc'] += 1
-        else:
-            counts['failed'] += 1
-    for item in _load_gsheets():
-        counts['total'] += 1
-        valid_keys.add(f'gsheet-{item["id"]}')
-        if _sync_one_gdrive_doc(item, 'gsheet', contents):
-            counts['gsheet'] += 1
-        else:
-            counts['failed'] += 1
-    for key in list(contents.keys()):
-        if key not in valid_keys:
-            del contents[key]
-    _save_gdrive_contents(contents)
-    return counts
 
 
 def _list_docs_sorted(docs, *, visitor=False):
@@ -1377,11 +1373,40 @@ def update_sheet(sheet_id):
 
 # ── Google Drive integration (gdocs + gsheets) ───────────────────────────────
 #
-# Stub implementation. Real OAuth + Drive API wiring lands in a later phase.
-# For now the create endpoint accepts an optional `embed_url` from the client
-# so the owner can paste a Drive URL they already shared as "anyone with link"
-# and validate the embed UX. After OAuth ships, the backend will create the
-# file and set this field automatically.
+# Real OAuth 2.0 flow. The owner clicks "Connect Google", browser redirects
+# to Google's auth screen, Google redirects back to /api/google/callback with
+# an auth code, we exchange that for access + refresh tokens and store them
+# in `data/google_auth.json`. Subsequent Drive API calls use the access token;
+# `_get_google_access_token` refreshes it transparently when it expires.
+
+import urllib.parse as _urllib_parse
+
+_GOOGLE_OAUTH_SCOPES = ' '.join([
+    # Read content (for the search index) AND write permissions (so the
+    # "Share all to visitors" button can flip docs to anyone-with-link).
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'openid',
+])
+
+
+def _google_oauth_creds():
+    """Return (client_id, client_secret, redirect_uri) or None if unconfigured."""
+    cid = os.getenv('GOOGLE_CLIENT_ID')
+    secret = os.getenv('GOOGLE_CLIENT_SECRET')
+    redirect = os.getenv('GOOGLE_OAUTH_REDIRECT_URI') or 'http://127.0.0.1:5001/api/google/callback'
+    if not cid or not secret:
+        return None
+    return cid, secret, redirect
+
+
+def _frontend_origin():
+    """Where to redirect the browser after OAuth completes."""
+    explicit = os.getenv('FRONTEND_URL')
+    if explicit:
+        return explicit.rstrip('/')
+    return 'https://YOUR_DOMAIN' if PRODUCTION else 'http://127.0.0.1:5173'
+
 
 def _google_auth_state():
     state = _load(GOOGLE_AUTH_FILE, {}) or {}
@@ -1391,20 +1416,171 @@ def _google_auth_state():
     }
 
 
+def _load_google_token_record():
+    return _load(GOOGLE_AUTH_FILE, {}) or {}
+
+
+def _save_google_token_record(record):
+    _save(GOOGLE_AUTH_FILE, record)
+
+
+def _google_token_expired(record):
+    expires_at = record.get('token_expires_at')
+    if not expires_at:
+        return True
+    try:
+        deadline = datetime.fromisoformat(expires_at)
+    except ValueError:
+        return True
+    # Refresh 60 seconds before actual expiry to avoid edge cases.
+    return (deadline - datetime.now()).total_seconds() < 60
+
+
+def _refresh_google_access_token(record):
+    """Use the refresh token to mint a new access token. Returns the updated
+    record on success, None on failure."""
+    creds = _google_oauth_creds()
+    if not creds or not record.get('refresh_token'):
+        return None
+    cid, secret, _ = creds
+    body = _urllib_parse.urlencode({
+        'client_id': cid,
+        'client_secret': secret,
+        'refresh_token': record['refresh_token'],
+        'grant_type': 'refresh_token',
+    }).encode('utf-8')
+    try:
+        req = _urllib_request.Request(
+            'https://oauth2.googleapis.com/token',
+            data=body,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        )
+        with _urllib_request.urlopen(req, timeout=15) as resp:
+            payload = json.loads(resp.read().decode('utf-8'))
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError) as exc:
+        print(f'Google token refresh failed: {exc}', flush=True)
+        return None
+    record['access_token'] = payload['access_token']
+    expires_in = int(payload.get('expires_in', 3600))
+    record['token_expires_at'] = (datetime.now() + _timedelta(seconds=expires_in)).isoformat()
+    _save_google_token_record(record)
+    return record
+
+
+def _get_google_access_token():
+    """Return a valid access token, refreshing if needed. None if disconnected."""
+    record = _load_google_token_record()
+    if not record.get('connected') or not record.get('access_token'):
+        return None
+    if _google_token_expired(record):
+        record = _refresh_google_access_token(record)
+        if not record:
+            return None
+    return record.get('access_token')
+
+
 @app.route('/api/google/status', methods=['GET'])
-@_viewer_auth_required
-def google_status():
-    return jsonify(_google_auth_state())
-
-
-@app.route('/api/google/connect', methods=['POST'])
 @_studio_auth_required
-def google_connect():
-    """Stub: pretends OAuth succeeded with a fake email. Real OAuth flow later."""
-    data = request.json or {}
-    email = (data.get('email') or 'you@example.com').strip()
-    _save(GOOGLE_AUTH_FILE, {'connected': True, 'email': email})
+def google_status():
+    # Owner-only — visitors must not learn the connected email or even whether
+    # Google is wired up. Their view goes through the cached gdrive_contents
+    # blob; nothing about the owner's auth leaks into the visitor surface.
     return jsonify(_google_auth_state())
+
+
+@app.route('/api/google/auth', methods=['GET'])
+@_studio_auth_required
+def google_auth_start():
+    """Kick off the OAuth flow: redirect browser to Google's consent screen."""
+    creds = _google_oauth_creds()
+    if not creds:
+        return jsonify({'error': 'Google OAuth not configured (set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)'}), 500
+    cid, _, redirect_uri = creds
+    state = secrets.token_urlsafe(32)
+    session['google_oauth_state'] = state
+    params = _urllib_parse.urlencode({
+        'client_id': cid,
+        'redirect_uri': redirect_uri,
+        'response_type': 'code',
+        'scope': _GOOGLE_OAUTH_SCOPES,
+        'access_type': 'offline',
+        'prompt': 'consent',  # force refresh_token issuance even on re-auth
+        'state': state,
+    })
+    return redirect(f'https://accounts.google.com/o/oauth2/v2/auth?{params}')
+
+
+@app.route('/api/google/callback', methods=['GET'])
+def google_oauth_callback():
+    """Google redirects here after the user approves. Exchange code for tokens."""
+    creds = _google_oauth_creds()
+    if not creds:
+        return 'Google OAuth not configured', 500
+    cid, secret, redirect_uri = creds
+
+    error = request.args.get('error')
+    if error:
+        return redirect(f'{_frontend_origin()}/?google=error&reason={_urllib_parse.quote(error)}')
+
+    code = request.args.get('code')
+    state = request.args.get('state')
+    expected_state = session.pop('google_oauth_state', None)
+    if not code or not state or state != expected_state:
+        return redirect(f'{_frontend_origin()}/?google=error&reason=state_mismatch')
+
+    body = _urllib_parse.urlencode({
+        'client_id': cid,
+        'client_secret': secret,
+        'code': code,
+        'redirect_uri': redirect_uri,
+        'grant_type': 'authorization_code',
+    }).encode('utf-8')
+    try:
+        req = _urllib_request.Request(
+            'https://oauth2.googleapis.com/token',
+            data=body,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        )
+        with _urllib_request.urlopen(req, timeout=15) as resp:
+            token_payload = json.loads(resp.read().decode('utf-8'))
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError) as exc:
+        print(f'Google token exchange failed: {exc}', flush=True)
+        return redirect(f'{_frontend_origin()}/?google=error&reason=token_exchange')
+
+    access_token = token_payload.get('access_token')
+    refresh_token = token_payload.get('refresh_token')
+    expires_in = int(token_payload.get('expires_in', 3600))
+    if not access_token:
+        return redirect(f'{_frontend_origin()}/?google=error&reason=no_access_token')
+
+    email = None
+    try:
+        req = _urllib_request.Request(
+            'https://www.googleapis.com/oauth2/v2/userinfo',
+            headers={'Authorization': f'Bearer {access_token}'},
+        )
+        with _urllib_request.urlopen(req, timeout=15) as resp:
+            email = json.loads(resp.read().decode('utf-8')).get('email')
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError):
+        pass
+
+    record = {
+        'connected': True,
+        'email': email,
+        'access_token': access_token,
+        'token_expires_at': (datetime.now() + _timedelta(seconds=expires_in)).isoformat(),
+        'connected_at': datetime.now().isoformat(),
+    }
+    if refresh_token:
+        record['refresh_token'] = refresh_token
+    else:
+        # Re-auth without prompt=consent omits refresh_token; preserve the old one.
+        prior = _load_google_token_record()
+        if prior.get('refresh_token'):
+            record['refresh_token'] = prior['refresh_token']
+    _save_google_token_record(record)
+
+    return redirect(f'{_frontend_origin()}/?google=connected')
 
 
 @app.route('/api/google/disconnect', methods=['POST'])
@@ -1414,13 +1590,75 @@ def google_disconnect():
     return jsonify(_google_auth_state())
 
 
-@app.route('/api/google/sync', methods=['POST'])
+def _delete_drive_file(file_id, timeout=15):
+    """Permanently delete the underlying file in Drive. Used when the user
+    opts in to "delete from Drive too" in the Station 8 delete dialog.
+    Returns True on success (200/204), False on any failure."""
+    if not file_id:
+        return False
+    access_token = _get_google_access_token()
+    if not access_token:
+        return False
+    url = f'https://www.googleapis.com/drive/v3/files/{file_id}'
+    try:
+        req = _urllib_request.Request(url, method='DELETE', headers={
+            'Authorization': f'Bearer {access_token}',
+        })
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            return resp.status in (200, 204)
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError) as exc:
+        print(f'Drive file delete failed for {file_id}: {exc}', flush=True)
+        return False
+
+
+def _share_drive_file_publicly(file_id, timeout=15):
+    """Add an `anyone with link → reader` permission so visitors can view the
+    embedded iframe without being signed into Google. Idempotent: if the
+    permission already exists, Google returns 200 with the existing record.
+    Returns True on success, False on any failure."""
+    if not file_id:
+        return False
+    access_token = _get_google_access_token()
+    if not access_token:
+        return False
+    body = json.dumps({'role': 'reader', 'type': 'anyone'}).encode('utf-8')
+    url = f'https://www.googleapis.com/drive/v3/files/{file_id}/permissions'
+    try:
+        req = _urllib_request.Request(url, data=body, method='POST', headers={
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json',
+        })
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            return resp.status in (200, 204)
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError) as exc:
+        print(f'Drive permissions update failed for {file_id}: {exc}', flush=True)
+        return False
+
+
+@app.route('/api/google/share-all', methods=['POST'])
 @_studio_auth_required
-def google_sync():
-    """Pull latest text from every linked Drive doc/sheet so search reflects
-    edits made inside Google. Auto-runs on create; user triggers manually
-    after editing existing docs."""
-    return jsonify(_sync_gdrive_contents())
+def google_share_all():
+    """Set every linked gdoc/gsheet to `anyone with link → reader`. Run after
+    adding new docs so visitors can actually view the embed (the search index
+    works without sharing, but the iframe needs the visitor's browser to be
+    able to load the doc directly from Google)."""
+    if not _get_google_access_token():
+        return jsonify({'error': 'Google not connected'}), 400
+    items = (
+        [(item, 'gdoc') for item in _load_gdocs()]
+        + [(item, 'gsheet') for item in _load_gsheets()]
+    )
+    shared = 0
+    failed = 0
+    for item, kind in items:
+        file_id = _extract_drive_file_id(item.get('embed_url'), kind)
+        if not file_id:
+            continue
+        if _share_drive_file_publicly(file_id):
+            shared += 1
+        else:
+            failed += 1
+    return jsonify({'shared': shared, 'failed': failed, 'total': len(items)})
 
 
 def _maybe_sync_one(item, kind):
@@ -1473,17 +1711,67 @@ def _sync_missing_only():
         pass
 
 
-def _create_gdrive_doc(load_fn, save_fn, request_data):
+_DRIVE_MIME = {
+    'gdoc': 'application/vnd.google-apps.document',
+    'gsheet': 'application/vnd.google-apps.spreadsheet',
+}
+_DRIVE_EDIT_URL = {
+    'gdoc': 'https://docs.google.com/document/d/{id}/edit',
+    'gsheet': 'https://docs.google.com/spreadsheets/d/{id}/edit',
+}
+
+
+def _create_drive_file(kind, name, timeout=15):
+    """Create a fresh Google Doc or Sheet in the connected user's Drive.
+    Returns (file_id, embed_url) on success, (None, None) if not connected
+    or the API call fails."""
+    access_token = _get_google_access_token()
+    if not access_token or kind not in _DRIVE_MIME:
+        return None, None
+    body = json.dumps({'name': name, 'mimeType': _DRIVE_MIME[kind]}).encode('utf-8')
+    try:
+        req = _urllib_request.Request(
+            'https://www.googleapis.com/drive/v3/files',
+            data=body, method='POST',
+            headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'},
+        )
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode('utf-8'))
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError) as exc:
+        print(f'Drive file create failed: {exc}', flush=True)
+        return None, None
+    file_id = payload.get('id')
+    if not file_id:
+        return None, None
+    return file_id, _DRIVE_EDIT_URL[kind].format(id=file_id)
+
+
+def _create_gdrive_doc(load_fn, save_fn, request_data, kind):
     name = (request_data.get('name') or 'Untitled').strip() or 'Untitled'
     folders = _get_workspace().get('folders', [])
+    pasted_url = (request_data.get('embed_url') or '').strip() or None
+
+    drive_file_id = (request_data.get('drive_file_id') or '').strip() or None
+    embed_url = pasted_url
+
+    # No URL pasted → create the file in Drive automatically (when connected)
+    # and share it publicly so visitors can view the embed without a manual
+    # share-all run.
+    if not embed_url and _get_google_access_token():
+        new_id, new_url = _create_drive_file(kind, name)
+        if new_id and new_url:
+            drive_file_id = new_id
+            embed_url = new_url
+            _share_drive_file_publicly(new_id)
+
     item = {
         'id': str(uuid.uuid4())[:8],
         'name': name,
         'tags': _parse_tags(request_data.get('tags')),
         'folder_id': _normalize_folder_id(request_data.get('folder_id'), folders),
         'created_at': datetime.now().isoformat(),
-        'drive_file_id': (request_data.get('drive_file_id') or '').strip() or None,
-        'embed_url': (request_data.get('embed_url') or '').strip() or None,
+        'drive_file_id': drive_file_id,
+        'embed_url': embed_url,
     }
     items = load_fn()
     items.append(item)
@@ -1529,7 +1817,7 @@ def list_visitor_gdocs():
 @app.route('/api/gdocs', methods=['POST'])
 @_studio_auth_required
 def create_gdoc():
-    item = _create_gdrive_doc(_load_gdocs, _save_gdocs, request.json or {})
+    item = _create_gdrive_doc(_load_gdocs, _save_gdocs, request.json or {}, 'gdoc')
     _maybe_sync_one(item, 'gdoc')
     return jsonify(item), 201
 
@@ -1549,6 +1837,13 @@ def patch_gdoc(gdoc_id):
 @app.route('/api/gdocs/<gdoc_id>', methods=['DELETE'])
 @_studio_auth_required
 def delete_gdoc(gdoc_id):
+    if request.args.get('drive') in ('1', 'true'):
+        for d in _load_gdocs():
+            if d['id'] == gdoc_id:
+                file_id = _extract_drive_file_id(d.get('embed_url'), 'gdoc')
+                if file_id:
+                    _delete_drive_file(file_id)
+                break
     items = [d for d in _load_gdocs() if d['id'] != gdoc_id]
     _save_gdocs(items)
     _drop_gdrive_content('gdoc', gdoc_id)
@@ -1589,7 +1884,7 @@ def list_visitor_gsheets():
 @app.route('/api/gsheets', methods=['POST'])
 @_studio_auth_required
 def create_gsheet():
-    item = _create_gdrive_doc(_load_gsheets, _save_gsheets, request.json or {})
+    item = _create_gdrive_doc(_load_gsheets, _save_gsheets, request.json or {}, 'gsheet')
     _maybe_sync_one(item, 'gsheet')
     return jsonify(item), 201
 
@@ -1609,6 +1904,13 @@ def patch_gsheet(gsheet_id):
 @app.route('/api/gsheets/<gsheet_id>', methods=['DELETE'])
 @_studio_auth_required
 def delete_gsheet(gsheet_id):
+    if request.args.get('drive') in ('1', 'true'):
+        for d in _load_gsheets():
+            if d['id'] == gsheet_id:
+                file_id = _extract_drive_file_id(d.get('embed_url'), 'gsheet')
+                if file_id:
+                    _delete_drive_file(file_id)
+                break
     items = [d for d in _load_gsheets() if d['id'] != gsheet_id]
     _save_gsheets(items)
     _drop_gdrive_content('gsheet', gsheet_id)

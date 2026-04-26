@@ -1944,6 +1944,19 @@ html[data-mode="light"] {
   color: var(--s8-text-mid);
   line-height: 1.5;
 }
+.delete-drive-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--s8-text-mid);
+  cursor: pointer;
+  user-select: none;
+}
+.delete-drive-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
 .delete-mode-list {
   display: flex;
   flex-direction: column;
@@ -2408,3 +2421,970 @@ html[data-mode="light"] {
   padding-left: 0;
 }
 
+
+/* ============================================================
+   Visitor Dashboard — mockup-aligned implementation.
+   All styles scoped under .database-home so atmosphere does not
+   leak to canvas/board pages. Appended last so it overrides
+   earlier .database-* rules.
+   ============================================================ */
+
+.database-home {
+  position: relative;
+  min-height: 100vh;
+  background-color: var(--s8-bg);
+  background-image:
+    radial-gradient(ellipse 55% 32% at 50% 14%, var(--s8-canvas-glow), transparent 70%),
+    linear-gradient(to right, var(--s8-canvas-dot) 0.0625rem, transparent 0.0625rem),
+    linear-gradient(to bottom, var(--s8-canvas-dot) 0.0625rem, transparent 0.0625rem);
+  background-size: auto, 4rem 4rem, 4rem 4rem;
+  background-position: center;
+  background-attachment: fixed;
+  overflow-y: auto;
+  padding: 0;
+  gap: 0;
+  display: block;
+}
+.database-home::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right,  var(--s8-accent) 0.0625rem, transparent 0.0625rem),
+    linear-gradient(to bottom, var(--s8-accent) 0.0625rem, transparent 0.0625rem);
+  background-size: 4rem 4rem;
+  background-position: center;
+  --s8-pulse-pos: -15%;
+  mask-image: linear-gradient(315deg,
+    transparent calc(var(--s8-pulse-pos) - 14%),
+    var(--s8-mask-fg) var(--s8-pulse-pos),
+    transparent calc(var(--s8-pulse-pos) + 14%));
+  -webkit-mask-image: linear-gradient(315deg,
+    transparent calc(var(--s8-pulse-pos) - 14%),
+    var(--s8-mask-fg) var(--s8-pulse-pos),
+    transparent calc(var(--s8-pulse-pos) + 14%));
+  animation: s8-scan 11s linear infinite;
+  z-index: 0;
+}
+.database-home::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(8, 12, 24, 0.55);
+  z-index: 0;
+}
+html[data-mode="light"] .database-home::after {
+  background: rgba(248, 250, 252, 0.45);
+}
+@media (prefers-reduced-motion: reduce) {
+  .database-home::before { animation: none; opacity: 0; }
+}
+.database-home > * { position: relative; z-index: 1; }
+
+.database-page {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 0 1.5rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Topbar */
+.database-home .database-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  flex-wrap: wrap;
+  padding: 0.875rem 0 0.625rem;
+  grid-template-columns: none;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--s8-bg) 88%, transparent), color-mix(in srgb, var(--s8-bg) 55%, transparent));
+  backdrop-filter: blur(0.5rem);
+}
+.database-brand-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.database-home .database-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4375rem;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--s8-accent);
+  white-space: nowrap;
+}
+.database-brand-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: var(--s8-accent);
+  box-shadow: 0 0 0.5rem var(--s8-accent);
+  animation: s8-pulse 2.4s ease-in-out infinite;
+}
+.database-brand-status {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.5625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--s8-text-mid);
+  white-space: nowrap;
+}
+
+.database-home .database-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4375rem 0.625rem;
+  background: var(--s8-input-bg);
+  border: 0.0625rem solid var(--s8-input-border);
+  border-radius: 0.25rem;
+  width: 17.5rem;
+  flex-shrink: 0;
+  min-height: 0;
+  box-shadow: none;
+  transition: border-color 0.15s, box-shadow 0.15s, width 0.18s;
+}
+.database-home .database-search:focus-within {
+  border-color: var(--s8-accent-border);
+  box-shadow: 0 0 0 0.125rem var(--s8-accent-dim);
+  width: 22rem;
+}
+.database-home .database-search svg { color: var(--s8-text-mid); width: 0.875rem; height: 0.875rem; flex-shrink: 0; }
+.database-home .database-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-size: 0.8125rem;
+  color: var(--s8-text);
+  outline: none;
+  font-family: inherit;
+}
+.database-home .database-search input::placeholder { color: var(--s8-text-mid); }
+.database-search-hint {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.625rem;
+  color: var(--s8-text-mid);
+  padding: 0.125rem 0.375rem;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 0.125rem;
+  flex-shrink: 0;
+}
+html[data-mode="light"] .database-search-hint { background: rgba(0, 0, 0, 0.05); }
+
+.database-theme-btn,
+.database-logout {
+  border: 0.0625rem solid var(--s8-sidebar-border);
+  border-radius: 0.1875rem;
+  background: transparent;
+  color: var(--s8-text-mid);
+  font-size: 0.625rem;
+  font-weight: 600;
+  font-family: 'Space Mono', monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.4375rem 0.625rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.database-theme-btn:hover { color: var(--s8-accent); border-color: var(--s8-accent-border); }
+.database-logout:hover { color: var(--s8-danger); border-color: var(--s8-danger); }
+
+/* Hero */
+.database-home .database-hero {
+  text-align: center;
+  padding: 2.75rem 0 0.5rem;
+  max-width: 36rem;
+  margin: 0 auto;
+}
+.database-home .database-hero-title {
+  font-family: 'Crimson Pro', serif;
+  font-size: 2.375rem;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  color: var(--s8-text);
+  margin: 0 0 0.625rem;
+  line-height: 1.1;
+}
+.database-home .database-hero-sub {
+  font-size: 0.875rem;
+  font-weight: 300;
+  color: var(--s8-text-mid);
+  margin: 0 auto 1.125rem;
+  line-height: 1.65;
+  max-width: 32rem;
+}
+.database-home .database-hero-tries {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.database-home .database-hero-tries-label {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--s8-text-mid);
+}
+.database-home .database-hero-try {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.6875rem;
+  color: var(--s8-accent);
+  background: transparent;
+  border: 0.0625rem solid var(--s8-accent-border);
+  border-radius: 0.1875rem;
+  padding: 0.1875rem 0.5625rem;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.database-home .database-hero-try:hover { background: var(--s8-accent-dim); }
+.database-home .database-hero-try:disabled { opacity: 0.4; cursor: not-allowed; }
+.database-home .database-hero-try::before { content: '`'; opacity: 0.5; }
+.database-home .database-hero-try::after  { content: '`'; opacity: 0.5; }
+
+/* Explore */
+.database-home .database-explore {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 2rem;
+  padding: 0.5rem 0 0.25rem;
+}
+.database-home .database-explore-col { min-width: 0; }
+.database-home .database-explore-label {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--s8-text-mid);
+  margin-bottom: 0.625rem;
+}
+.database-home .database-folder-chips,
+.database-home .database-tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+.database-home .database-folder-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  padding: 0.375rem 0.75rem;
+  background: var(--s8-card-bg);
+  border: 0.0625rem solid var(--s8-card-border);
+  border-radius: 0.1875rem;
+  color: var(--s8-text-mid);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.database-home .database-folder-chip:hover {
+  background: var(--s8-hover);
+  border-color: var(--s8-accent-border);
+  color: var(--s8-text);
+}
+.database-home .database-folder-chip.is-active {
+  background: var(--s8-accent-dim);
+  border-color: var(--s8-accent-border);
+  color: var(--s8-accent);
+}
+.database-home .database-chip-count {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.625rem;
+  color: var(--s8-text-mid);
+  margin-left: 0.125rem;
+}
+.database-home .database-folder-chip.is-active .database-chip-count { color: var(--s8-accent); }
+.database-home .database-tag-chip {
+  padding: 0.3125rem 0.6875rem;
+  background: transparent;
+  border: 0.0625rem solid var(--s8-card-border);
+  border-radius: 1.25rem;
+  color: var(--s8-text-mid);
+  font-size: 0.75rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.database-home .database-tag-chip:hover {
+  border-color: var(--s8-accent-border);
+  color: var(--s8-accent);
+}
+.database-home .database-tag-chip.is-active {
+  background: var(--s8-accent);
+  border-color: var(--s8-accent);
+  color: var(--s8-bg);
+}
+
+/* Section divider */
+.database-home .database-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.625rem 0 0;
+}
+.database-home .database-divider-label {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--s8-text-mid);
+  white-space: nowrap;
+}
+.database-home .database-divider-line {
+  flex: 1;
+  height: 0.0625rem;
+  background: var(--s8-accent-border);
+  position: relative;
+  overflow: hidden;
+}
+.database-home .database-divider-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    transparent 35%,
+    var(--s8-accent) 50%,
+    transparent 65%,
+    transparent 100%
+  );
+  background-size: 250% 100%;
+  background-position: -50% 0;
+  animation: s8-divider-shimmer 8s ease-in-out infinite;
+  opacity: 0.55;
+}
+@keyframes s8-divider-shimmer {
+  0%   { background-position: -50% 0; }
+  55%  { background-position: 150% 0; }
+  100% { background-position: 150% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .database-home .database-divider-line::after { animation: none; opacity: 0; }
+}
+
+/* Doc grid */
+.database-home .database-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
+  gap: 0.75rem;
+  padding: 0.25rem 0 1rem;
+  overflow: visible;
+}
+.database-home .database-card {
+  width: 100%;
+  background: var(--s8-card-bg);
+  border: 0.0625rem solid var(--s8-card-border);
+  border-radius: 0.25rem;
+  padding: 1.125rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  text-align: left;
+  font-family: inherit;
+  color: var(--s8-text);
+  box-shadow: none;
+  transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
+}
+.database-home .database-card:hover {
+  border-color: var(--s8-accent-border);
+  transform: translateY(-0.0625rem);
+  box-shadow: 0 0 0 0.0625rem var(--s8-accent-border), 0 0.5rem 2rem rgba(0, 0, 0, 0.18);
+}
+.database-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.database-card-type {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--s8-accent);
+}
+.database-card-date {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.625rem;
+  color: var(--s8-text-mid);
+}
+.database-home .database-card-title {
+  font-family: 'Crimson Pro', serif;
+  font-size: 1.125rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--s8-text);
+  letter-spacing: 0;
+}
+.database-home .database-card-snippet {
+  font-size: 0.8125rem;
+  font-weight: 300;
+  line-height: 1.55;
+  color: var(--s8-text-mid);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.database-home .database-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: auto;
+  font-family: inherit;
+  text-transform: none;
+  font-size: inherit;
+  letter-spacing: 0;
+  color: var(--s8-text-mid);
+}
+.database-card-folder {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.625rem;
+  color: var(--s8-text-mid);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.database-home .database-card-meta .tag-pill {
+  font-size: 0.6875rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.625rem;
+  border: 0.0625rem solid var(--s8-card-border);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Recently Updated */
+.database-feed {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
+  gap: 0.625rem;
+  padding-bottom: 2rem;
+}
+.database-feed-card {
+  background: var(--s8-card-bg);
+  border: 0.0625rem solid var(--s8-card-border);
+  border-radius: 0.25rem;
+  padding: 0.875rem;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: var(--s8-text);
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  transition: border-color 0.15s;
+}
+.database-feed-card:hover { border-color: var(--s8-accent-border); }
+.database-feed-title {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--s8-text);
+  line-height: 1.4;
+}
+.database-feed-meta {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.625rem;
+  color: var(--s8-text-mid);
+}
+
+/* Empty states */
+.database-home .database-empty {
+  grid-column: 1 / -1;
+  padding: 3rem 1rem;
+  text-align: center;
+  background: var(--s8-card-bg);
+  border: 0.0625rem dashed var(--s8-card-border);
+  border-radius: 0.25rem;
+}
+.database-home .database-empty-title {
+  font-family: 'Crimson Pro', serif;
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: var(--s8-text);
+  margin-bottom: 0.5rem;
+  letter-spacing: 0;
+}
+.database-home .database-empty-copy {
+  font-size: 0.8125rem;
+  color: var(--s8-text-mid);
+}
+.database-empty-reset {
+  background: transparent;
+  border: 0.0625rem solid var(--s8-accent-border);
+  color: var(--s8-accent);
+  font-family: 'Space Mono', monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.1875rem;
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+.database-empty-reset:hover { background: var(--s8-accent-dim); }
+
+@media (max-width: 48rem) {
+  .database-home .database-explore { grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
+  .database-home .database-search { width: 12rem; }
+  .database-home .database-search:focus-within { width: 16rem; }
+}
+@media (max-width: 30rem) {
+  .database-page { padding: 0 1rem 2rem; }
+  .database-home .database-hero { padding: 1.5rem 0 0.25rem; }
+  .database-home .database-hero-title { font-size: 1.6875rem; }
+  .database-home .database-search { width: 100%; order: 99; }
+  .database-home .database-search:focus-within { width: 100%; }
+  .database-home .database-topbar { gap: 0.5rem; }
+}
+
+/* Inline search results panel (visitor dashboard) */
+.database-home .database-search-results {
+  margin-top: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.database-home .database-search-results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.625rem;
+}
+.database-search-results-title {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--s8-accent);
+}
+.database-search-results-clear {
+  font-size: 0.75rem;
+  color: var(--s8-text-mid);
+  cursor: pointer;
+  background: none;
+  border: none;
+  font-family: inherit;
+  padding: 0;
+  transition: color 0.12s;
+}
+.database-search-results-clear:hover { color: var(--s8-accent); }
+.database-search-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--s8-card-bg);
+  border: 0.0625rem solid var(--s8-card-border);
+  border-radius: 0.25rem;
+  overflow: hidden;
+}
+.database-search-result {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  color: var(--s8-text);
+  transition: background 0.12s;
+}
+.database-search-result + .database-search-result {
+  border-top: 0.0625rem solid var(--s8-sidebar-border);
+}
+.database-search-result:hover { background: var(--s8-hover); }
+.database-sr-type {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--s8-accent);
+  width: 2.75rem;
+  flex-shrink: 0;
+}
+.database-sr-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+.database-sr-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--s8-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.database-sr-snippet {
+  font-size: 0.75rem;
+  color: var(--s8-text-mid);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.database-sr-snippet mark {
+  background: var(--s8-accent-dim);
+  color: var(--s8-accent);
+  border-radius: 0.125rem;
+  padding: 0 0.125rem;
+}
+.database-sr-meta {
+  font-family: 'Space Mono', monospace;
+  font-size: 0.625rem;
+  color: var(--s8-text-mid);
+  flex-shrink: 0;
+  text-align: right;
+}
+.database-search-results-empty {
+  padding: 1.25rem 1rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--s8-text-mid);
+  background: var(--s8-card-bg);
+  border: 0.0625rem dashed var(--s8-card-border);
+  border-radius: 0.25rem;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   RESPONSIVE — phones, tablet portrait, tablet landscape
+   ════════════════════════════════════════════════════════════════════════
+   Desktop layout (≥1280px) is the canonical Aurora design and is INTENTIONALLY
+   left untouched. Every rule below lives inside a max-width media query so
+   it can only narrow the layout, never alter desktop.
+
+   Breakpoints (matching the user's accepted scheme):
+     ≤599px  — phone
+     ≤899px  — tablet portrait + phone
+     ≤1279px — tablet landscape + everything below
+   Plus orthogonal queries:
+     (hover: none)                        — touch devices, surface affordances
+     (orientation: landscape) and short   — phone landscape, vertical squeeze
+
+   The owner sidebar becomes a slide-in drawer below 900px (governed by the
+   existing `.app.sidebar-collapsed` class — no JSX state changes needed).
+   A scrim element (rendered in App.jsx when sidebar is open) sits behind
+   the drawer and is CSS-hidden ≥900px.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* The scrim element exists in JSX whenever the sidebar is uncollapsed; it's
+   only ever displayed below the tablet-landscape breakpoint. Default to
+   hidden so it never appears on desktop. */
+.sidebar-scrim { display: none; }
+
+
+/* ────────────────────────────────────────────────────────────────────────
+   ≤1279px — tablet landscape (light touch only)
+   ──────────────────────────────────────────────────────────────────────── */
+@media (max-width: 1279px) {
+  /* Slightly tighter sidebar so canvas keeps room. Stays inline (no drawer) */
+  .app:not(.app-viewer) {
+    --s8-sidebar-w: 13rem;
+  }
+}
+
+
+/* ────────────────────────────────────────────────────────────────────────
+   ≤899px — tablet portrait + phone: sidebar becomes drawer, modals shrink
+   ──────────────────────────────────────────────────────────────────────── */
+@media (max-width: 899px) {
+  /* Owner app: collapse the grid so canvas fills the viewport, then float
+     the sidebar over it as a slide-in drawer. Visitor (.app-viewer) has no
+     sidebar so it's untouched. */
+  .app:not(.app-viewer) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app:not(.app-viewer) .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(85vw, 18rem);
+    z-index: 100;
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events: auto;
+    box-shadow: var(--s8-shadow-modal);
+    transition: transform 220ms ease;
+  }
+  .app.sidebar-collapsed:not(.app-viewer) .sidebar {
+    transform: translateX(-100%);
+    /* override desktop's opacity-fade collapse so the slide-out is the only
+       visible transition; opacity:0 + transform looks broken in motion */
+    opacity: 1;
+  }
+
+  /* Drawer scrim — covers canvas area, click closes drawer */
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+    border: none;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(0.125rem);
+    -webkit-backdrop-filter: blur(0.125rem);
+    cursor: pointer;
+    animation: s8-fade-in 180ms ease;
+  }
+  html[data-mode="light"] .sidebar-scrim {
+    background: rgba(8, 30, 60, 0.35);
+  }
+
+  /* Modals: smaller card, more breathing room around it */
+  .modal {
+    width: min(28rem, calc(100vw - 1.75rem));
+    padding: 1.125rem;
+  }
+  .modal-overlay {
+    padding-top: 8vh;
+    padding-left: 0.875rem;
+    padding-right: 0.875rem;
+  }
+  .modal-search {
+    width: min(34rem, 100%);
+  }
+
+  /* Database home: more compact topbar layout */
+  .database-topbar {
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    gap: 0.625rem;
+  }
+}
+
+
+/* ────────────────────────────────────────────────────────────────────────
+   ≤599px — phone: bottom-sheet modals, condensed pills, single-column UI
+   ──────────────────────────────────────────────────────────────────────── */
+@media (max-width: 599px) {
+  /* Sidebar drawer takes more of the viewport on small screens */
+  .app:not(.app-viewer) .sidebar {
+    width: min(92vw, 18rem);
+  }
+
+  /* Modals slide up from bottom as a sheet, full-width with rounded top */
+  .modal-overlay {
+    padding-top: 0;
+    align-items: flex-end;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .modal {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 1rem 1rem 0 0;
+    padding: 1rem 1.125rem 1.5rem;
+    border-bottom: none;
+    animation: s8-sheet-up 240ms ease;
+  }
+  .modal-search {
+    width: 100%;
+    max-height: 80vh;
+  }
+  .modal-footer {
+    margin-top: 1rem;
+  }
+
+  /* Owner pill: condense to icon-only — title becomes a chevron-only button */
+  .pill {
+    padding: 0.25rem 0.375rem;
+    gap: 0.25rem;
+  }
+  .pill-title-text {
+    max-width: 9rem;
+  }
+  .pill-brand,
+  .pill-sep:nth-of-type(2) {
+    display: none;
+  }
+  .pill-ro-badge {
+    padding: 0.125rem 0.375rem;
+    font-size: 0.5625rem;
+  }
+
+  /* Visitor topbar: stack into a single column */
+  .database-topbar {
+    grid-template-columns: 1fr;
+    gap: 0.625rem;
+  }
+  .database-topbar .database-brand {
+    text-align: center;
+  }
+  .database-topbar .database-search {
+    grid-column: 1 / -1;
+    width: 100% !important;
+    order: 1;
+  }
+  .database-topbar .database-toggle {
+    justify-self: center;
+    order: 2;
+  }
+  .database-topbar .topbar-theme,
+  .database-topbar .topbar-logout {
+    order: 3;
+  }
+  .database-home {
+    padding: 0 1rem 2rem;
+  }
+
+  /* Database hero: smaller type, tighter padding */
+  .database-hero {
+    padding: 1.25rem 0.25rem 0.25rem;
+  }
+  .database-hero-title { font-size: 1.5rem; }
+  .database-hero-sub { font-size: 0.8125rem; }
+
+  /* Database results: single-column grid */
+  .database-results {
+    grid-template-columns: 1fr;
+  }
+
+  /* Auth shell: full-bleed card with breathing room */
+  .auth-shell {
+    padding: 1rem;
+  }
+  .auth-card {
+    width: 100%;
+    padding: 1.25rem 1.125rem 1rem;
+  }
+
+  /* ShapeInspector: hide entirely on phone — editing canvas shapes on a
+     phone screen is not viable; the inspector overlaps selection too much
+     and the touch targets are too small. Phone users can still pan/zoom and
+     view the canvas read-only-style. */
+  .shape-inspector {
+    display: none !important;
+  }
+
+  /* FjToolbar: centered, slightly smaller, full hit-target buttons */
+  .fj-toolbar {
+    bottom: 0.625rem;
+    padding: 0.375rem;
+    gap: 0.125rem;
+  }
+  .fj-tool {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+  .fj-tool .tlui-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  /* tldraw actions menu zone: shrink and reposition tighter to the corner */
+  .tldraw-wrap .tlui-menu-zone {
+    top: 0.5rem;
+    right: 0.5rem;
+  }
+
+  /* FindBar: full-width pill at the top, no horizontal overflow */
+  .find-bar {
+    left: 0.5rem !important;
+    right: 0.5rem !important;
+    transform: none !important;
+    max-width: calc(100vw - 1rem);
+  }
+}
+
+
+/* ────────────────────────────────────────────────────────────────────────
+   (hover: none) — touch devices: always-visible affordances, bigger taps
+   ──────────────────────────────────────────────────────────────────────── */
+@media (hover: none) {
+  /* Sidebar tree row actions are normally hover-revealed. Always show on
+     touch so users can rename/delete without a hover state. */
+  .tree-item-shell .item-actions,
+  .tree-item-shell .tree-delete,
+  .tree-item-shell .tree-privacy {
+    opacity: 1 !important;
+    pointer-events: auto;
+  }
+
+  /* Tag remove buttons: full opacity, bigger tap target */
+  .tag-pill-remove {
+    opacity: 1;
+    padding: 0.0625rem 0.25rem;
+    font-size: 0.875rem;
+  }
+
+  /* Sidebar action buttons: minimum 44px hit target */
+  .sidebar-action,
+  .sidebar-utility-btn,
+  .sidebar-google-btn {
+    min-height: 2.75rem;
+  }
+
+  /* Pill icon buttons: 44px minimum */
+  .pill-icon-btn {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
+
+/* ────────────────────────────────────────────────────────────────────────
+   Phone in landscape — short viewport. Hide hero, condense pills further
+   so the canvas / database results stay usable.
+   ──────────────────────────────────────────────────────────────────────── */
+@media (max-width: 899px) and (orientation: landscape) and (max-height: 500px) {
+  .database-hero {
+    display: none;
+  }
+  .database-explore {
+    padding-top: 0;
+  }
+  .pill {
+    padding: 0.1875rem 0.375rem;
+  }
+  .pill-title-text {
+    max-width: 7rem;
+  }
+}
+
+
+/* Animations used above */
+@keyframes s8-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes s8-sheet-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal,
+  .sidebar-scrim,
+  .app:not(.app-viewer) .sidebar {
+    animation: none !important;
+    transition: none !important;
+  }
+}

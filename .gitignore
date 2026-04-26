@@ -43,6 +43,10 @@ Thumbs.db
 # Superpowers cache
 .superpowers/
 
+# Agent IDE state
+.claude/
+.kiro/
+
 # Local app bundle
 ResearchHub.app/
 
@@ -54,6 +58,10 @@ backups/
 ops/.backup-env
 ops/.env*
 ops/.deploy-hook
+
+# Local env files (Google OAuth creds, etc.)
+.env
+.env.local
 
 # Internal docs and mockups (not for public repo)
 docs/

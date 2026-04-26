@@ -631,12 +631,12 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
         }
         .find-bar-btn.find-bar-close {
           background: var(--s8-accent);
-          color: #fff;
+          color: var(--s8-on-accent);
           margin-left: 0.125rem;
         }
         .find-bar-btn.find-bar-close:hover {
-          background: color-mix(in srgb, var(--s8-accent) 85%, white);
-          color: #fff;
+          background: color-mix(in srgb, var(--s8-accent) 85%, var(--s8-on-accent));
+          color: var(--s8-on-accent);
         }
         .find-bar-btn:disabled {
           opacity: 0.3;
@@ -669,7 +669,7 @@ const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards =
           left: 0.625rem;
           padding: 0.125rem 0.5rem;
           background: var(--s8-accent);
-          color: #fff;
+          color: var(--s8-on-accent);
           font-family: 'Inter', -apple-system, sans-serif;
           font-size: 0.625rem;
           font-weight: 600;

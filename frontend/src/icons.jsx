@@ -72,13 +72,12 @@ export function PlusIcon(props) {
   )
 }
 
-export function RefreshIcon(props) {
+export function GlobeIcon(props) {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...props}>
-      <path d="M2.2 6.6a4.8 4.8 0 0 1 8.5-2.6" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
-      <path d="M11.8 7.4a4.8 4.8 0 0 1-8.5 2.6" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
-      <path d="M8.4 4h2.6V1.4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M5.6 10H3v2.6" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx="7" cy="7" r="5.4" stroke="currentColor" strokeWidth="1.1"/>
+      <path d="M1.6 7h10.8" stroke="currentColor" strokeWidth="1.1"/>
+      <path d="M7 1.6c1.5 1.5 2.4 3.4 2.4 5.4S8.5 10.9 7 12.4M7 1.6C5.5 3.1 4.6 5 4.6 7s.9 3.9 2.4 5.4" stroke="currentColor" strokeWidth="1.1" fill="none"/>
     </svg>
   )
 }
@@ -255,9 +254,9 @@ export function FjPenIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
       <path d="M13.5 4.5l6 6-10.5 10.5-5 1 1-5z"
-            fill="#ffffff" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+            fill="var(--s8-tl-white)" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
       <path d="M13.5 4.5l6 6-3 3-6-6z"
-            fill="#FF7AA2" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+            fill="var(--s8-fj-pen-accent)" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
       <path d="M6 17l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
     </svg>
   )

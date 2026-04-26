@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import TldrawCanvas from './TldrawCanvas'
 import {
   BoardIcon, SheetIcon, DocIcon, GoogleLogoIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon, ThemeToggleIcon, LogoutIcon,
-  SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon, RefreshIcon,
+  SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon, GlobeIcon,
 } from './icons'
 import './App.css'
 
@@ -142,8 +142,17 @@ function parseRoute() {
   const url = new URL(window.location.href)
   const path = url.pathname.replace(/\/+$/, '') || '/'
   const docMatch = path.match(/^\/(board|gdoc|gsheet)\/([^/]+)$/)
+  const shareToken = url.searchParams.get('share') || null
+
+  // Known routes: /, /board/<id>, /gdoc/<id>, /gsheet/<id>
+  // Everything else redirects to /
+  if (path !== '/' && !docMatch) {
+    window.history.replaceState({}, '', '/')
+    return { shareToken, doc: null }
+  }
+
   return {
-    shareToken: url.searchParams.get('share') || null,
+    shareToken,
     doc: docMatch ? { type: docMatch[1], id: docMatch[2] } : null,
   }
 }
@@ -306,11 +315,8 @@ export default function App() {
   const [newFolderName, setNewFolderName] = useState('')
   const [newFolderParentId, setNewFolderParentId] = useState(ROOT_FOLDER)
   const [googleAuth, setGoogleAuth] = useState({ loading: true, connected: false, email: null })
-  const [googleConnectOpen, setGoogleConnectOpen] = useState(false)
-  const [googleConnectEmail, setGoogleConnectEmail] = useState('')
-  const [googleConnectBusy, setGoogleConnectBusy] = useState(false)
-  const [driveSyncState, setDriveSyncState] = useState({ busy: false, message: null })
-  const driveSyncMessageTimer = useRef(null)
+  const [driveShareState, setDriveShareState] = useState({ busy: false, message: null })
+  const driveShareMessageTimer = useRef(null)
   const [tagFilter, setTagFilter] = useState(null)
   const [tagInput, setTagInput] = useState('')
   const [tagInputOpen, setTagInputOpen] = useState(false)
@@ -324,6 +330,7 @@ export default function App() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleteMode, setDeleteMode] = useState('move')
+  const [deleteAlsoDrive, setDeleteAlsoDrive] = useState(false)
   const [errorMessage, setErrorMessage] = useState(null)
   const [errorVisible, setErrorVisible] = useState(false)
   const [saveState, setSaveState] = useState('idle')
@@ -590,6 +597,26 @@ export default function App() {
     refreshGoogleAuth()
   }, [auth.authenticated, ownerMode, refreshGoogleAuth])
 
+  useEffect(() => {
+    // Google OAuth callback redirects back here with ?google=connected (or
+    // ?google=error&reason=...). Pull the status, then strip the query so a
+    // refresh doesn't keep firing the toast.
+    const params = new URLSearchParams(window.location.search)
+    const flag = params.get('google')
+    if (!flag) return
+    if (flag === 'connected') {
+      refreshGoogleAuth()
+    } else if (flag === 'error') {
+      const reason = params.get('reason') || 'unknown'
+      console.warn('Google OAuth failed:', reason)
+    }
+    params.delete('google')
+    params.delete('reason')
+    const next = params.toString()
+    const cleanUrl = window.location.pathname + (next ? `?${next}` : '') + window.location.hash
+    window.history.replaceState({}, '', cleanUrl)
+  }, [refreshGoogleAuth])
+
   const showDatabaseHome = readOnly && !activeId
 
   useEffect(() => {
@@ -622,11 +649,11 @@ export default function App() {
         setNewBoardOpen(false)
         setNewGDocOpen(false)
         setNewGSheetOpen(false)
-        setGoogleConnectOpen(false)
         setNewFolderOpen(false)
         setDeleteConfirmOpen(false)
         setDeleteTarget(null)
         setDeleteMode('move')
+        setDeleteAlsoDrive(false)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -727,27 +754,10 @@ export default function App() {
   }
 
   const openGoogleConnect = () => {
-    setGoogleConnectEmail(googleAuth.email || '')
-    setGoogleConnectOpen(true)
-  }
-
-  const submitGoogleConnect = async () => {
-    setGoogleConnectBusy(true)
-    try {
-      const data = await fetchJsonPost(`${API}/api/google/connect`, {
-        email: googleConnectEmail.trim() || 'you@example.com',
-      })
-      if (data) {
-        setGoogleAuth({
-          loading: false,
-          connected: Boolean(data.connected),
-          email: data.email || null,
-        })
-      }
-      setGoogleConnectOpen(false)
-    } finally {
-      setGoogleConnectBusy(false)
-    }
+    // Real OAuth: kick the browser over to /api/google/auth, which redirects
+    // to Google's consent screen and bounces back to /api/google/callback,
+    // which redirects back to the frontend with ?google=connected.
+    window.location.href = `${API}/api/google/auth`
   }
 
   const disconnectGoogle = async () => {
@@ -761,31 +771,31 @@ export default function App() {
     }
   }
 
-  const syncDriveContent = useCallback(async () => {
-    if (driveSyncState.busy) return
-    setDriveSyncState({ busy: true, message: null })
-    const data = await fetchJsonPost(`${API}/api/google/sync`, {})
-    if (driveSyncMessageTimer.current) clearTimeout(driveSyncMessageTimer.current)
+  const shareAllDrive = useCallback(async () => {
+    if (driveShareState.busy) return
+    setDriveShareState({ busy: true, message: null })
+    const data = await fetchJsonPost(`${API}/api/google/share-all`, {})
+    if (driveShareMessageTimer.current) clearTimeout(driveShareMessageTimer.current)
     let message
     if (!data) {
-      message = 'Sync failed'
+      message = 'Share failed'
     } else if ((data.total || 0) === 0) {
-      message = 'Nothing to sync'
+      message = 'Nothing to share'
     } else {
-      const ok = (data.gdoc || 0) + (data.gsheet || 0)
+      const ok = data.shared || 0
       const failed = data.failed || 0
       message = failed
-        ? `Synced ${ok} · ${failed} couldn't be read`
-        : `Synced ${ok} ${ok === 1 ? 'item' : 'items'}`
+        ? `Shared ${ok} · ${failed} failed`
+        : `Shared ${ok} ${ok === 1 ? 'item' : 'items'}`
     }
-    setDriveSyncState({ busy: false, message })
-    driveSyncMessageTimer.current = setTimeout(() => {
-      setDriveSyncState((cur) => (cur.busy ? cur : { busy: false, message: null }))
+    setDriveShareState({ busy: false, message })
+    driveShareMessageTimer.current = setTimeout(() => {
+      setDriveShareState((cur) => (cur.busy ? cur : { busy: false, message: null }))
     }, 4000)
-  }, [driveSyncState.busy])
+  }, [driveShareState.busy])
 
   useEffect(() => () => {
-    if (driveSyncMessageTimer.current) clearTimeout(driveSyncMessageTimer.current)
+    if (driveShareMessageTimer.current) clearTimeout(driveShareMessageTimer.current)
   }, [])
 
   const createFolder = async () => {
@@ -1112,7 +1122,20 @@ export default function App() {
     return (docsByKind[type] || []).find(item => item.id === hit.doc_id)
   }
 
-  const databaseItems = query.trim()
+  const databaseBrowseItems = visibleDocs.map(doc => ({
+    key: `${doc.type}-${doc.id}`,
+    type: doc.type,
+    docId: doc.id,
+    name: doc.name,
+    snippet: null,
+    source: docTypeLabel(doc.type),
+    createdAt: doc.created_at,
+    folderId: doc.folder_id || null,
+    folderPath: buildFolderPath(doc.folder_id, folderById),
+    tags: doc.tags || [],
+  }))
+
+  const databaseSearchHits = query.trim()
     ? (() => {
       // Deduplicate by doc_id — keep the highest-scoring hit per doc,
       // but collect all snippets/sources to show the best one
@@ -1144,18 +1167,7 @@ export default function App() {
       }
       return [...seen.values()]
     })()
-    : visibleDocs.map(doc => ({
-      key: `${doc.type}-${doc.id}`,
-      type: doc.type,
-      docId: doc.id,
-      name: doc.name,
-      snippet: null,
-      source: docTypeLabel(doc.type),
-      createdAt: doc.created_at,
-      folderId: doc.folder_id || null,
-      folderPath: buildFolderPath(doc.folder_id, folderById),
-      tags: doc.tags || [],
-    }))
+    : []
 
   const saveOwner = async () => {
     const name = ownerInput.trim()
@@ -1298,9 +1310,14 @@ export default function App() {
   const handleDelete = async () => {
     if (!deleteTarget || readOnly) return
     try {
-      const endpoint = deleteTarget.type === 'folder'
-        ? `/api/folders/${deleteTarget.id}?mode=${deleteMode}`
-        : `/api/${DOC_KIND_API[deleteTarget.type]}/${deleteTarget.id}`
+      let endpoint
+      if (deleteTarget.type === 'folder') {
+        endpoint = `/api/folders/${deleteTarget.id}?mode=${deleteMode}`
+      } else {
+        const isDriveKind = deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet'
+        const driveQuery = isDriveKind && deleteAlsoDrive ? '?drive=1' : ''
+        endpoint = `/api/${DOC_KIND_API[deleteTarget.type]}/${deleteTarget.id}${driveQuery}`
+      }
       const res = await fetch(`${API}${endpoint}`, { method: 'DELETE', credentials: 'include' })
       if (!res.ok) {
         showError(res.status === 404 ? 'Item not found' : 'Delete failed')
@@ -1318,6 +1335,7 @@ export default function App() {
       setDeleteConfirmOpen(false)
       setDeleteTarget(null)
       setDeleteMode('move')
+      setDeleteAlsoDrive(false)
     } catch {
       showError('Delete failed')
     }
@@ -1521,13 +1539,13 @@ export default function App() {
                   <div className="sidebar-drive-actions">
                     {(gdocs.length > 0 || gsheets.length > 0) && (
                       <button
-                        className={`sidebar-drive-icon${driveSyncState.busy ? ' is-busy' : ''}`}
-                        onClick={syncDriveContent}
-                        title="Pull latest text from your linked Docs and Sheets"
+                        className={`sidebar-drive-icon${driveShareState.busy ? ' is-busy' : ''}`}
+                        onClick={shareAllDrive}
+                        title="Set every linked Doc and Sheet to 'anyone with link → reader' so visitors can view them"
                         type="button"
-                        disabled={driveSyncState.busy}
+                        disabled={driveShareState.busy}
                       >
-                        <RefreshIcon />
+                        <GlobeIcon />
                       </button>
                     )}
                     <button
@@ -1543,9 +1561,9 @@ export default function App() {
               </div>
               {googleAuth.connected ? (
                 <div className="sidebar-drive-body">
-                  {driveSyncState.busy
-                    ? 'Syncing…'
-                    : (driveSyncState.message || googleAuth.email)}
+                  {driveShareState.busy
+                    ? 'Sharing…'
+                    : (driveShareState.message || googleAuth.email)}
                 </div>
               ) : (
                 <button
@@ -1583,6 +1601,18 @@ export default function App() {
         </aside>
       )}
 
+      {/* Mobile/tablet sidebar drawer scrim. CSS-hidden on desktop; visible
+          only when the sidebar is open AND the viewport is below the tablet-
+          landscape breakpoint. Tap dismisses the drawer. */}
+      {showSidebar && !sidebarCollapsed && (
+        <button
+          type="button"
+          className="sidebar-scrim"
+          aria-label="Close sidebar"
+          onClick={() => setSidebarCollapsed(true)}
+        />
+      )}
+
       <main className="canvas-wrap s8-grid">
         {showDatabaseHome ? (
           <DatabaseHome
@@ -1590,7 +1620,8 @@ export default function App() {
             onQueryChange={setQuery}
             databaseView={databaseView}
             onDatabaseViewChange={setDatabaseView}
-            items={databaseItems}
+            items={databaseBrowseItems}
+            searchHits={databaseSearchHits}
             folders={folders}
             allTags={allTags}
             topTags={allTags.slice(0, 3).map(([t]) => t)}
@@ -1864,30 +1895,6 @@ export default function App() {
         </Modal>
       )}
 
-      {googleConnectOpen && (
-        <Modal onClose={() => setGoogleConnectOpen(false)} title="Connect Google">
-          <p style={{ fontSize: 13, color: 'var(--s8-text-mid)', marginBottom: 12, lineHeight: 1.5 }}>
-            <strong style={{ color: 'var(--s8-text)' }}>Stub mode.</strong> Real Google OAuth isn't wired up yet — for now this just lets you mark Station 8 as "connected" so you can see what the UX looks like once OAuth ships.
-          </p>
-          <p style={{ fontSize: 12, color: 'var(--s8-text-mid)', marginBottom: 12 }}>
-            Once OAuth lands: clicking this button will redirect you to Google, you'll grant Drive access, and Station 8 will create new Docs and Sheets in your Drive automatically. You won't paste URLs anymore.
-          </p>
-          <input
-            autoFocus
-            value={googleConnectEmail}
-            onChange={e => setGoogleConnectEmail(e.target.value)}
-            placeholder="you@example.com (placeholder)"
-            onKeyDown={e => { if (e.key === 'Enter') submitGoogleConnect() }}
-          />
-          <div className="modal-footer">
-            <button className="btn-ghost" onClick={() => setGoogleConnectOpen(false)} type="button">Cancel</button>
-            <button className="btn-primary" onClick={submitGoogleConnect} disabled={googleConnectBusy} type="button">
-              {googleConnectBusy ? 'Connecting…' : 'Pretend connected'}
-            </button>
-          </div>
-        </Modal>
-      )}
-
       {newFolderOpen && (
         <Modal onClose={() => setNewFolderOpen(false)} title="New folder">
           <input
@@ -1986,7 +1993,10 @@ export default function App() {
       )}
 
       {deleteConfirmOpen && deleteTarget && (
-        <Modal onClose={() => { setDeleteConfirmOpen(false); setDeleteTarget(null) }} title={`Delete ${deleteTarget.type}`}>
+        <Modal
+          onClose={() => { setDeleteConfirmOpen(false); setDeleteTarget(null); setDeleteAlsoDrive(false) }}
+          title={`Delete ${deleteTarget.type === 'folder' ? 'folder' : (DOC_KIND_LABEL[deleteTarget.type] || 'item').toLowerCase()}`}
+        >
           <div className="delete-dialog-body">
             <p className="modal-copy">
               {deleteTarget.type === 'folder'
@@ -2026,16 +2036,25 @@ export default function App() {
               </p>
             )}
 
-            {deleteTarget.type !== 'folder' && (
+            {deleteTarget.type === 'board' && (
               <p className="delete-dialog-note">
-                {deleteTarget.type === 'board'
-                  ? 'Its canvas data will be removed, and uploaded images tied only to this board will be cleaned up too.'
-                  : 'It will be removed from Station 8. The underlying file in your Google Drive is not deleted.'}
+                Its canvas data will be removed, and uploaded images tied only to this board will be cleaned up too.
               </p>
+            )}
+
+            {(deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet') && (
+              <label className="delete-drive-toggle">
+                <input
+                  type="checkbox"
+                  checked={deleteAlsoDrive}
+                  onChange={(e) => setDeleteAlsoDrive(e.target.checked)}
+                />
+                <span>Also delete the underlying file from my Google Drive</span>
+              </label>
             )}
           </div>
           <div className="modal-footer">
-            <button className="btn-ghost" onClick={() => { setDeleteConfirmOpen(false); setDeleteTarget(null); setDeleteMode('move') }} type="button">Cancel</button>
+            <button className="btn-ghost" onClick={() => { setDeleteConfirmOpen(false); setDeleteTarget(null); setDeleteMode('move'); setDeleteAlsoDrive(false) }} type="button">Cancel</button>
             <button className="btn-primary btn-danger" onClick={handleDelete} type="button">
               {deleteTarget.type === 'folder' && deleteMode === 'move' ? 'Delete folder' : 'Delete permanently'}
             </button>
@@ -2219,6 +2238,7 @@ function DatabaseHome({
   databaseView,
   onDatabaseViewChange,
   items,
+  searchHits,
   folders,
   allTags,
   topTags,
@@ -2287,7 +2307,6 @@ function DatabaseHome({
   }, [items, folders, rootFolderIdOf])
 
   const filteredItems = useMemo(() => {
-    if (hasQuery) return items
     return items.filter(item => {
       let folderOk = selectedFolder === 'all'
       if (!folderOk) {
@@ -2300,7 +2319,18 @@ function DatabaseHome({
       for (const t of selectedTags) if (!itemTags.includes(t)) return false
       return true
     })
-  }, [items, hasQuery, selectedFolder, selectedTags, rootFolderIdOf])
+  }, [items, selectedFolder, selectedTags, rootFolderIdOf])
+
+  const recentItems = useMemo(() => {
+    if (hasQuery || selectedFolder !== 'all' || selectedTags.size > 0) return []
+    const sorted = [...items].sort((a, b) => {
+      const av = a.createdAt || ''
+      const bv = b.createdAt || ''
+      if (av === bv) return 0
+      return av < bv ? 1 : -1
+    })
+    return sorted.slice(0, 4)
+  }, [items, hasQuery, selectedFolder, selectedTags])
 
   const toggleTag = (tag) => {
     setSelectedTags(prev => {
@@ -2326,7 +2356,8 @@ function DatabaseHome({
   })()
 
   return (
-    <div className="database-home s8-grid">
+    <div className="database-home">
+     <div className="database-page">
       <div className="database-topbar">
         <div className="database-brand-wrap">
           <span className="database-brand"><span className="database-brand-dot" />STATION 8</span>
@@ -2338,7 +2369,7 @@ function DatabaseHome({
             ref={searchRef}
             value={query}
             onChange={(e) => isReady && onQueryChange(e.target.value)}
-            placeholder={isReady ? 'Search every public note, board, sheet, and OCR fragment…' : 'Search will be ready shortly…'}
+            placeholder={isReady ? 'Search the archive…' : 'Search will be ready shortly…'}
             disabled={!isReady}
           />
           {!isReady && (
@@ -2347,14 +2378,11 @@ function DatabaseHome({
               {statusMessage}
             </span>
           )}
+          {isReady && <span className="database-search-hint">⌘K</span>}
         </label>
-        <div className="database-toggle" role="tablist" aria-label="Database layout">
-          <button className={databaseView === 'list' ? 'active' : ''} onClick={() => onDatabaseViewChange('list')} type="button">List</button>
-          <button className={databaseView === 'grid' ? 'active' : ''} onClick={() => onDatabaseViewChange('grid')} type="button">Grid</button>
-        </div>
         {onToggleColorMode && (
           <button
-            className="topbar-theme"
+            className="database-theme-btn"
             onClick={onToggleColorMode}
             title={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             aria-label={colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
@@ -2363,11 +2391,49 @@ function DatabaseHome({
             <ThemeToggleIcon />
           </button>
         )}
-        <button className="topbar-logout" onClick={onLogout} type="button">Logout</button>
+        <button className="database-logout" onClick={onLogout} type="button">Logout</button>
       </div>
 
-      {!hasQuery && (
-        <div className="database-hero">
+      {hasQuery && (
+        <div className="database-search-results">
+          <div className="database-search-results-header">
+            <span className="database-search-results-title">
+              {searchLoading
+                ? 'SEARCHING…'
+                : `${(searchHits || []).length} ${(searchHits || []).length === 1 ? 'RESULT' : 'RESULTS'} FOR "${query.toUpperCase()}"`}
+            </span>
+            <button
+              type="button"
+              className="database-search-results-clear"
+              onClick={() => onQueryChange('')}
+            >Clear search</button>
+          </div>
+          {!searchLoading && (searchHits || []).length > 0 && (
+            <div className="database-search-result-list">
+              {(searchHits || []).slice(0, 6).map(item => (
+                <button
+                  key={`sr-${item.key}`}
+                  type="button"
+                  className="database-search-result"
+                  onClick={() => onOpenItem(item.type, item.docId)}
+                >
+                  <span className="database-sr-type">{docTypeLabel(item.type)}</span>
+                  <span className="database-sr-content">
+                    <span className="database-sr-title">{item.name}</span>
+                    {item.snippet && <span className="database-sr-snippet">{item.snippet}</span>}
+                  </span>
+                  <span className="database-sr-meta">{item.folderPath || 'Workspace root'}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {!searchLoading && (searchHits || []).length === 0 && (
+            <div className="database-search-results-empty">Nothing public matched that search.</div>
+          )}
+        </div>
+      )}
+
+      <div className="database-hero">
           <h1 className="database-hero-title">Research Database</h1>
           <p className="database-hero-sub">Boards, docs, and field notes from across Station 8. Every image, sticky, and cell is indexed.</p>
           {topTags && topTags.length > 0 && (
@@ -2391,9 +2457,8 @@ function DatabaseHome({
             </div>
           )}
         </div>
-      )}
 
-      {!hasQuery && (folderRail.length > 0 || (allTags || []).length > 0) && (
+      {(folderRail.length > 0 || (allTags || []).length > 0) && (
         <div className="database-explore">
           {folderRail.length > 0 && (
             <div className="database-explore-col">
@@ -2439,18 +2504,16 @@ function DatabaseHome({
         </div>
       )}
 
-      {!hasQuery && (
-        <div className="database-divider">
-          <span className="database-divider-label">{dividerLabel}</span>
-          <span className="database-divider-line" />
-        </div>
-      )}
+      <div className="database-divider">
+        <span className="database-divider-label">{dividerLabel}</span>
+        <span className="database-divider-line" />
+      </div>
 
-      <div className={`database-results database-${databaseView}`}>
+      <div className="database-results">
         {filteredItems.map((item) => (
           <button
             key={item.key}
-            className={`database-card database-card-${databaseView}`}
+            className="database-card"
             onClick={() => onOpenItem(item.type, item.docId)}
             type="button"
           >
@@ -2502,6 +2565,29 @@ function DatabaseHome({
           </div>
         )}
       </div>
+
+      {recentItems.length > 0 && (
+        <>
+          <div className="database-divider">
+            <span className="database-divider-label">Recently Updated</span>
+            <span className="database-divider-line" />
+          </div>
+          <div className="database-feed">
+            {recentItems.map(item => (
+              <button
+                key={`recent-${item.key}`}
+                className="database-feed-card"
+                onClick={() => onOpenItem(item.type, item.docId)}
+                type="button"
+              >
+                <div className="database-feed-title">{item.name}</div>
+                <div className="database-feed-meta">{item.folderPath || 'Workspace root'} · {formatDocDate(item.createdAt)}</div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+     </div>
     </div>
   )
 }
@@ -2562,7 +2648,7 @@ function GoogleEmbed({ kind, doc, readOnly, googleConnected, onConnectGoogle }) 
           <div className="gdrive-empty-title">{kindLabel} not linked yet</div>
           <div className="gdrive-empty-copy">
             {googleConnected
-              ? 'This item was created without a Google file attached. Once OAuth is fully wired up, new docs and sheets will be created in Drive automatically.'
+              ? 'This item has no Google file attached yet. Delete and recreate it — new docs and sheets are now created in your Drive automatically.'
               : 'Connect your Google account once and Station 8 will create this file in your Drive automatically.'}
           </div>
           {!googleConnected && (
@@ -2602,9 +2688,9 @@ function GDriveUrlField({ value, onChange, googleConnected, placeholder, kindLab
   return (
     <label className="modal-field gdrive-url-field">
       <span className="modal-field-label">
-        Google Drive URL
+        {googleConnected ? 'Or import an existing Drive URL' : 'Google Drive URL'}
         {googleConnected ? (
-          <span className="gdrive-url-hint">Optional — once OAuth is wired up, new {kindLabel}s will be created automatically.</span>
+          <span className="gdrive-url-hint">Leave empty to create a brand new {kindLabel} in your Drive automatically.</span>
         ) : (
           <span className="gdrive-url-hint">Paste a Drive URL you've shared as "anyone with link." Required until Google is connected.</span>
         )}

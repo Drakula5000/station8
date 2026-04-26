@@ -9,6 +9,13 @@ if [ -f "$ROOT/venv/bin/activate" ]; then
   source "$ROOT/venv/bin/activate"
 fi
 
+# Load .env if present (Google OAuth creds, etc.)
+if [ -f "$ROOT/.env" ]; then
+  set -a
+  source "$ROOT/.env"
+  set +a
+fi
+
 cleanup_port() {
   local port="$1"
   local pids
