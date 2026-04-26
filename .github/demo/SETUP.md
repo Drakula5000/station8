@@ -6,7 +6,7 @@ The demo is now ready to build and deploy. Here's what was created:
 
 ### Source Files (`.github/demo/`)
 - `package.json` - React + tldraw dependencies
-- `vite.config.js` - Builds to `../../docs/demo/` with base path `/station8/demo/`
+- `vite.config.js` - Build configuration with base path `/station8/demo/`
 - `index.html` - Entry point with Google Fonts (Inter, Space Mono, Gaegu)
 - `src/main.jsx` - React root
 - `src/Demo.jsx` - Main component with visitor/owner mode switcher
@@ -55,28 +55,16 @@ Visit `http://localhost:5173` to see the demo.
 - Sample board loads with all shapes visible
 - Responsive layout works on mobile
 
-### 3. Build for GitHub Pages
-
-```bash
-npm run build
-```
-
-This creates the production build in `../../docs/demo/`.
-
-### 4. Enable GitHub Pages
+### 3. Enable GitHub Pages
 
 1. Go to your GitHub repo → Settings → Pages
-2. Source: Deploy from a branch
-3. Branch: `main`
-4. Folder: `/docs`
-5. Save
+2. Source: **GitHub Actions** (not "Deploy from a branch")
+3. Save
 
-### 5. Update README Link
+The workflow at `.github/workflows/deploy-demo.yml` builds and deploys automatically whenever files in `.github/demo/` change on `main`. You can also trigger it manually via the Actions tab.
 
-The README already points to the correct URL:
+The demo will be live at:
 `https://drakula5000.github.io/station8/demo`
-
-Once GitHub Pages is enabled and the build is pushed, the demo will be live at that URL.
 
 ## Troubleshooting
 
@@ -84,8 +72,8 @@ Once GitHub Pages is enabled and the build is pushed, the demo will be live at t
 You saw this error because browsers block `file://` protocol from loading ES modules. Always use `npm run dev` for local testing.
 
 ### Demo Not Loading on GitHub Pages
-- Verify GitHub Pages is enabled in repo settings
-- Check that `docs/demo/` folder exists in the `main` branch
+- Verify GitHub Pages source is set to **GitHub Actions** in repo settings
+- Check the Actions tab for build errors in the "Deploy Demo" workflow
 - Wait 1-2 minutes after pushing for GitHub Pages to rebuild
 
 ### Styles Not Applying

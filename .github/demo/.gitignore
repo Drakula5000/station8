@@ -1,7 +1,7 @@
 # Dependencies
 node_modules
 
-# Build output (goes to ../../docs/demo/)
+# Build output (deployed via GitHub Actions → Pages)
 dist
 
 # Logs

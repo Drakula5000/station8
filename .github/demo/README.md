@@ -18,14 +18,13 @@ Visit `http://localhost:5173`
 npm run build
 ```
 
-This builds to `../../docs/demo/` which is served by GitHub Pages at:
+The GitHub Actions workflow (`.github/workflows/deploy-demo.yml`) builds and deploys automatically on push to `main`. The demo is served at:
 `https://drakula5000.github.io/station8/demo`
 
 ## Structure
 
-- `src/Demo.jsx` - Main demo component with mode switcher
+- `src/Demo.jsx` - Main demo component with mode switcher and sample data
 - `src/demo.css` - Aurora theme styling
-- `src/sampleData.js` - Fabricated marine science board data
 - `src/main.jsx` - React entry point
 - `index.html` - HTML entry point
 - `vite.config.js` - Build configuration

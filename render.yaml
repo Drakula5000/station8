@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: research-hub-backend
+    name: station8
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python server.py

@@ -8,7 +8,7 @@ import './styles/index.css'
 
 const API = import.meta.env.VITE_API_URL || ''
 const ROOT_FOLDER = '__root__'
-const SIDEBAR_STORAGE_KEY = 'researchHub.sidebarCollapsed'
+const SIDEBAR_STORAGE_KEY = 's8.sidebarCollapsed'
 
 // Aurora is the only theme — ensure data-theme is always absent so Aurora
 // tokens (on html[data-mode]) take effect.
@@ -2422,7 +2422,7 @@ function DatabaseHome({
   })()
 
   return (
-    <div className="database-home">
+    <div className="database-home s8-grid">
      <div className="database-page">
       <div className="database-topbar">
         <div className="database-brand-wrap">

@@ -104,6 +104,7 @@ body {
 /* ── Aurora dark (default) ── */
 html[data-mode="dark"], html:not([data-mode]) {
   --s8-bg:             #080c18;
+  --s8-grid-tile:      3rem;
   --s8-canvas-dot:     rgba(0, 221, 255, 0.15);
   --s8-canvas-glow:    rgba(0, 221, 255, 0.08);
   --s8-accent:         #00ddff;
@@ -178,6 +179,7 @@ html[data-mode="dark"], html:not([data-mode]) {
    with dark so the two modes feel like one design system. */
 html[data-mode="light"] {
   --s8-bg:             #f4f8fb;
+  --s8-grid-tile:      3rem;
   --s8-canvas-dot:     rgba(0, 130, 160, 0.18);
   --s8-canvas-glow:    rgba(0, 180, 220, 0.10);
   --s8-accent:         #0096b8;

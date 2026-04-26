@@ -1,4 +1,4 @@
-"""Research Hub backend with studio auth and password-protected share links."""
+"""Station 8 backend with studio auth and password-protected share links."""
 
 import json
 import os
@@ -78,7 +78,7 @@ ALLOW_BROWSER_AUTH_SETUP = _env_flag('S8_ALLOW_PROD_AUTH_SETUP', default=not PRO
 app.secret_key = (
     os.getenv('FLASK_SECRET_KEY')
     or os.getenv('SECRET_KEY')
-    or 'research-hub-dev-secret-change-me'
+    or 'station8-dev-secret-change-me'
 )
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,

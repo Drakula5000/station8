@@ -1,16 +1,44 @@
 /* ── Station grid + diagonal scan sweep ──
    Single source of truth for the dotted-grid backdrop and its sonar-style
    sweep. Any full-bleed surface that wants the grid just adds itself to the
-   selector list below — no per-view duplication. */
+   selector list below — no per-view duplication.
+
+   The glow bloom drifts organically via @property-animated custom
+   properties (--s8-glow-x, --s8-glow-y, --s8-glow-spread). Browsers
+   that don't support @property get a static centered glow — graceful
+   degradation, no layout shift. */
+@property --s8-glow-x {
+  syntax: '<percentage>';
+  initial-value: 50%;
+  inherits: false;
+}
+@property --s8-glow-y {
+  syntax: '<percentage>';
+  initial-value: 38%;
+  inherits: false;
+}
+@property --s8-glow-spread {
+  syntax: '<percentage>';
+  initial-value: 45%;
+  inherits: false;
+}
 .s8-grid {
   position: relative;
   background-color: var(--s8-bg);
   background-image:
-    radial-gradient(ellipse 50% 45% at 50% 38%, var(--s8-canvas-glow), transparent 70%),
+    radial-gradient(ellipse 50% var(--s8-glow-spread) at var(--s8-glow-x) var(--s8-glow-y), var(--s8-canvas-glow), transparent 70%),
     linear-gradient(to right,  var(--s8-canvas-dot) 0.0625rem, transparent 0.0625rem),
     linear-gradient(to bottom, var(--s8-canvas-dot) 0.0625rem, transparent 0.0625rem);
-  background-size: auto, 4rem 4rem, 4rem 4rem;
+  background-size: auto, var(--s8-grid-tile) var(--s8-grid-tile), var(--s8-grid-tile) var(--s8-grid-tile);
   background-position: center, center, center;
+  animation: s8-glow-drift 25s ease-in-out infinite;
+}
+@keyframes s8-glow-drift {
+  0%   { --s8-glow-x: 42%; --s8-glow-y: 34%; --s8-glow-spread: 42%; }
+  25%  { --s8-glow-x: 58%; --s8-glow-y: 40%; --s8-glow-spread: 48%; }
+  50%  { --s8-glow-x: 52%; --s8-glow-y: 46%; --s8-glow-spread: 44%; }
+  75%  { --s8-glow-x: 44%; --s8-glow-y: 36%; --s8-glow-spread: 50%; }
+  100% { --s8-glow-x: 42%; --s8-glow-y: 34%; --s8-glow-spread: 42%; }
 }
 @property --s8-pulse-pos {
   syntax: '<percentage>';
@@ -25,7 +53,7 @@
   background-image:
     linear-gradient(to right,  var(--s8-accent) 0.0625rem, transparent 0.0625rem),
     linear-gradient(to bottom, var(--s8-accent) 0.0625rem, transparent 0.0625rem);
-  background-size: 4rem 4rem;
+  background-size: var(--s8-grid-tile) var(--s8-grid-tile);
   background-position: center;
   --s8-pulse-pos: -15%;
   mask-image: linear-gradient(315deg,
@@ -47,6 +75,7 @@
   100% { --s8-pulse-pos: 115%; opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .s8-grid { animation: none; }
   .s8-grid::before { animation: none; opacity: 0; }
 }
 

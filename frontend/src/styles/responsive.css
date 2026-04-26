@@ -76,14 +76,11 @@
     gap: 0.625rem;
   }
 
-  /* Visitor home: scale grid down so 4rem cells stop dominating narrow
+  /* Visitor home: scale grid down so cells stop dominating narrow
      viewports, tighten hero rhythm, pull page padding in. Desktop rules
      above are untouched. */
   .database-home {
-    background-size: auto, 2.5rem 2.5rem, 2.5rem 2.5rem;
-  }
-  .database-home::before {
-    background-size: 2.5rem 2.5rem;
+    --s8-grid-tile: 1.75rem;
   }
   .database-home .database-page {
     padding: 0 1.25rem 2.5rem;
@@ -178,19 +175,14 @@
 
   /* Page container: keep the lab grid — it's part of the brand — but
      dimmed so it reads as ambient texture, not architecture cutting
-     through cards. Two layers:
-       1. The base dot grid lines stay, but the line color is mixed
-          with 30% of var(--s8-canvas-dot) so the lines themselves are
-          much fainter. Tile size stays at desktop 4rem so there are
-          fewer lines per card and the rhythm feels open.
-       2. The animated cyan ::before scan layer is paused and reduced
-          to 0.12 opacity — atmosphere only, no motion. */
+     through cards. Override --s8-canvas-dot to a fainter value so the
+     grid lines recede. The scan ::before layer is reduced to 0.25
+     opacity — atmosphere only, less motion. */
   .database-home {
-    background-image:
-      radial-gradient(ellipse 55% 32% at 50% 14%, var(--s8-canvas-glow), transparent 70%),
-      linear-gradient(to right, color-mix(in srgb, var(--s8-canvas-dot) 60%, transparent) 0.0625rem, transparent 0.0625rem),
-      linear-gradient(to bottom, color-mix(in srgb, var(--s8-canvas-dot) 60%, transparent) 0.0625rem, transparent 0.0625rem);
-    background-size: auto, 4rem 4rem, 4rem 4rem;
+    --s8-canvas-dot: rgba(0, 221, 255, 0.09);
+  }
+  html[data-mode="light"] .database-home {
+    --s8-canvas-dot: rgba(0, 130, 160, 0.11);
   }
   .database-home::before {
     opacity: 0.25;

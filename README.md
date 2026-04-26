@@ -73,6 +73,7 @@ One login, two access levels: the owner password lets you edit everything, the v
 
 ```bash
 # Backend (terminal 1)
+pip install -r requirements.txt
 export FLASK_SECRET_KEY=dev-secret
 python server.py
 
@@ -84,7 +85,7 @@ npm run dev
 
 Visit `http://127.0.0.1:5173`.
 
-If you don't set `OWNER_PASSWORD` and `VISITOR_PASSWORD`, local dev will prompt you to create both in the browser on first run.
+Supabase is optional for local dev — without `SUPABASE_URL` and `SUPABASE_KEY`, data is stored in local JSON files under `data/`. If you don't set `OWNER_PASSWORD` and `VISITOR_PASSWORD`, local dev will prompt you to create both in the browser on first run.
 
 <details>
 <summary><strong>Adding Google Docs and Sheets to your workspace</strong></summary>
