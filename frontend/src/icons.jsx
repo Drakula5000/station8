@@ -198,6 +198,15 @@ export function UnlockIcon(props) {
   )
 }
 
+export function PencilIcon(props) {
+  return (
+    <svg {...common} {...props}>
+      <path d="M13.5 3.5l3 3-9.5 9.5H4v-3z"/>
+      <path d="M12 5l3 3"/>
+    </svg>
+  )
+}
+
 /* ─── FigJam-style canvas-toolbar icons (colored, 1.375rem) ─── */
 
 export function FjCursorIcon() {

@@ -680,7 +680,8 @@
     pointer-events: auto;
   }
   .tree-delete-btn,
-  .tree-privacy-btn {
+  .tree-privacy-btn,
+  .tree-rename-btn {
     opacity: 1 !important;
   }
 

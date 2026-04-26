@@ -517,16 +517,19 @@
 }
 .tree-item-shell:hover .item-actions { display: flex; }
 .tree-delete-btn,
-.tree-privacy-btn {
+.tree-privacy-btn,
+.tree-rename-btn {
   display: flex; align-items: center; justify-content: center;
   width: 1.375rem; height: 1.375rem; border: none; background: transparent;
   color: var(--s8-text-mid); border-radius: 0.3125rem; cursor: pointer;
   transition: color 0.1s, background 0.1s;
 }
 .tree-delete-btn svg,
-.tree-privacy-btn svg { width: 0.9375rem; height: 0.9375rem; }
+.tree-privacy-btn svg,
+.tree-rename-btn svg { width: 0.9375rem; height: 0.9375rem; }
 .tree-delete-btn:hover { color: var(--s8-danger); background: var(--s8-danger-dim); }
 .tree-privacy-btn:hover { color: var(--s8-accent); background: var(--s8-accent-dim); }
+.tree-rename-btn:hover { color: var(--s8-accent); background: var(--s8-accent-dim); }
 /* When locked: always show the lock button (not just on hover) */
 .tree-privacy-btn.is-private {
   color: var(--s8-accent);
@@ -534,7 +537,20 @@
 }
 .tree-privacy-btn.is-private:hover { color: var(--s8-text-mid); background: var(--s8-hover); }
 
-.sb-item-main { padding-right: 3.625rem; }
+/* Inline rename input — replaces the label while editing */
+.tree-rename-input {
+  flex: 1; min-width: 0;
+  background: var(--s8-bg);
+  color: var(--s8-text);
+  border: 0.0625rem solid var(--s8-accent);
+  border-radius: 0.25rem;
+  padding: 0.0625rem 0.375rem;
+  font: inherit;
+  outline: none;
+}
+.tree-item-shell.is-renaming .sb-item-main { cursor: text; }
+
+.sb-item-main { padding-right: 5rem; }
 
 /* Always-visible lock icon for private items in the label area */
 .sb-private-badge {
