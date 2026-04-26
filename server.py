@@ -2673,7 +2673,7 @@ class _ReportTextExtractor(_StdlibHTMLParser):
     Skips <script>, <style>, and <head> contents so the search index
     isn't polluted with CSS rules, JS strings, or meta tags.
     """
-    _SKIP_TAGS = frozenset({'script', 'style', 'head', 'meta', 'link', 'title'})
+    _SKIP_TAGS = frozenset({'script', 'style', 'head', 'title'})
 
     def __init__(self):
         super().__init__()
@@ -2704,6 +2704,7 @@ def _text_from_report_html(html: str) -> str:
     parser = _ReportTextExtractor()
     try:
         parser.feed(html)
+        parser.close()
     except Exception:
         return ''
     return parser.text()
