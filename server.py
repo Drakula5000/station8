@@ -8,6 +8,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta as _timedelta
 from functools import wraps
+from html.parser import HTMLParser as _StdlibHTMLParser
 
 from flask import Flask, jsonify, request, send_from_directory, session, redirect
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -2664,6 +2665,48 @@ def _extract_rich_text(node):
         if extracted:
             parts.append(extracted)
     return ' '.join(parts)
+
+
+class _ReportTextExtractor(_StdlibHTMLParser):
+    """Walks a knitted HTML doc and accumulates visible body text.
+
+    Skips <script>, <style>, and <head> contents so the search index
+    isn't polluted with CSS rules, JS strings, or meta tags.
+    """
+    _SKIP_TAGS = frozenset({'script', 'style', 'head', 'meta', 'link', 'title'})
+
+    def __init__(self):
+        super().__init__()
+        self._depth_skip = 0
+        self._chunks = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._SKIP_TAGS:
+            self._depth_skip += 1
+
+    def handle_endtag(self, tag):
+        if tag in self._SKIP_TAGS and self._depth_skip > 0:
+            self._depth_skip -= 1
+
+    def handle_data(self, data):
+        if self._depth_skip == 0:
+            text = data.strip()
+            if text:
+                self._chunks.append(text)
+
+    def text(self):
+        return ' '.join(self._chunks)
+
+
+def _text_from_report_html(html: str) -> str:
+    if not html:
+        return ''
+    parser = _ReportTextExtractor()
+    try:
+        parser.feed(html)
+    except Exception:
+        return ''
+    return parser.text()
 
 
 def _text_from_tldraw(snapshot):
