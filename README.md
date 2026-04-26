@@ -287,15 +287,23 @@ Replace `/path/to/your/station8` with the actual path to your forked repo on dis
 
 **2. Connect to your hub.**
 
+In the RStudio console, run:
+
 ```r
 station8::configure()
 ```
 
-This prompts for your hub URL (default `https://YOUR_API_DOMAIN`) and your owner password. It exchanges them for a long-lived token stored at `~/.station8/token` (mode 0600 — readable only by you). You only do this once per machine.
+It will ask for your hub URL — press Enter to accept the default (`https://YOUR_API_DOMAIN`) — then your owner password. It exchanges them for a long-lived token stored at `~/.station8/token`. You only do this once per machine.
 
 **3. Register the auto-push hook.**
 
-Add one line to your `~/.Rprofile`:
+In the RStudio console, run this to open your `~/.Rprofile` for editing:
+
+```r
+file.edit("~/.Rprofile")
+```
+
+Add this line, save, and close the file:
 
 ```r
 station8::auto_push()
