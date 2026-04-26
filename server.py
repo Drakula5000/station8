@@ -195,6 +195,10 @@ def _sheet_file(item_id):
     return os.path.join(DATA_DIR, f'sheet-{item_id}.json')
 
 
+def _report_file(item_id):
+    return os.path.join(DATA_DIR, f'report-{item_id}.json')
+
+
 def _get_env_password(env_names, dev_default):
     for name in env_names:
         value = os.getenv(name)
@@ -425,6 +429,30 @@ def _load_gsheets():
 def _save_gsheets(gsheets):
     folders = _get_workspace().get('folders', [])
     _save(GSHEETS_FILE, [_normalize_gdrive_doc(d, folders) for d in gsheets])
+
+
+def _load_reports():
+    return _load('reports.json', [])
+
+
+def _save_reports(reports):
+    _save('reports.json', reports)
+
+
+def _load_report(report_id):
+    return _load(_report_file(report_id), None)
+
+
+def _save_report(report_id, data):
+    _save(_report_file(report_id), data)
+
+
+def _load_r_tokens():
+    return _load('r_tokens.json', [])
+
+
+def _save_r_tokens(tokens):
+    _save('r_tokens.json', tokens)
 
 
 # ── Google Drive content sync (no-OAuth path) ────────────────────────────────
@@ -897,6 +925,13 @@ def _delete_board_files(board_ids):
 def _delete_sheet_files(sheet_ids):
     for sheet_id in sheet_ids:
         fp = _sheet_file(sheet_id)
+        if os.path.exists(fp):
+            os.remove(fp)
+
+
+def _delete_report_files(report_ids):
+    for report_id in report_ids:
+        fp = _report_file(report_id)
         if os.path.exists(fp):
             os.remove(fp)
 
