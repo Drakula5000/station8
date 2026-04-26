@@ -293,7 +293,7 @@ In the RStudio console, run:
 station8::configure()
 ```
 
-It will ask for your hub URL — press Enter to accept the default (`https://YOUR_API_DOMAIN`) — then your owner password. It exchanges them for a long-lived token stored at `~/.station8/token`. You only do this once per machine.
+It will ask for your hub URL (your Render backend URL, e.g. `https://your-app.onrender.com`) and your owner password. It exchanges them for a long-lived token stored at `~/.station8/token`. You only do this once per machine.
 
 **3. Register the auto-push hook.**
 
