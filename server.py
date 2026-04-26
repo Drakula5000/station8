@@ -191,20 +191,34 @@ def _sheet_file(item_id):
     return os.path.join(DATA_DIR, f'sheet-{item_id}.json')
 
 
+def _is_local_dev():
+    return os.getenv('FLASK_ENV') == 'development' or os.getenv('PORT') is None
+
+
 def _env_studio_password():
-    return (
+    value = (
         os.getenv('OWNER_PASSWORD')
         or os.getenv('STUDIO_PASSWORD')
         or os.getenv('RESEARCH_OWNER_PASSWORD')
         or os.getenv('RESEARCH_STUDIO_PASSWORD')
     )
+    if value:
+        return value
+    if _is_local_dev():
+        return 'owner'
+    return None
 
 
 def _env_visitor_password():
-    return (
+    value = (
         os.getenv('VISITOR_PASSWORD')
         or os.getenv('RESEARCH_VISITOR_PASSWORD')
     )
+    if value:
+        return value
+    if _is_local_dev():
+        return 'visitor'
+    return None
 
 
 def _load_auth_config():
@@ -2624,7 +2638,7 @@ def root():
 
 
 if __name__ == '__main__':
-    _is_dev = os.getenv('FLASK_ENV') == 'development' or os.getenv('PORT') is None
+    _is_dev = _is_local_dev()
     app.run(
         debug=_is_dev,
         use_reloader=_is_dev,
