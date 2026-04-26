@@ -56,11 +56,11 @@
   background-size: var(--s8-grid-tile) var(--s8-grid-tile);
   background-position: center;
   --s8-pulse-pos: -15%;
-  mask-image: linear-gradient(315deg,
+  mask-image: linear-gradient(180deg,
     transparent calc(var(--s8-pulse-pos) - 14%),
     var(--s8-mask-fg) var(--s8-pulse-pos),
     transparent calc(var(--s8-pulse-pos) + 14%));
-  -webkit-mask-image: linear-gradient(315deg,
+  -webkit-mask-image: linear-gradient(180deg,
     transparent calc(var(--s8-pulse-pos) - 14%),
     var(--s8-mask-fg) var(--s8-pulse-pos),
     transparent calc(var(--s8-pulse-pos) + 14%));

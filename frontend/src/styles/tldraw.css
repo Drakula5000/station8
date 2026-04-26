@@ -152,6 +152,7 @@
    the dashboard scrolls. .s8-grid uses position: absolute. */
 .database-home::before {
   position: fixed;
+  display: none;
 }
 .database-home::after {
   content: '';
