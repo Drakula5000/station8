@@ -552,19 +552,19 @@
     transition: border-color 0.12s;
   }
   .database-home .database-feed-card[data-doc-type="gdoc"] {
-    border-left-color: color-mix(in srgb, #90BCE8 50%, transparent);
+    border-left-color: color-mix(in srgb, var(--s8-tl-blue) 50%, transparent);
   }
   .database-home .database-feed-card[data-doc-type="gsheet"] {
-    border-left-color: color-mix(in srgb, #88D4B0 50%, transparent);
+    border-left-color: color-mix(in srgb, var(--s8-tl-teal) 50%, transparent);
   }
   .database-home .database-feed-card:hover {
     border-left-color: var(--s8-accent);
   }
   .database-home .database-feed-card[data-doc-type="gdoc"]:hover {
-    border-left-color: #90BCE8;
+    border-left-color: var(--s8-tl-blue);
   }
   .database-home .database-feed-card[data-doc-type="gsheet"]:hover {
-    border-left-color: #88D4B0;
+    border-left-color: var(--s8-tl-teal);
   }
   .database-home .database-feed-title {
     font-family: 'Crimson Pro', serif;

@@ -65,6 +65,9 @@ PRODUCTION = bool(
     or os.getenv('COOKIE_SECURE', '').lower() in {'1', 'true', 'yes'}
 )
 
+ACCESS_OWNER = 'owner'
+ACCESS_VISITOR = 'visitor'
+
 
 def _env_flag(name, default=False):
     value = os.getenv(name)
@@ -191,34 +194,26 @@ def _sheet_file(item_id):
     return os.path.join(DATA_DIR, f'sheet-{item_id}.json')
 
 
-def _is_local_dev():
-    return os.getenv('FLASK_ENV') == 'development' or os.getenv('PORT') is None
+def _get_env_password(env_names, dev_default):
+    for name in env_names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return dev_default if not PRODUCTION else None
 
 
 def _env_studio_password():
-    value = (
-        os.getenv('OWNER_PASSWORD')
-        or os.getenv('STUDIO_PASSWORD')
-        or os.getenv('RESEARCH_OWNER_PASSWORD')
-        or os.getenv('RESEARCH_STUDIO_PASSWORD')
+    return _get_env_password(
+        ['OWNER_PASSWORD', 'STUDIO_PASSWORD', 'RESEARCH_OWNER_PASSWORD', 'RESEARCH_STUDIO_PASSWORD'],
+        ACCESS_OWNER,
     )
-    if value:
-        return value
-    if _is_local_dev():
-        return 'owner'
-    return None
 
 
 def _env_visitor_password():
-    value = (
-        os.getenv('VISITOR_PASSWORD')
-        or os.getenv('RESEARCH_VISITOR_PASSWORD')
+    return _get_env_password(
+        ['VISITOR_PASSWORD', 'RESEARCH_VISITOR_PASSWORD'],
+        ACCESS_VISITOR,
     )
-    if value:
-        return value
-    if _is_local_dev():
-        return 'visitor'
-    return None
 
 
 def _load_auth_config():
@@ -704,9 +699,9 @@ def _is_visitor_authed():
 
 def _current_access_level():
     if _is_studio_authed():
-        return 'owner'
+        return ACCESS_OWNER
     if _is_visitor_authed():
-        return 'visitor'
+        return ACCESS_VISITOR
     return None
 
 
@@ -968,7 +963,7 @@ def auth_setup():
     session['studio_authed'] = True
     session.pop('visitor_authed', None)
     session.modified = True
-    return jsonify({'authenticated': True, 'requires_setup': False, 'access': 'owner'})
+    return jsonify({'authenticated': True, 'requires_setup': False, 'access': ACCESS_OWNER})
 
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -988,13 +983,13 @@ def auth_login():
         session['studio_authed'] = True
         session.pop('visitor_authed', None)
         session.modified = True
-        return jsonify({'authenticated': True, 'access': 'owner'})
+        return jsonify({'authenticated': True, 'access': ACCESS_OWNER})
     if not _verify_visitor_password(password):
         return jsonify({'error': 'Wrong password'}), 401
     session['visitor_authed'] = True
     session.pop('studio_authed', None)
     session.modified = True
-    return jsonify({'authenticated': True, 'access': 'visitor'})
+    return jsonify({'authenticated': True, 'access': ACCESS_VISITOR})
 
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -2638,7 +2633,7 @@ def root():
 
 
 if __name__ == '__main__':
-    _is_dev = _is_local_dev()
+    _is_dev = not PRODUCTION
     app.run(
         debug=_is_dev,
         use_reloader=_is_dev,
