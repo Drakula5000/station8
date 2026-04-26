@@ -2447,6 +2447,32 @@ def get_visitor_gsheet(gsheet_id):
     return jsonify({'error': 'Not found'}), 404
 
 
+@app.route('/api/visitor/reports', methods=['GET'])
+@_viewer_auth_required
+def list_visitor_reports():
+    return jsonify(_list_docs_sorted(_load_reports(), visitor=True))
+
+
+@app.route('/api/visitor/reports/<report_id>', methods=['GET'])
+@_viewer_auth_required
+def get_visitor_report(report_id):
+    payload, error = _visitor_doc_load(
+        report_id,
+        load_index=_load_reports,
+        doc_file_fn=_report_file,
+        default_payload={'html': ''},
+    )
+    if error:
+        return error
+    return jsonify({
+        'id': report_id,
+        'name': payload.get('name', ''),
+        'html': payload.get('html', ''),
+        'created_at': payload.get('created_at'),
+        'updated_at': payload.get('updated_at'),
+    })
+
+
 # ── Uploads + OCR ────────────────────────────────────────────────────────────
 
 # Images render on the canvas at a few hundred pixels wide at most. Full-res
