@@ -30,7 +30,7 @@ You can create or import Google Docs and Sheets directly into the same workspace
 Station 8 is a free (or almost-free if depending on your usage) way to show-off your research and how you think. You could put a link in your résumé or recruiter outreach so they can see your research and passion on a relevant topic. The economy and labor market are tough right now, and I want you to shine without sacrificing meals.
 
 <div align="center">
-<a href="https://drakula5000.github.io/station8/demo" style="color: #66ffff; text-decoration: none; font-family: 'Courier New', monospace; font-size: 11px; letter-spacing: 0.1em;">→ TRY THE LIVE DEMO</a>
+<a href="https://drakula5000.github.io/station8" style="color: #66ffff; text-decoration: none; font-family: 'Courier New', monospace; font-size: 11px; letter-spacing: 0.1em;">→ TRY THE LIVE DEMO</a>
 </div>
 
 <br>
