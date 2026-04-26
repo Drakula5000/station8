@@ -659,6 +659,21 @@ export default function App() {
     }
   }, [driveConfig.mirror_folders])
 
+  const [driveSyncOpen, setDriveSyncOpen] = useState(false)
+  const [driveSyncBusy, setDriveSyncBusy] = useState(false)
+  const [driveSyncResult, setDriveSyncResult] = useState(null)
+
+  const runDriveSyncExisting = useCallback(async () => {
+    setDriveSyncBusy(true)
+    setDriveSyncResult(null)
+    try {
+      const data = await fetchJsonPost(`${API}/api/google/sync-existing`, {}, null)
+      setDriveSyncResult(data || { error: true })
+    } finally {
+      setDriveSyncBusy(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (!auth.authenticated || !ownerMode) return
     refreshGoogleAuth()
@@ -1676,12 +1691,20 @@ export default function App() {
                       onChange={toggleDriveMirror}
                     />
                     <span className="drive-settings-toggle-text">
-                      <span className="drive-settings-toggle-title">Mirror Station 8 folders in Drive</span>
+                      <span className="drive-settings-toggle-title">Mirror Station 8 folders going forward</span>
                       <span className="drive-settings-toggle-sub">
-                        New files land inside a Drive folder that matches their Station 8 folder path. Existing files aren't moved.
+                        Only applies to <strong>new</strong> Docs and Sheets. Use the button below to organize existing files.
                       </span>
                     </span>
                   </label>
+                  <button
+                    className="drive-settings-action-btn"
+                    onClick={() => setDriveSyncOpen(true)}
+                    type="button"
+                    title="Move every linked Doc and Sheet into its mirrored Drive folder"
+                  >
+                    Move existing files into folders…
+                  </button>
                 </div>
               )}
               {googleAuth.connected ? (
@@ -2187,6 +2210,72 @@ export default function App() {
               {deleteTarget.type === 'folder' && deleteMode === 'move' ? 'Delete folder' : 'Delete permanently'}
             </button>
           </div>
+        </Modal>
+      )}
+
+      {driveSyncOpen && (
+        <Modal
+          onClose={() => { if (!driveSyncBusy) { setDriveSyncOpen(false); setDriveSyncResult(null) } }}
+          title={driveSyncResult ? 'Move complete' : 'Move existing files into folders?'}
+        >
+          {!driveSyncResult ? (
+            <>
+              <p className="modal-copy">
+                Every linked Doc and Sheet will be moved in your Google Drive into the folder that matches its Station 8 location. Files imported by URL paste (no underlying Drive file we own) are skipped.
+              </p>
+              <p className="modal-copy" style={{ fontSize: '0.75rem', color: 'var(--s8-text-mid)', marginTop: '0.5rem' }}>
+                Saved to <strong>{driveConfig.root_folder_name}</strong>{driveConfig.mirror_folders ? ' with the mirrored Station 8 folder structure inside.' : '. (Folder mirroring is OFF, so everything lands directly in this folder.)'}
+              </p>
+              <div className="modal-footer">
+                <button className="btn-ghost" onClick={() => setDriveSyncOpen(false)} type="button" disabled={driveSyncBusy}>Cancel</button>
+                <button className="btn-primary" onClick={runDriveSyncExisting} type="button" disabled={driveSyncBusy}>
+                  {driveSyncBusy ? 'Moving…' : 'Move files now'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="drive-sync-summary">
+                <div className="drive-sync-stat">
+                  <span className="drive-sync-stat-num">{driveSyncResult.summary?.moved ?? 0}</span>
+                  <span className="drive-sync-stat-lbl">moved</span>
+                </div>
+                <div className="drive-sync-stat">
+                  <span className="drive-sync-stat-num">{driveSyncResult.summary?.skipped ?? 0}</span>
+                  <span className="drive-sync-stat-lbl">skipped</span>
+                </div>
+                {Boolean(driveSyncResult.summary?.failed) && (
+                  <div className="drive-sync-stat drive-sync-stat-fail">
+                    <span className="drive-sync-stat-num">{driveSyncResult.summary.failed}</span>
+                    <span className="drive-sync-stat-lbl">failed</span>
+                  </div>
+                )}
+              </div>
+              {Boolean(driveSyncResult.skipped?.length) && (
+                <details className="drive-sync-details">
+                  <summary>Skipped ({driveSyncResult.skipped.length})</summary>
+                  <ul className="drive-sync-list">
+                    {driveSyncResult.skipped.map((s, i) => (
+                      <li key={i}><strong>{s.name}</strong> — {s.reason}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {Boolean(driveSyncResult.failed?.length) && (
+                <details className="drive-sync-details" open>
+                  <summary>Failed ({driveSyncResult.failed.length})</summary>
+                  <ul className="drive-sync-list">
+                    {driveSyncResult.failed.map((s, i) => (
+                      <li key={i}><strong>{s.name}</strong></li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              <div className="modal-footer">
+                <button className="btn-primary" onClick={() => { setDriveSyncOpen(false); setDriveSyncResult(null) }} type="button">Done</button>
+              </div>
+            </>
+          )}
         </Modal>
       )}
 

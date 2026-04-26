@@ -1668,6 +1668,90 @@ def google_drive_folders_list():
     return jsonify({'folders': folders, 'parent': parent, 'breadcrumb': breadcrumb})
 
 
+def _drive_get_file_parents(file_id, access_token, timeout=15):
+    params = _urllib_parse.urlencode({'fields': 'parents'})
+    payload = _drive_api_get(
+        f'https://www.googleapis.com/drive/v3/files/{file_id}?{params}',
+        access_token, timeout,
+    )
+    if not payload:
+        return None
+    return payload.get('parents') or []
+
+
+def _drive_move_file(file_id, new_parent_id, current_parents, access_token, timeout=15):
+    """Move a Drive file by adjusting its parents. Drive's PATCH supports
+    `addParents` + `removeParents` in one call. Returns True on success."""
+    if not file_id:
+        return False
+    add_parents = new_parent_id or 'root'
+    remove_parents = ','.join(p for p in (current_parents or []) if p != add_parents)
+    if not remove_parents and add_parents in (current_parents or []):
+        # Already in the right place — no-op success.
+        return True
+    params = {'addParents': add_parents}
+    if remove_parents:
+        params['removeParents'] = remove_parents
+    url = f'https://www.googleapis.com/drive/v3/files/{file_id}?{_urllib_parse.urlencode(params)}'
+    try:
+        req = _urllib_request.Request(
+            url, data=b'{}', method='PATCH',
+            headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'},
+        )
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            return resp.status in (200, 204)
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError) as exc:
+        print(f'Drive file move failed for {file_id}: {exc}', flush=True)
+        return False
+
+
+@app.route('/api/google/sync-existing', methods=['POST'])
+@_studio_auth_required
+def google_drive_sync_existing():
+    """Move every linked Doc/Sheet into the Drive folder that mirrors its
+    Station 8 folder (or to the configured save root if it's unfiled).
+    No-op for items without a `drive_file_id` (e.g. URL-pasted imports
+    where we don't own the file). Returns a per-item summary so the UI
+    can show what happened."""
+    access_token = _get_google_access_token()
+    if not access_token:
+        return jsonify({'error': 'Google account not connected'}), 400
+    config = _drive_get_config()
+    items = (
+        [(item, 'gdoc') for item in _load_gdocs()]
+        + [(item, 'gsheet') for item in _load_gsheets()]
+    )
+    moved = []
+    skipped_no_drive_file = []
+    failed = []
+    for item, _kind in items:
+        file_id = (item.get('drive_file_id') or '').strip()
+        if not file_id:
+            skipped_no_drive_file.append({'name': item.get('name'), 'reason': 'no linked Drive file'})
+            continue
+        s8_folder_id = item.get('folder_id')
+        if config['mirror_folders'] and s8_folder_id:
+            target_parent = _drive_ensure_mirror_folder(s8_folder_id, access_token)
+        else:
+            target_parent = config['root_folder_id']
+        current_parents = _drive_get_file_parents(file_id, access_token) or []
+        if _drive_move_file(file_id, target_parent, current_parents, access_token):
+            moved.append({'name': item.get('name'), 'file_id': file_id})
+        else:
+            failed.append({'name': item.get('name'), 'file_id': file_id})
+    return jsonify({
+        'moved': moved,
+        'skipped': skipped_no_drive_file,
+        'failed': failed,
+        'summary': {
+            'moved': len(moved),
+            'skipped': len(skipped_no_drive_file),
+            'failed': len(failed),
+            'total': len(items),
+        },
+    })
+
+
 def _delete_drive_file(file_id, timeout=15):
     """Permanently delete the underlying file in Drive. Used when the user
     opts in to "delete from Drive too" in the Station 8 delete dialog.
