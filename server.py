@@ -11,6 +11,7 @@ from functools import wraps
 from html.parser import HTMLParser as _StdlibHTMLParser
 
 from flask import Flask, jsonify, request, send_from_directory, session, redirect
+from itsdangerous import URLSafeSerializer, BadSignature
 from werkzeug.security import check_password_hash, generate_password_hash
 from supabase import create_client, Client
 
@@ -1042,6 +1043,51 @@ def auth_logout():
     session.pop('visitor_authed', None)
     session.modified = True
     return '', 204
+
+
+def _r_token_serializer():
+    return URLSafeSerializer(app.secret_key, salt='station8-r-token')
+
+
+def _r_token_required(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'missing bearer token'}), 401
+        token = auth_header[len('Bearer '):].strip()
+        try:
+            payload = _r_token_serializer().loads(token)
+        except BadSignature:
+            return jsonify({'error': 'invalid token'}), 401
+        if not isinstance(payload, dict) or payload.get('kind') != 'r-token':
+            return jsonify({'error': 'invalid token kind'}), 401
+        token_id = payload.get('token_id')
+        active_ids = {t['id'] for t in _load_r_tokens() if t.get('active', True)}
+        if token_id not in active_ids:
+            return jsonify({'error': 'token revoked'}), 401
+        return fn(*args, **kwargs)
+    return wrapped
+
+
+@app.route('/api/auth/r-token', methods=['POST'])
+def mint_r_token():
+    body = request.get_json(silent=True) or {}
+    password = (body.get('password') or '').strip()
+    if not password:
+        return jsonify({'error': 'password required'}), 400
+    if not _verify_studio_password(password):
+        return jsonify({'error': 'invalid password'}), 401
+    token_id = uuid.uuid4().hex
+    tokens = _load_r_tokens()
+    tokens.append({
+        'id': token_id,
+        'created_at': datetime.utcnow().isoformat() + 'Z',
+        'active': True,
+    })
+    _save_r_tokens(tokens)
+    token = _r_token_serializer().dumps({'kind': 'r-token', 'token_id': token_id})
+    return jsonify({'token': token})
 
 
 @app.route('/api/folders', methods=['POST'])
