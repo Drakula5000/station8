@@ -26,7 +26,7 @@ The search results also take you directly to the search hits, zooming your camer
 
 You can create or import Google Docs and Sheets directly into the same workspace, so people can search your entire research database in one spot.
 
-Station 8 is a free (or almost-free if depending on your usage) way to show-off your research and how you think. You could put a link in your résumé or recruiter outreach so they can see your research and passion on a relevant topic. The economy and labor market are tough right now, and I want you to shine without sacrificing meals.
+Station 8 is a free (or almost-free depending on your usage) way to show off your research and how you think. You could put a link in your résumé or recruiter outreach so they can see your research and passion on a relevant topic. The economy and labor market are tough right now, and I want you to shine without sacrificing meals.
 
 <div align="center">
 <a href="https://drakula5000.github.io/station8"><img src="./.github/assets/demo-link.svg" alt="→ TRY THE LIVE DEMO" width="260" /></a>
@@ -85,7 +85,7 @@ You'll need four free accounts. Create them before you start — the free tier o
 
 ![Getting Started](./.github/assets/h-getting-started.svg)
 
-Five steps: fork → Supabase → Render → Vercel → log in. Each step builds on the previous one, so do them in order.
+Five steps: fork → Supabase → Render → Vercel → log in. Each step builds on the previous one, so do them in order. Want to run it on your own computer instead? Skip to [local setup](#local-dev) below.
 
 **1. Fork this repo.**
 
@@ -243,6 +243,49 @@ Restart the dev server (`.env` is loaded by `start.sh` on launch — a running s
 </details>
 
 <br>
+
+<a id="local-dev"></a>
+
+<details>
+<summary><strong>Running Station 8 locally</strong></summary>
+
+<br>
+
+Run Station 8 on your own machine — to tinker with the code, test changes, or keep everything private with no cloud accounts needed. You'll need [Python 3.11+](https://www.python.org/downloads/) and [Node.js 18+](https://nodejs.org/) installed.
+
+**1. Install dependencies.**
+
+```bash
+python3 -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cd frontend && npm install && cd ..
+```
+
+**2. (Optional) Create a `.env` file** in the project root. Copy `.env.example` as a starting point. Everything has a working local default — you only need this file if you want to change a value.
+
+| Variable | Local default | Notes |
+|:---|:---|:---|
+| `FLASK_SECRET_KEY` | `station8-dev-secret-change-me` | Fine for local use. |
+| `OWNER_PASSWORD` | `owner` | Password for editor access. |
+| `VISITOR_PASSWORD` | `visitor` | Password for read-only access. |
+| `SUPABASE_URL` / `SUPABASE_KEY` | — | Optional. Without these, data is stored in local JSON files under `data/` — no account needed. |
+
+**3. Start the app.**
+
+```bash
+./start.sh
+```
+
+`start.sh` starts the Flask backend on `:5001` and the Vite frontend on `:5173` together — Ctrl+C stops both. It loads your `.env` automatically and activates the venv if one exists. The Vite dev server proxies all `/api` calls to the backend, so no `VITE_API_URL` is needed locally.
+
+Visit `http://127.0.0.1:5173` and log in with your `OWNER_PASSWORD` (default: `owner`).
+
+> **Google Docs and Sheets** work locally too. Add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:5001/api/google/callback` to your `.env`. Make sure `http://127.0.0.1:5001/api/google/callback` is listed as an authorized redirect URI in your Google Cloud credentials.
+
+</details>
+
+<br>
 <br>
 
 ![Acknowledgements](./.github/assets/h-acknowledgements.svg)
@@ -253,7 +296,7 @@ Restart the dev server (`.env` is loaded by `start.sh` on launch — a running s
 
 ![AI Transparency](./.github/assets/h-ai-transparency.svg)
 
-I vibecoded this app. AI transparency is important for your security, safety, and guaging the longevity of a software. You might ask your own AI agents or, even better, an engineering friend to review this code before you use it.
+I built this with AI. AI transparency is important for your security, safety, and gauging the longevity of the software. You might ask your own AI agents or, even better, an engineering friend to review this code before you use it.
 
 <br>
 
@@ -265,27 +308,3 @@ MIT. See [LICENSE](./LICENSE).
 
 tldraw requires its own license key for production use. A free 100-day trial and a free hobby license (non-commercial, shows a watermark) are available at [tldraw.dev/community/license](https://tldraw.dev/community/license).
 
----
-
-<details>
-<summary><strong>Running Station 8 on your own computer</strong></summary>
-
-<br>
-
-This is for people who want to run Station 8 locally — to tinker with the code, test changes, or just try it without deploying anywhere. You'll need Python 3.11+ and Node.js 18+ installed.
-
-```bash
-# Backend (terminal 1)
-pip install -r requirements.txt
-export FLASK_SECRET_KEY=dev-secret
-python server.py
-
-# Frontend (terminal 2)
-cd frontend
-npm install
-npm run dev
-```
-
-Visit `http://127.0.0.1:5173`. The app will prompt you to set an owner and visitor password on first run. Supabase is optional — without it, data is stored in local JSON files under `data/`.
-
-</details>
