@@ -442,8 +442,8 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
         </div>
         {shapePickerOpen && (
           <div className="shape-picker" onClick={e => e.stopPropagation()}>
-            {GEO_SHAPES.map(({ id, Icon }) => (
-              <button key={id} className="shape-option" onClick={() => setShape(id)} title={id} type="button"><Icon /></button>
+            {GEO_SHAPES.map((s) => (
+              <button key={s.id} className="shape-option" onClick={() => setShape(s.id)} title={s.id} type="button"><s.Icon /></button>
             ))}
             <div className="shape-picker-sep" />
             <button className="shape-option shape-option-line" onClick={() => setShape('line')} title="line" type="button"><FjLineIcon /></button>
