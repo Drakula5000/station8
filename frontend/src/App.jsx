@@ -1772,7 +1772,7 @@ export default function App() {
                     </button>
                     <button
                       className="sidebar-drive-icon"
-                      onClick={disconnectGoogle}
+                      onClick={() => setDisconnectConfirmOpen(true)}
                       title="Disconnect Google"
                       type="button"
                     >
@@ -2320,6 +2320,25 @@ export default function App() {
             <button className="btn-ghost" onClick={() => { setDeleteConfirmOpen(false); setDeleteTarget(null); setDeleteMode('move'); setDeleteAlsoDrive(false) }} type="button">Cancel</button>
             <button className="btn-primary btn-danger" onClick={handleDelete} type="button">
               {deleteTarget.type === 'folder' && deleteMode === 'move' ? 'Delete folder' : 'Delete permanently'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {disconnectConfirmOpen && (
+        <Modal
+          onClose={() => setDisconnectConfirmOpen(false)}
+          title="Disconnect Google?"
+        >
+          <div className="delete-dialog-body">
+            <p className="modal-copy">
+              Station 8 will lose access to your Google Drive. Linked Docs and Sheets stay in your workspace, but you'll need to reconnect to read their content or create new ones.
+            </p>
+          </div>
+          <div className="modal-footer">
+            <button className="btn-ghost" onClick={() => setDisconnectConfirmOpen(false)} type="button">Cancel</button>
+            <button className="btn-primary btn-danger" onClick={() => { disconnectGoogle(); setDisconnectConfirmOpen(false) }} type="button">
+              Disconnect
             </button>
           </div>
         </Modal>

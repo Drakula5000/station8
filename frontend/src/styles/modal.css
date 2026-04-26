@@ -2,10 +2,11 @@
 .modal-overlay {
   position: fixed; inset: 0;
   background: var(--s8-backdrop-scrim);
-  backdrop-filter: blur(0.1875rem);
-  z-index: 1000;
-  display: flex; justify-content: center; align-items: flex-start;
-  padding-top: 14vh;
+  backdrop-filter: blur(0.5rem);
+  z-index: 100000;
+  display: flex; justify-content: center; align-items: center;
+  overflow-y: auto;
+  padding: 1rem;
 }
 
 .modal {

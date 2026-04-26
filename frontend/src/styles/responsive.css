@@ -62,9 +62,7 @@
     padding: 1.125rem;
   }
   .modal-overlay {
-    padding-top: 8vh;
-    padding-left: 0.875rem;
-    padding-right: 0.875rem;
+    padding: 0.875rem;
   }
   .modal-search {
     width: min(34rem, 100%);
