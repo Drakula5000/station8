@@ -1,0 +1,248 @@
+/* ── Resets ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; }
+
+/* Block the macOS trackpad back-swipe gesture at the document level.
+   tldraw's canvas is infinite — it handles wheel events programmatically
+   instead of actually scrolling — so `overscroll-behavior` on any inner
+   container has nothing to contain. The browser fires the swipe-back
+   gesture based on trackpad momentum at the root, regardless of whether
+   the scroll chain reached it, so this rule has to live on `html` + `body`.
+   Board switches go through `window.history.pushState`; without this the
+   swipe fires `popstate` and flips to a previously-visited board. */
+html, body {
+  overscroll-behavior-x: none;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow: hidden;
+  background: var(--s8-bg);
+  color: var(--s8-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Theme-independent tokens (overlays, mask layers, tldraw palette) ── */
+:root {
+  /* Mask gradient color — alpha-only; the color itself is invisible */
+  --s8-mask-fg: rgba(0, 0, 0, 0.65);
+
+  /* Inset highlights on dark glass surfaces */
+  --s8-glass-highlight-soft:   rgba(255, 255, 255, 0.04);
+  --s8-glass-highlight:        rgba(255, 255, 255, 0.05);
+  --s8-glass-highlight-strong: rgba(255, 255, 255, 0.06);
+
+  /* Faint dark borders/shadows for light surfaces */
+  --s8-faint-border:        rgba(0, 0, 0, 0.05);
+  --s8-faint-border-soft:   rgba(0, 0, 0, 0.06);
+  --s8-shadow-soft:         rgba(0, 0, 0, 0.20);
+
+  /* Slate shadow palette (light-theme card depth) */
+  --s8-card-shadow-faint:  rgba(15, 23, 42, 0.08);
+  --s8-card-shadow-mid:    rgba(15, 23, 42, 0.10);
+  --s8-card-shadow-soft:   rgba(15, 23, 42, 0.12);
+  --s8-card-shadow:        rgba(15, 23, 42, 0.14);
+  --s8-card-shadow-strong: rgba(15, 23, 42, 0.16);
+
+  /* Backdrop scrim for modals */
+  --s8-backdrop-scrim: rgba(10, 12, 18, 0.55);
+
+  /* Generic dark overlays */
+  --s8-overlay-dark-18: var(--s8-overlay-dark-18);
+  --s8-overlay-dark-45: rgba(0, 0, 0, 0.45);
+
+  /* Tldraw palette — must match colors.js swatches; theme-independent */
+  --s8-tl-lavender:      #C8B0F5;
+  --s8-tl-violet:        #B8A0F8;
+  --s8-tl-pink:          #F0A8C0;
+  --s8-tl-pink-strong:   #e87890;
+  --s8-tl-blue:          #90BCE8;
+  --s8-tl-teal:          #88D4B0;
+  --s8-tl-orange:        #F0B880;
+  --s8-tl-grey:          #8898b0;
+  --s8-tl-black:         #000000;
+  --s8-tl-white:         #FFFFFF;
+  --s8-tl-text-on-light: #1d1d1d;
+
+  /* FigJam-style decorative icon accents */
+  --s8-fj-pen-accent: #FF7AA2;
+
+  /* Sticky-icon fold/stroke variants (paired with --s8-tl-* base colors) */
+  --s8-tl-lavender-fold:   #B098E8;
+  --s8-tl-lavender-stroke: #7050C0;
+  --s8-tl-pink-fold:       #E090A8;
+  --s8-tl-pink-stroke:     #B04870;
+  --s8-tl-blue-fold:       #78A8E0;
+  --s8-tl-blue-stroke:     #3068A8;
+  --s8-tl-teal-fold:       #70C0A0;
+  --s8-tl-teal-stroke:     #307060;
+  --s8-tl-orange-fold:     #E0A068;
+  --s8-tl-orange-stroke:   #B07020;
+  --s8-tl-violet-fold:     #A088F0;
+  --s8-tl-violet-stroke:   #5830B0;
+
+  /* Section/highlight pastel palette (light bg + dark stroke pairs) */
+  --s8-section-violet-bg:     #ede8ff;
+  --s8-section-violet-stroke: #7c5ce8;
+  --s8-section-teal-bg:       #d8f5f0;
+  --s8-section-teal-stroke:   #15c4b0;
+  --s8-section-blue-bg:       #ddeeff;
+  --s8-section-blue-stroke:   #3a80d8;
+  --s8-section-rose-bg:       #ffe8f0;
+  --s8-section-rose-stroke:   #d84a80;
+  --s8-section-amber-bg:      #fff0d8;
+  --s8-section-amber-stroke:  #c88030;
+  --s8-section-slate-bg:      #e8ecf4;
+  --s8-section-slate-stroke:  #607090;
+
+  /* Logo prism gradient stops */
+  --s8-logo-prism-1: #60F0FF;
+  --s8-logo-prism-2: #A07AFF;
+  --s8-logo-prism-3: #FF5CE0;
+}
+
+/* ── Aurora dark (default) ── */
+html[data-mode="dark"], html:not([data-mode]) {
+  --s8-bg:             #080c18;
+  --s8-canvas-dot:     rgba(0, 221, 255, 0.15);
+  --s8-canvas-glow:    rgba(0, 221, 255, 0.08);
+  --s8-accent:         #00ddff;
+  --s8-accent2:        #0066dd;
+  --s8-accent-dim:     rgba(0, 221, 255, 0.12);
+  --s8-accent-border:  rgba(0, 221, 255, 0.28);
+  --s8-sidebar-bg:     #0a0e1c;
+  --s8-sidebar-border: #182038;
+  --s8-hover:          rgba(0, 221, 255, 0.07);
+  --s8-active:         rgba(0, 221, 255, 0.14);
+  --s8-text:           #dce8f8;
+  --s8-text-mid:       #8b9cbd;
+  --s8-text-dim:       #6473a0;
+  --s8-pill-bg:        rgba(8, 12, 24, 0.85);
+  --s8-pill-border:    rgba(0, 221, 255, 0.32);
+  --s8-tag-bg:         rgba(0, 221, 255, 0.10);
+  --s8-tag:            #00ddff;
+  --s8-card-bg:        #0a0e1c;
+  --s8-card-border:    #182038;
+  --s8-folder-bg:      #0c1124;
+  --s8-folder-border:  #1e2d50;
+  --s8-modal-bg:       #0b0f20;
+  --s8-input-bg:       #0f1428;
+  --s8-input-border:   #1e2d4a;
+  --s8-danger:         #f87171;
+  --s8-danger-dim:     rgba(248, 113, 113, 0.08);
+  --s8-success:        #22c55e;
+  --s8-success-dim:    rgba(34, 197, 94, 0.10);
+  --s8-on-accent:      #ffffff;
+  --s8-shadow-pill:    0 0.125rem 1.25rem rgba(0, 0, 0, 0.55);
+  --s8-shadow-menu:    0 0.75rem 2.5rem rgba(0, 0, 0, 0.65);
+  --s8-shadow-modal:   0 1.25rem 3.75rem rgba(0, 0, 0, 0.70);
+  --s8-radius-lg:      1.125rem;
+  --s8-lightbox-backdrop: rgba(4, 6, 14, 0.92);
+  --s8-lightbox-img-bg:   #0a0e1c;
+  /* Search-result kind pills — uses Aurora swatch palette as type indicators */
+  --s8-kind-alt:          #C8B0F5;
+  --s8-kind-alt-dim:      rgba(200, 176, 245, 0.10);
+  --s8-kind-alt-border:   rgba(200, 176, 245, 0.34);
+  --s8-kind-ocr:          #90BCE8;
+  --s8-kind-ocr-dim:      rgba(144, 188, 232, 0.10);
+  --s8-kind-ocr-border:   rgba(144, 188, 232, 0.34);
+  --s8-kind-text:         #F0A8C0;
+  --s8-kind-text-dim:     rgba(240, 168, 192, 0.10);
+  --s8-kind-text-border:  rgba(240, 168, 192, 0.34);
+  --s8-kind-frame:        #88D4B0;
+  --s8-kind-frame-dim:    rgba(136, 212, 176, 0.10);
+  --s8-kind-frame-border: rgba(136, 212, 176, 0.34);
+  --s8-kind-sheet:        #F0B880;
+  --s8-kind-sheet-dim:    rgba(240, 184, 128, 0.10);
+  --s8-kind-sheet-border: rgba(240, 184, 128, 0.34);
+  --s8-kind-gdoc:         #8898b0;
+  --s8-kind-gdoc-dim:     rgba(136, 152, 176, 0.10);
+  --s8-kind-gdoc-border:  rgba(136, 152, 176, 0.34);
+  --s8-kind-gsheet:       #6dd890;
+  --s8-kind-gsheet-dim:   rgba(109, 216, 144, 0.10);
+  --s8-kind-gsheet-border:rgba(109, 216, 144, 0.34);
+  --s8-kind-name:         #FFC428;
+  --s8-kind-name-dim:     rgba(255, 196, 40, 0.12);
+  --s8-kind-name-border:  rgba(255, 196, 40, 0.40);
+  --s8-kind-tag:          #FF66CC;
+  --s8-kind-tag-dim:      rgba(255, 102, 204, 0.12);
+  --s8-kind-tag-border:   rgba(255, 102, 204, 0.40);
+
+  --s8-grid-overlay: rgba(8, 12, 24, 0.55);
+}
+
+/* ── Aurora light ──
+   Mirror of the dark token set. Same Aurora identity (cyan accent, dotted
+   grid, glass surfaces, sidebar slightly darker than canvas) — only colour
+   values are flipped. Structure (alphas, shadows, radii) stays in lockstep
+   with dark so the two modes feel like one design system. */
+html[data-mode="light"] {
+  --s8-bg:             #f4f8fb;
+  --s8-canvas-dot:     rgba(0, 130, 160, 0.18);
+  --s8-canvas-glow:    rgba(0, 180, 220, 0.10);
+  --s8-accent:         #0096b8;
+  --s8-accent2:        #006a8a;
+  --s8-accent-dim:     rgba(0, 150, 184, 0.12);
+  --s8-accent-border:  rgba(0, 150, 184, 0.32);
+  --s8-sidebar-bg:     #e6eef4;
+  --s8-sidebar-border: #c8d6e2;
+  --s8-hover:          rgba(0, 150, 184, 0.07);
+  --s8-active:         rgba(0, 150, 184, 0.14);
+  --s8-text:           #08172a;
+  --s8-text-mid:       #4a5b78;
+  --s8-text-dim:       #8090a8;
+  --s8-pill-bg:        rgba(255, 255, 255, 0.85);
+  --s8-pill-border:    rgba(0, 150, 184, 0.32);
+  --s8-tag-bg:         rgba(0, 150, 184, 0.10);
+  --s8-tag:            #0096b8;
+  --s8-card-bg:        #ffffff;
+  --s8-card-border:    #d0dde8;
+  --s8-folder-bg:      #eaf1f6;
+  --s8-folder-border:  #c8d6e2;
+  --s8-modal-bg:       #ffffff;
+  --s8-input-bg:       #ffffff;
+  --s8-input-border:   #c8d6e2;
+  --s8-danger:         #dc2626;
+  --s8-danger-dim:     rgba(220, 38, 38, 0.08);
+  --s8-success:        #16a34a;
+  --s8-success-dim:    rgba(22, 163, 74, 0.10);
+  --s8-on-accent:      #ffffff;
+  --s8-shadow-pill:    0 0.125rem 1.25rem rgba(8, 30, 60, 0.18);
+  --s8-shadow-menu:    0 0.75rem 2.5rem rgba(8, 30, 60, 0.22);
+  --s8-shadow-modal:   0 1.25rem 3.75rem rgba(8, 30, 60, 0.26);
+  --s8-radius-lg:      1.125rem;
+  --s8-lightbox-backdrop: rgba(8, 30, 60, 0.55);
+  --s8-lightbox-img-bg:   #ffffff;
+  /* Same kind palette identity as dark — darkened so the swatches read as
+     legible badges on white card surfaces instead of washing out. */
+  --s8-kind-alt:          #8c6cd0;
+  --s8-kind-alt-dim:      rgba(140, 108, 208, 0.10);
+  --s8-kind-alt-border:   rgba(140, 108, 208, 0.32);
+  --s8-kind-ocr:          #4f8fc4;
+  --s8-kind-ocr-dim:      rgba(79, 143, 196, 0.10);
+  --s8-kind-ocr-border:   rgba(79, 143, 196, 0.32);
+  --s8-kind-text:         #d96f8c;
+  --s8-kind-text-dim:     rgba(217, 111, 140, 0.10);
+  --s8-kind-text-border:  rgba(217, 111, 140, 0.32);
+  --s8-kind-frame:        #4caa80;
+  --s8-kind-frame-dim:    rgba(76, 170, 128, 0.10);
+  --s8-kind-frame-border: rgba(76, 170, 128, 0.32);
+  --s8-kind-sheet:        #d59456;
+  --s8-kind-sheet-dim:    rgba(213, 148, 86, 0.10);
+  --s8-kind-sheet-border: rgba(213, 148, 86, 0.32);
+  --s8-kind-gdoc:         #5a6b88;
+  --s8-kind-gdoc-dim:     rgba(90, 107, 136, 0.10);
+  --s8-kind-gdoc-border:  rgba(90, 107, 136, 0.32);
+  --s8-kind-gsheet:       #3aa766;
+  --s8-kind-gsheet-dim:   rgba(58, 167, 102, 0.10);
+  --s8-kind-gsheet-border:rgba(58, 167, 102, 0.32);
+  --s8-kind-name:         #b07410;
+  --s8-kind-name-dim:     rgba(176, 116, 16, 0.12);
+  --s8-kind-name-border:  rgba(176, 116, 16, 0.36);
+  --s8-kind-tag:          #c020a0;
+  --s8-kind-tag-dim:      rgba(192, 32, 160, 0.10);
+  --s8-kind-tag-border:   rgba(192, 32, 160, 0.36);
+
+  --s8-grid-overlay: rgba(248, 250, 252, 0.45);
+}
+

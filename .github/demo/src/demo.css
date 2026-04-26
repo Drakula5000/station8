@@ -259,7 +259,7 @@ body {
 .db-findbar-close:hover { background:color-mix(in srgb, var(--s8d-accent) 85%, var(--s8d-on-accent)); color:var(--s8d-on-accent); }
 
 /* Canvas area */
-.db-canvas { flex:1; position:relative; overflow:visible; z-index:2; }
+.db-canvas { flex:1; position:relative; overflow:hidden; z-index:2; }
 
 /* Frames — matches tldraw frame visual: thin border, label tab on top edge */
 .db-frame {
@@ -267,12 +267,13 @@ body {
   z-index:2;
 }
 .db-frame-label {
-  position:absolute; top:0; left:0; transform:translateY(-100%);
-  font-size:0.6875rem; font-weight:500; color:var(--s8d-text-mid);
-  white-space:nowrap; padding:4px 10px;
+  position:absolute; top:-20px; left:8px;
+  font-size:0.625rem; font-weight:500; color:var(--s8d-text-mid);
+  white-space:nowrap; padding:2px 8px;
   background:#0c1020; border:1px solid rgba(0,221,255,0.25);
   border-bottom:none; border-radius:4px 4px 0 0;
   font-family:'Inter',-apple-system,sans-serif;
+  z-index:3;
 }
 /* Frame inner layout — mimics tldraw free-form canvas with positioned items */
 .db-frame-inner {
@@ -430,8 +431,7 @@ body {
 /* ── (placeholder styles removed) ── */
 
 
-/* ── Frame solid background (no grid bleed-through) ── */
-.db-frame { background: #0c1020; position: relative; z-index: 2; }
+/* ── Frame background already set above ── */
 
 /* ── Wide grid for Fieldwork Sites when shown as main board ── */
 .db-frame-grid-wide {

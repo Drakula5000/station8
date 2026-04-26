@@ -4,12 +4,11 @@ import {
   BoardIcon, SheetIcon, DocIcon, GoogleLogoIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon, ThemeToggleIcon, LogoutIcon,
   SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon, GlobeIcon,
 } from './icons'
-import './App.css'
+import './styles/index.css'
 
 const API = import.meta.env.VITE_API_URL || ''
 const ROOT_FOLDER = '__root__'
 const SIDEBAR_STORAGE_KEY = 'researchHub.sidebarCollapsed'
-const DATABASE_VIEW_STORAGE_KEY = 'researchHub.databaseView'
 
 // Aurora is the only theme — ensure data-theme is always absent so Aurora
 // tokens (on html[data-mode]) take effect.
@@ -181,6 +180,8 @@ const KIND_PILL_LABEL = {
   sheet:  'CELL',
   gdoc:   'DOC',
   gsheet: 'SHEET',
+  name:   'NAME',
+  tag:    'TAG',
 }
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -292,13 +293,6 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
-  const [databaseView, setDatabaseView] = useState(() => {
-    try {
-      return window.localStorage.getItem(DATABASE_VIEW_STORAGE_KEY) || 'list'
-    } catch {
-      return 'list'
-    }
-  })
   const homeSearchRef = useRef(null)
   const [newBoardOpen, setNewBoardOpen] = useState(false)
   const [newBoardName, setNewBoardName] = useState('')
@@ -433,14 +427,6 @@ export default function App() {
       // Ignore storage failures; collapse state can fall back to per-session.
     }
   }, [sidebarCollapsed])
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(DATABASE_VIEW_STORAGE_KEY, databaseView)
-    } catch {
-      // Ignore storage failures; database view can fall back to per-session.
-    }
-  }, [databaseView])
 
   useEffect(() => {
     const onPopState = () => setRoute(parseRoute())
@@ -1435,9 +1421,9 @@ export default function App() {
       >
         <defs>
           <linearGradient id="s8-prism-stroke" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#60F0FF" />
-            <stop offset="50%" stopColor="#A07AFF" />
-            <stop offset="100%" stopColor="#FF5CE0" />
+            <stop offset="0%" stopColor="var(--s8-logo-prism-1)" />
+            <stop offset="50%" stopColor="var(--s8-logo-prism-2)" />
+            <stop offset="100%" stopColor="var(--s8-logo-prism-3)" />
           </linearGradient>
         </defs>
       </svg>
@@ -1618,8 +1604,6 @@ export default function App() {
           <DatabaseHome
             query={query}
             onQueryChange={setQuery}
-            databaseView={databaseView}
-            onDatabaseViewChange={setDatabaseView}
             items={databaseBrowseItems}
             searchHits={databaseSearchHits}
             folders={folders}
@@ -2235,8 +2219,6 @@ function AccessGate({
 function DatabaseHome({
   query,
   onQueryChange,
-  databaseView,
-  onDatabaseViewChange,
   items,
   searchHits,
   folders,

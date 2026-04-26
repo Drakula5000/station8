@@ -1,21 +1,18 @@
 // Aurora swatch palette — single source of truth.
-// `bg` is what the swatch chip displays and what lands on canvas (after the
-// CSS data-tl-color overrides in App.css). `tl` is the tldraw color name
-// stored on the shape and used by the data-tl-color CSS hooks.
-//
-// If you change a hex here, also update the matching `[data-tl-color='<tl>']`
-// override in App.css so the CSS-rendered fill matches the picker chip.
+// `bg` references CSS custom properties so all hex values live in App.css.
+// `tl` is the tldraw color name stored on the shape and used by the
+// data-tl-color CSS hooks.
 export const AURORA_SWATCHES = [
-  { id: 'black',    bg: '#000000', tl: 'black' },
-  { id: 'white',    bg: '#FFFFFF', tl: 'white' },
-  { id: 'lavender', bg: '#C8B0F5', tl: 'light-violet' },
-  { id: 'pink',     bg: '#F0A8C0', tl: 'light-red' },
-  { id: 'blue',     bg: '#90BCE8', tl: 'light-blue' },
-  { id: 'teal',     bg: '#88D4B0', tl: 'light-green' },
-  { id: 'orange',   bg: '#F0B880', tl: 'orange' },
-  { id: 'purple',   bg: '#B8A0F8', tl: 'violet' },
-  { id: 'red',      bg: '#e87890', tl: 'red' },
-  { id: 'grey',     bg: '#8898b0', tl: 'grey' },
+  { id: 'black',    bg: 'var(--s8-tl-black)',    tl: 'black' },
+  { id: 'white',    bg: 'var(--s8-tl-white)',    tl: 'white' },
+  { id: 'lavender', bg: 'var(--s8-tl-lavender)', tl: 'light-violet' },
+  { id: 'pink',     bg: 'var(--s8-tl-pink)',     tl: 'light-red' },
+  { id: 'blue',     bg: 'var(--s8-tl-blue)',     tl: 'light-blue' },
+  { id: 'teal',     bg: 'var(--s8-tl-teal)',     tl: 'light-green' },
+  { id: 'orange',   bg: 'var(--s8-tl-orange)',   tl: 'orange' },
+  { id: 'purple',   bg: 'var(--s8-tl-violet)',   tl: 'violet' },
+  { id: 'red',      bg: 'var(--s8-tl-pink-strong)', tl: 'red' },
+  { id: 'grey',     bg: 'var(--s8-tl-grey)',     tl: 'grey' },
 ]
 
 // Sticky-note picker uses legacy keys (yellow/pink/blue/green/orange/purple)

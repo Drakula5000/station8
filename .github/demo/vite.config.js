@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [react()],
   base: '/station8/demo/',
   build: {
-    outDir: '../../docs/demo',
+    outDir: 'dist',
     emptyOutDir: true,
   },
 })

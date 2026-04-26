@@ -210,13 +210,15 @@ export function FjHandIcon() {
   )
 }
 
+// Sticky-icon palette references CSS tokens defined in App.css :root
+// (the `yellow` legacy key maps to the lavender swatch).
 const STICKY_ICON_PALETTE = {
-  yellow: { bg: '#C8B0F5', fold: '#B098E8', stroke: '#7050C0' },  // lavender
-  pink:   { bg: '#F0A8C0', fold: '#E090A8', stroke: '#B04870' },
-  blue:   { bg: '#90BCE8', fold: '#78A8E0', stroke: '#3068A8' },
-  green:  { bg: '#88D4B0', fold: '#70C0A0', stroke: '#307060' },
-  orange: { bg: '#F0B880', fold: '#E0A068', stroke: '#B07020' },
-  purple: { bg: '#B8A0F8', fold: '#A088F0', stroke: '#5830B0' },
+  yellow: { bg: 'var(--s8-tl-lavender)', fold: 'var(--s8-tl-lavender-fold)', stroke: 'var(--s8-tl-lavender-stroke)' },
+  pink:   { bg: 'var(--s8-tl-pink)',     fold: 'var(--s8-tl-pink-fold)',     stroke: 'var(--s8-tl-pink-stroke)' },
+  blue:   { bg: 'var(--s8-tl-blue)',     fold: 'var(--s8-tl-blue-fold)',     stroke: 'var(--s8-tl-blue-stroke)' },
+  green:  { bg: 'var(--s8-tl-teal)',     fold: 'var(--s8-tl-teal-fold)',     stroke: 'var(--s8-tl-teal-stroke)' },
+  orange: { bg: 'var(--s8-tl-orange)',   fold: 'var(--s8-tl-orange-fold)',   stroke: 'var(--s8-tl-orange-stroke)' },
+  purple: { bg: 'var(--s8-tl-violet)',   fold: 'var(--s8-tl-violet-fold)',   stroke: 'var(--s8-tl-violet-stroke)' },
 }
 
 export function FjStickyIcon({ color = 'yellow' } = {}) {

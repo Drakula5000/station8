@@ -2407,6 +2407,28 @@ def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None):
     gdoc_items = gdocs if gdocs is not None else _load_gdocs()
     gsheet_items = gsheets if gsheets is not None else _load_gsheets()
     drive_contents = _load_gdrive_contents()
+
+    # Index every doc's name + tags so searches like "test" surface docs whose
+    # title or tag contains the term, even when the body never mentions it.
+    for doc_type, items in (
+        ('board', board_items), ('sheet', sheet_items),
+        ('gdoc', gdoc_items),   ('gsheet', gsheet_items),
+    ):
+        for item in items:
+            name = (item.get('name') or '').strip()
+            if name:
+                yield {
+                    'doc_type': doc_type, 'doc_id': item['id'], 'doc_name': name,
+                    'kind': 'name', 'text': name,
+                }
+            for tag in item.get('tags') or []:
+                tag = (tag or '').strip()
+                if tag:
+                    yield {
+                        'doc_type': doc_type, 'doc_id': item['id'], 'doc_name': name,
+                        'kind': 'tag', 'text': tag,
+                    }
+
     for board in board_items:
         data = _load(_board_file(board['id']), {'snapshot': None})
         snap = data.get('snapshot') or {}

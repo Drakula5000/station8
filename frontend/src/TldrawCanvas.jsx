@@ -1,22 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  Tldraw,
-  useEditor,
-  track,
-  DefaultColorStyle,
-  DefaultDashStyle,
-  GeoShapeGeoStyle,
-  FrameShapeUtil,
-  TldrawUiButtonIcon,
-} from 'tldraw'
+import { Tldraw, FrameShapeUtil } from 'tldraw'
 import 'tldraw/tldraw.css'
-import {
-  FjCursorIcon, FjHandIcon, FjStickyIcon, FjTextIcon, FjArrowIcon, FjPenIcon, FjSectionIcon,
-  FjEllipseIcon, FjDiamondIcon, FjRectIcon, FjLineIcon, FjChevronDownIcon,
-} from './icons'
 import { ShapeInspector } from './components/ShapeInspector'
 import { ImageLightbox } from './components/ImageLightbox'
 import { STICKY_SWATCHES } from './colors'
+import { ShapeColorSync } from './canvas/ShapeColorSync'
+import { FrameCornerStyles, ImageShapeStyles, ListStyles } from './canvas/ShapeStyles'
+import { BrokenImageRetry } from './canvas/BrokenImageRetry'
+import { FindBar } from './canvas/FindBar'
+import { FjToolbar } from './canvas/FjToolbar'
+import { isEditableTarget, resolveImageShapeUrl } from './canvas/shared'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -89,25 +82,6 @@ const NOTE_PREVIEW_SIZE = 200
 const MAX_DROPPED_IMAGE_VIEWPORT_FRACTION = 0.2
 const MAX_DROPPED_IMAGE_FRAME_FRACTION = 0.2
 const FRAME_DROPPED_IMAGE_INSET = 32
-// Resolve an image shape to a URL suitable for full-resolution viewing.
-// Uses tldraw's asset resolver so cropped images still point at the original
-// source; falls back to the shape's own src prop if the asset lookup fails.
-async function resolveImageShapeUrl(editor, shape) {
-  if (!shape || shape.type !== 'image') return null
-  const assetId = shape.props?.assetId
-  if (assetId) {
-    const asset = editor.getAsset(assetId)
-    if (asset) {
-      try {
-        const url = await editor.resolveAssetUrl(asset.id, { shouldResolveToOriginal: true })
-        if (url) return url
-      } catch {}
-      if (asset.props?.src) return asset.props.src
-    }
-  }
-  return shape.props?.src || null
-}
-
 const FRAME_SHAPE_UTILS = [FrameShapeUtil.configure({ showColors: true })]
 const FIGMA_REORDER_SHORTCUTS = {
   bringForward: 'cmd+],ctrl+]',
@@ -176,15 +150,25 @@ function getVisibleContentBounds(editor) {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
 }
 
-function fitBoardAfterOpen(editor) {
+function fitBoardAfterOpen(editor, onComplete) {
   // Poll until the visible-content bounds stabilise, then zoom to them.
   // Excludes the overflow of shapes nested inside frames (wide text etc.)
   // since frames clip those visually — including them would push the fit
   // box past the last visible content and leave the viewport off-center.
+  // `onComplete` fires when the fit finishes (or when no bounds ever resolve);
+  // callers use it to reveal the canvas after the camera lands, hiding the
+  // brief flash of saved-zoom content from the snapshot.
   let attempts = 0
+  let done = false
   const MAX_ATTEMPTS = 40
   const INTERVAL_MS = 100
   let lastSignature = null
+
+  const finish = () => {
+    if (done) return
+    done = true
+    onComplete?.()
+  }
 
   const doFit = (bounds) => {
     // loadStoreSnapshot replaces instance_state, which includes screenBounds.
@@ -196,6 +180,7 @@ function fitBoardAfterOpen(editor) {
     const container = editor.getContainer()
     if (container) editor.updateViewportScreenBounds(container)
     editor.zoomToBounds(bounds, { immediate: true, inset: 64 })
+    finish()
   }
 
   const tryFit = () => {
@@ -214,6 +199,10 @@ function fitBoardAfterOpen(editor) {
     } else if (lastSignature) {
       const fallback = getVisibleContentBounds(editor) ?? editor.getCurrentPageBounds()
       if (fallback) doFit(fallback)
+      else finish()
+    } else {
+      // Empty board / no shapes — nothing to fit, just reveal as-is.
+      finish()
     }
   }
 
@@ -254,895 +243,6 @@ function getDroppedImageTargetSize(editor, shape) {
   return resized || { w: width, h: height }
 }
 
-// Stamps data-tl-color on each shape DOM node so CSS can remap tldraw's
-// native dark-mode color palette to Aurora-appropriate values.
-const ShapeColorSync = track(function ShapeColorSync() {
-  const editor = useEditor()
-  const shapes = editor.getCurrentPageShapes()
-  useEffect(() => {
-    shapes.forEach(shape => {
-      const el = document.querySelector(`[data-shape-id="${shape.id}"]`)
-      if (!el) return
-
-      const color = shape.props?.color
-      if (color) {
-        el.setAttribute('data-tl-color', color)
-      } else {
-        el.removeAttribute('data-tl-color')
-      }
-
-      const size = shape.props?.size
-      if (typeof size === 'string') {
-        el.setAttribute('data-s8-size', size)
-      } else {
-        el.removeAttribute('data-s8-size')
-      }
-
-      const fillColor = shape.type === 'geo' && typeof shape.meta?.fillColor === 'string' ? shape.meta.fillColor : null
-      const fillOpacity = shape.type === 'geo' && typeof shape.meta?.fillOpacity === 'number' ? shape.meta.fillOpacity : 0
-
-      if (fillColor && fillOpacity > 0) {
-        el.setAttribute('data-geo-fill-custom', 'true')
-        el.style.setProperty('--s8-geo-fill-color', fillColor)
-        el.style.setProperty('--s8-geo-fill-opacity', String(fillOpacity))
-      } else {
-        el.removeAttribute('data-geo-fill-custom')
-        el.style.removeProperty('--s8-geo-fill-color')
-        el.style.removeProperty('--s8-geo-fill-opacity')
-      }
-    })
-  })
-  return null
-})
-
-// Reactive component that injects per-frame corner-radius CSS.
-// React 19 hoists <style> tags into <head> automatically.
-const FrameCornerStyles = track(function FrameCornerStyles() {
-  const editor = useEditor()
-  const frames = editor.getCurrentPageShapes().filter(
-    s => s.type === 'frame' && Number(s.meta?.cornerRadius) > 0
-  )
-  if (frames.length === 0) return null
-  const css = frames.map(f => {
-    const rx = Number(f.meta.cornerRadius)
-    const id = f.id
-    return [
-      `[data-shape-id="${id}"] .tl-frame__body { rx: ${rx}px }`,
-      `[data-shape-id="${id}"] .tl-frame-heading,`,
-      `[data-shape-id="${id}"] .tl-frame-heading-hit-area { border-radius: ${rx * 12 / 32}px }`,
-    ].join('\n')
-  }).join('\n')
-  return <style>{css}</style>
-})
-
-const ImageShapeStyles = track(function ImageShapeStyles() {
-  const editor = useEditor()
-  const images = editor.getCurrentPageShapes().filter((s) => {
-    if (s.type !== 'image') return false
-    const hasExplicitCorners = Object.prototype.hasOwnProperty.call(s.meta ?? {}, 'imageCornerRadius')
-    return hasExplicitCorners || Number(s.meta?.imageBorderWidth ?? 0) > 0
-  })
-  if (images.length === 0) return null
-
-  const css = images.map((image) => {
-    const id = image.id
-    const radius = image.props.crop?.isCircle ? '50%' : `${Number(image.meta?.imageCornerRadius ?? 0)}px`
-    const borderWidth = Number(image.meta?.imageBorderWidth ?? 0)
-    const borderColor = image.meta?.imageBorderColor || 'var(--s8-accent)'
-    const outlineStyle = borderWidth > 0
-      ? `outline: ${borderWidth}px solid ${borderColor}; outline-offset: 0; will-change: transform;`
-      : 'outline: none;'
-
-    return [
-      `[data-shape-id="${id}"] .tl-html-container { position: relative; border-radius: ${radius}; overflow: hidden; ${outlineStyle} }`,
-      `[data-shape-id="${id}"] .tl-image-container,`,
-      `[data-shape-id="${id}"] .tl-image { border-radius: inherit; }`,
-    ].join('\n')
-  }).join('\n')
-
-  return <style>{css}</style>
-})
-
-const ListStyles = track(function ListStyles() {
-  const editor = useEditor()
-  const shapesWithLists = editor.getCurrentPageShapes().filter((s) => {
-    return (s.type === 'note' || s.type === 'text') && s.meta?.listStyle
-  })
-  if (shapesWithLists.length === 0) return null
-
-  const css = shapesWithLists.map((shape) => {
-    const id = shape.id
-    const listStyle = shape.meta.listStyle
-    if (listStyle === 'roman') {
-      // Roman: I, II, III → a, b, c → i, ii, iii → 1, 2, 3
-      return [
-        `[data-shape-id="${id}"] ol { list-style-type: upper-roman !important; }`,
-        `[data-shape-id="${id}"] ol ol { list-style-type: lower-alpha !important; }`,
-        `[data-shape-id="${id}"] ol ol ol { list-style-type: lower-roman !important; }`,
-        `[data-shape-id="${id}"] ol ol ol ol { list-style-type: decimal !important; }`,
-      ].join('\n')
-    }
-    return ''
-  }).filter(Boolean).join('\n')
-
-  return css ? <style>{css}</style> : null
-})
-
-const SECTION_SWATCHES = {
-  violet: { bg: '#ede8ff', stroke: '#7c5ce8', tl: 'violet' },   // aurora accent
-  teal:   { bg: '#d8f5f0', stroke: '#15c4b0', tl: 'green' },    // aurora teal
-  blue:   { bg: '#ddeeff', stroke: '#3a80d8', tl: 'blue' },
-  rose:   { bg: '#ffe8f0', stroke: '#d84a80', tl: 'light-red' },
-  amber:  { bg: '#fff0d8', stroke: '#c88030', tl: 'orange' },
-  slate:  { bg: '#e8ecf4', stroke: '#607090', tl: 'grey' },
-}
-
-function isEditableTarget(target) {
-  if (!(target instanceof HTMLElement)) return false
-  const tag = target.tagName
-  return target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
-}
-
-function walkRichText(node) {
-  if (!node || typeof node !== 'object') return ''
-  if (node.type === 'text') return node.text || ''
-  return (node.content || []).map(walkRichText).join(' ')
-}
-
-function extractShapeText(shape) {
-  if (!shape) return ''
-  const type = shape.type
-  // All text-bearing shapes — richText takes priority, fall back to text prop
-  const richText = shape.props?.richText
-  if (richText) {
-    const extracted = walkRichText(richText)
-    if (extracted.trim()) return extracted
-  }
-  if (shape.props?.text) return shape.props.text
-  // Image alt text
-  if (type === 'image') return shape.meta?.altText || ''
-  // Frame name
-  if (type === 'frame') return shape.props?.name || ''
-  return ''
-}
-
-const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards = [], onNavigateBoard, findShapeIds = [] }) {
-  const editor = useEditor()
-  const [matches, setMatches] = useState([])
-  const [matchIndex, setMatchIndex] = useState(0)
-  const retryRef = useRef(null)
-
-  const boardIndex = findBoards.indexOf(boardId)
-  const totalBoards = findBoards.length
-  const hasPrevBoard = boardIndex > 0
-  const hasNextBoard = boardIndex < totalBoards - 1
-
-  const zoomToMatch = useCallback((editor, shapeId) => {
-    const bounds = editor.getShapePageBounds(shapeId)
-    if (!bounds || !(bounds.width > 0)) return
-    editor.zoomToBounds(bounds, { padding: 160, animation: { duration: 350 } })
-    editor.selectNone()
-  }, [])
-
-  const buildMatches = useCallback((editor, q, preferredIds) => {
-    const pageShapes = editor.getCurrentPageShapes()
-    if (preferredIds && preferredIds.length > 0) {
-      const byId = new Map(pageShapes.map(s => [s.id, s]))
-      const ordered = preferredIds
-        .filter(id => byId.has(id))
-        .map(id => ({ shapeId: id }))
-      if (ordered.length > 0) return ordered
-    }
-    return pageShapes
-      .filter(s => extractShapeText(s).toLowerCase().includes(q))
-      .map(s => ({ shapeId: s.id }))
-  }, [])
-
-  const findShapeIdsKey = findShapeIds.join('|')
-
-  useEffect(() => {
-    if (!editor || !query) return
-    const q = query.toLowerCase()
-    if (retryRef.current) clearTimeout(retryRef.current)
-
-    const tryMatch = (attempt = 0) => {
-      const found = buildMatches(editor, q, findShapeIds)
-      if (found.length > 0) {
-        setMatches(found)
-        setMatchIndex(0)
-        return
-      }
-      if (attempt < 30) {
-        retryRef.current = setTimeout(() => tryMatch(attempt + 1), 100)
-      } else {
-        setMatches([])
-        setMatchIndex(0)
-      }
-    }
-    tryMatch()
-    return () => { if (retryRef.current) clearTimeout(retryRef.current) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, query, buildMatches, findShapeIdsKey])
-
-  useEffect(() => {
-    if (!editor || matches.length === 0) return
-    zoomToMatch(editor, matches[matchIndex].shapeId)
-  }, [editor, matches, matchIndex, zoomToMatch])
-
-  const currentShapeId = matches[matchIndex]?.shapeId || null
-  const hasMatches = matches.length > 0
-
-  // Reactive glow + dim. Runs after every render; track() re-runs on store
-  // changes (camera tweens, shape mounts), letting us restamp once tldraw
-  // finally renders the target DOM node.
-  useEffect(() => {
-    document.querySelectorAll('[data-find-glow="true"]').forEach(el => {
-      if (el.getAttribute('data-shape-id') !== currentShapeId) {
-        el.removeAttribute('data-find-glow')
-      }
-    })
-    const wrap = document.querySelector('.tldraw-wrap')
-    if (wrap) {
-      if (hasMatches && currentShapeId) wrap.setAttribute('data-find-active', 'true')
-      else wrap.removeAttribute('data-find-active')
-    }
-    if (!currentShapeId) return
-    let rafId
-    let attempts = 0
-    const stamp = () => {
-      const el = document.querySelector(`[data-shape-id="${currentShapeId}"]`)
-      if (el) {
-        if (!el.hasAttribute('data-find-glow')) el.setAttribute('data-find-glow', 'true')
-        return
-      }
-      if (attempts++ < 60) rafId = requestAnimationFrame(stamp)
-    }
-    stamp()
-    return () => { if (rafId) cancelAnimationFrame(rafId) }
-  })
-
-  useEffect(() => {
-    return () => {
-      document.querySelectorAll('[data-find-glow="true"]').forEach(el => el.removeAttribute('data-find-glow'))
-      const wrap = document.querySelector('.tldraw-wrap')
-      if (wrap) wrap.removeAttribute('data-find-active')
-    }
-  }, [])
-
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') onDismiss()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onDismiss])
-
-  const goNext = () => {
-    if (matches.length > 1) {
-      setMatchIndex((matchIndex + 1) % matches.length)
-    } else if (hasNextBoard) {
-      onNavigateBoard(findBoards[boardIndex + 1])
-    }
-  }
-
-  const goPrev = () => {
-    if (matches.length > 1) {
-      setMatchIndex((matchIndex - 1 + matches.length) % matches.length)
-    } else if (hasPrevBoard) {
-      onNavigateBoard(findBoards[boardIndex - 1])
-    }
-  }
-
-  const handleClose = () => onDismiss()
-
-  // Counter: "1 of 3 · board 1/2" when multiple boards
-  const shapeCounter = matches.length === 0 ? '0 of 0' : `${matchIndex + 1} of ${matches.length}`
-  const boardCounter = totalBoards > 1 ? ` · board ${boardIndex + 1}/${totalBoards}` : ''
-  const counter = shapeCounter + boardCounter
-
-  const prevDisabled = matches.length <= 1 && !hasPrevBoard
-  const nextDisabled = matches.length <= 1 && !hasNextBoard
-
-  // Compute overlay marker geometry (viewport-relative, via pageToScreen)
-  let overlayStyle = null
-  let overlayLabel = shapeCounter
-  if (currentShapeId && editor) {
-    const bounds = editor.getShapePageBounds(currentShapeId)
-    if (bounds) {
-      const tl = editor.pageToScreen({ x: bounds.minX, y: bounds.minY })
-      const br = editor.pageToScreen({ x: bounds.maxX, y: bounds.maxY })
-      overlayStyle = {
-        left: `${tl.x}px`,
-        top: `${tl.y}px`,
-        width: `${br.x - tl.x}px`,
-        height: `${br.y - tl.y}px`,
-      }
-    }
-  }
-
-  return (
-    <>
-      <style>{`
-        /* Top-center find bar, glass style matching the pill */
-        .find-bar {
-          position: fixed;
-          top: 0.875rem;
-          left: 50%;
-          transform: translateX(-50%);
-          z-index: 520;
-          display: flex;
-          align-items: center;
-          gap: 0.625rem;
-          padding: 0.375rem 0.5rem 0.375rem 0.875rem;
-          background: color-mix(in srgb, var(--s8-bg) 80%, transparent);
-          backdrop-filter: blur(1.25rem) saturate(1.2);
-          -webkit-backdrop-filter: blur(1.25rem) saturate(1.2);
-          color: var(--s8-text);
-          border: 0.0625rem solid var(--s8-accent-border);
-          box-shadow: var(--s8-shadow-pill);
-          border-radius: 62.4375rem;
-          font-size: 0.75rem;
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-          letter-spacing: 0.01em;
-          white-space: nowrap;
-          pointer-events: all;
-        }
-        .find-bar-label {
-          font-size: 0.625rem;
-          text-transform: uppercase;
-          letter-spacing: 0.12em;
-          color: var(--s8-text-mid);
-          font-weight: 600;
-        }
-        .find-bar-query {
-          font-family: 'Space Mono', monospace;
-          font-size: 0.75rem;
-          color: var(--s8-text);
-          max-width: 11.25rem;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .find-bar-counter {
-          font-variant-numeric: tabular-nums;
-          opacity: 0.7;
-          padding: 0 0.375rem;
-          border-left: 0.0625rem solid var(--s8-accent-border);
-          border-right: 0.0625rem solid var(--s8-accent-border);
-        }
-        .find-bar-btn {
-          background: transparent;
-          border: none;
-          cursor: pointer;
-          color: var(--s8-text);
-          padding: 0.25rem 0.5rem;
-          border-radius: 62.4375rem;
-          font-size: 0.8125rem;
-          line-height: 1;
-          transition: background 0.12s, color 0.12s;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          min-width: 1.5rem;
-          height: 1.5rem;
-        }
-        .find-bar-btn:hover:not(:disabled) {
-          background: var(--s8-accent-dim);
-          color: var(--s8-accent);
-        }
-        .find-bar-btn.find-bar-close {
-          background: var(--s8-accent);
-          color: var(--s8-on-accent);
-          margin-left: 0.125rem;
-        }
-        .find-bar-btn.find-bar-close:hover {
-          background: color-mix(in srgb, var(--s8-accent) 85%, var(--s8-on-accent));
-          color: var(--s8-on-accent);
-        }
-        .find-bar-btn:disabled {
-          opacity: 0.3;
-          cursor: default;
-        }
-
-        /* Dim all non-matched shapes when a find is active (match kept bright via data-find-glow) */
-        .tldraw-wrap [data-shape-id] {
-          transition: opacity 0.25s ease, filter 0.25s ease;
-        }
-        .tldraw-wrap[data-find-active="true"] [data-shape-id]:not([data-find-glow="true"]) {
-          opacity: 0.2;
-          filter: saturate(0.45);
-        }
-
-        /* Overlay marker — lives in fixed-position layer above canvas, no clipping */
-        .find-overlay {
-          position: fixed;
-          z-index: 510;
-          pointer-events: none;
-          border: 0.0938rem solid var(--s8-accent);
-          border-radius: 0.1875rem;
-          box-shadow:
-            0 0 0 0.25rem color-mix(in srgb, var(--s8-accent) 12%, transparent),
-            0 0 1.75rem 0.25rem color-mix(in srgb, var(--s8-accent) 35%, transparent);
-        }
-        .find-overlay-label {
-          position: absolute;
-          top: -0.6875rem;
-          left: 0.625rem;
-          padding: 0.125rem 0.5rem;
-          background: var(--s8-accent);
-          color: var(--s8-on-accent);
-          font-family: 'Inter', -apple-system, sans-serif;
-          font-size: 0.625rem;
-          font-weight: 600;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-          border-radius: 62.4375rem;
-          white-space: nowrap;
-          box-shadow: var(--s8-shadow-pill);
-          font-variant-numeric: tabular-nums;
-        }
-      `}</style>
-
-      {overlayStyle && (
-        <div className="find-overlay" style={overlayStyle}>
-          <span className="find-overlay-label">{overlayLabel}</span>
-        </div>
-      )}
-
-      <div className="find-bar">
-        <span className="find-bar-label">Find</span>
-        <span className="find-bar-query">{query}</span>
-        <span className="find-bar-counter">{counter}</span>
-        <button
-          className="find-bar-btn"
-          onClick={goPrev}
-          disabled={prevDisabled}
-          title="Previous match"
-          type="button"
-        >↑</button>
-        <button
-          className="find-bar-btn"
-          onClick={goNext}
-          disabled={nextDisabled}
-          title="Next match"
-          type="button"
-        >↓</button>
-        <button
-          className="find-bar-btn find-bar-close"
-          onClick={handleClose}
-          title="Clear find (Esc)"
-          type="button"
-        >✕</button>
-      </div>
-    </>
-  )
-})
-
-// Watches for broken image elements inside tldraw shapes and retries loading
-// them with exponential backoff. Handles Render cold-start failures where
-// /uploads/ returns 404 or 500 while the server is waking up.
-const BrokenImageRetry = track(function BrokenImageRetry() {
-  const editor = useEditor()
-  const shapes = editor.getCurrentPageShapes().filter(s => s.type === 'image')
-
-  useEffect(() => {
-    if (shapes.length === 0) return
-    const timers = []
-
-    shapes.forEach(shape => {
-      const el = document.querySelector(`[data-shape-id="${shape.id}"] img`)
-      if (!el || el.complete && el.naturalWidth > 0) return
-      // Image is broken or not loaded — set up retry
-      const retry = (attempt = 0) => {
-        if (!el || el.naturalWidth > 0) return
-        const delay = Math.min(1000 * Math.pow(2, attempt), 16000)
-        const t = setTimeout(() => {
-          if (el.naturalWidth > 0) return
-          const src = el.src
-          el.src = ''
-          requestAnimationFrame(() => { el.src = src })
-          if (attempt < 5) retry(attempt + 1)
-        }, delay)
-        timers.push(t)
-      }
-      if (el.complete && el.naturalWidth === 0) {
-        retry(0)
-      } else {
-        el.addEventListener('error', () => retry(0), { once: true })
-      }
-    })
-
-    return () => timers.forEach(clearTimeout)
-  })
-
-  return null
-})
-
-const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox }) {
-  const editor = useEditor()
-  const [stickyPickerOpen, setStickyPickerOpen] = useState(false)
-  const [sectionPickerOpen, setSectionPickerOpen] = useState(false)
-  const [shapePickerOpen, setShapePickerOpen] = useState(false)
-  const [editingAltText, setEditingAltText] = useState(false)
-  const [altTextDraft, setAltTextDraft] = useState('')
-  const [lastStickyColor, setLastStickyColor] = useState('yellow')
-  const [lastSectionColor, setLastSectionColor] = useState('violet')
-  const [lastShape, setLastShape] = useState('ellipse')
-
-  const currentTool = editor.getCurrentToolId()
-  const selectedImage = editor.getOnlySelectedShape()?.type === 'image' ? editor.getOnlySelectedShape() : null
-
-  useEffect(() => {
-    if (!selectedImage) {
-      setEditingAltText(false)
-      setAltTextDraft('')
-      return
-    }
-    setAltTextDraft(selectedImage.meta?.altText || '')
-  }, [selectedImage])
-
-  // Keep toolInfoRef in sync so TldrawCanvas can render the ghost
-  if (toolInfoRef) {
-    toolInfoRef.current.tool = currentTool
-    toolInfoRef.current.stickyColor = lastStickyColor
-  }
-
-  useEffect(() => {
-    const onClick = (e) => {
-      if (!e.target.closest('.sticky-btn-wrap')) setStickyPickerOpen(false)
-      if (!e.target.closest('.section-btn-wrap')) setSectionPickerOpen(false)
-      if (!e.target.closest('.shape-btn-wrap')) setShapePickerOpen(false)
-    }
-    const onKey = (e) => {
-      if (e.key === 'Escape') {
-        setStickyPickerOpen(false)
-        setSectionPickerOpen(false)
-        setShapePickerOpen(false)
-      }
-    }
-    window.addEventListener('click', onClick)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('click', onClick)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [])
-
-  const closeAll = () => {
-    setStickyPickerOpen(false)
-    setSectionPickerOpen(false)
-    setShapePickerOpen(false)
-  }
-
-  const stopToolbarPointer = (e) => {
-    e.stopPropagation()
-  }
-
-  const startImageCrop = () => {
-    if (!selectedImage) return
-    editor.select(selectedImage.id)
-    editor.setCurrentTool('select.crop.idle')
-  }
-
-  const replaceImage = async () => {
-    if (!selectedImage) return
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = 'image/*'
-    input.style.display = 'none'
-    document.body.appendChild(input)
-    input.addEventListener('change', () => {
-      const file = input.files?.[0]
-      if (file) {
-        editor.markHistoryStoppingPoint('replace image')
-        editor.replaceExternalContent({
-          type: 'file-replace',
-          file,
-          shapeId: selectedImage.id,
-          isImage: true,
-        })
-      }
-      input.remove()
-    }, { once: true })
-    input.click()
-  }
-
-  const downloadImage = async () => {
-    if (!selectedImage) return
-    const url = await resolveImageShapeUrl(editor, selectedImage)
-    if (!url) return
-    const asset = selectedImage.props.assetId ? editor.getAsset(selectedImage.props.assetId) : null
-    const resp = await fetch(url)
-    if (!resp.ok) {
-      window.open(url, '_blank', 'noopener,noreferrer')
-      return
-    }
-    const blob = await resp.blob()
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = asset?.props?.name || 'image'
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(link.href)
-  }
-
-  const expandImage = async () => {
-    if (!selectedImage || !onOpenLightbox) return
-    const url = await resolveImageShapeUrl(editor, selectedImage)
-    if (!url) return
-    onOpenLightbox({ src: url, alt: selectedImage.meta?.altText || '' })
-  }
-
-  const saveAltText = () => {
-    if (!selectedImage) return
-    editor.updateShapes([{
-      id: selectedImage.id,
-      type: 'image',
-      meta: { ...selectedImage.meta, altText: altTextDraft },
-    }])
-    setEditingAltText(false)
-  }
-
-  const setTool = (tool) => {
-    editor.setCurrentTool(tool)
-    closeAll()
-  }
-
-  const placeNote = (color) => {
-    setLastStickyColor(color)
-    if (toolInfoRef) toolInfoRef.current.stickyColor = color
-    try { editor.setStyleForNextShapes(DefaultColorStyle, STICKY_SWATCHES[color]?.tl || 'yellow') } catch { /* no-op */ }
-    editor.setCurrentTool('note')
-    setStickyPickerOpen(false)
-  }
-
-  const placeFrame = (color) => {
-    setLastSectionColor(color)
-    try { editor.setStyleForNextShapes(DefaultColorStyle, SECTION_SWATCHES[color]?.tl || 'blue') } catch { /* no-op */ }
-    editor.setCurrentTool('frame')
-    setSectionPickerOpen(false)
-  }
-
-  const setShape = (shape) => {
-    setLastShape(shape)
-    if (shape === 'line') {
-      editor.setCurrentTool('line')
-    } else {
-      try { editor.setStyleForNextShapes(GeoShapeGeoStyle, shape) } catch { /* no-op */ }
-      try {
-        editor.setStyleForNextShapes(
-          DefaultDashStyle,
-          shape === 'rectangle' || shape === 'diamond' ? 'solid' : 'draw'
-        )
-      } catch { /* no-op */ }
-      editor.setCurrentTool('geo')
-    }
-    closeAll()
-  }
-
-  return (
-    <>
-    <div
-      className="fj-toolbar"
-      onPointerDownCapture={stopToolbarPointer}
-      onMouseDownCapture={stopToolbarPointer}
-    >
-      <button
-        className={`fj-tool ${currentTool === 'select' ? 'active' : ''}`}
-        onClick={() => setTool('select')}
-        onPointerDown={stopToolbarPointer}
-        title="Select"
-        type="button"
-      ><FjCursorIcon /></button>
-
-      <button
-        className={`fj-tool ${currentTool === 'hand' ? 'active' : ''}`}
-        onClick={() => setTool('hand')}
-        onPointerDown={stopToolbarPointer}
-        title="Hand"
-        type="button"
-      ><FjHandIcon /></button>
-
-      <div className="fj-sep" />
-
-      {/* Sticky notes */}
-      <div className="sticky-btn-wrap">
-        <div className={`fj-split ${stickyPickerOpen ? 'open' : ''}`}>
-          <button
-            className={`fj-tool fj-tool-main ${currentTool === 'note' ? 'active' : ''}`}
-            onClick={() => placeNote(lastStickyColor)}
-            onPointerDown={stopToolbarPointer}
-            title="Sticky note"
-            type="button"
-          ><FjStickyIcon color={lastStickyColor} /></button>
-          <button
-            className={`fj-tool fj-tool-caret ${stickyPickerOpen ? 'active' : ''}`}
-            onClick={() => { setStickyPickerOpen(o => !o); setSectionPickerOpen(false); setShapePickerOpen(false) }}
-            onPointerDown={stopToolbarPointer}
-            type="button"
-          ><FjChevronDownIcon /></button>
-        </div>
-        {stickyPickerOpen && (
-          <div className="section-picker" onClick={e => e.stopPropagation()}>
-            <div className="section-picker-title">Sticky color</div>
-            <div className="section-picker-grid">
-              {Object.entries(STICKY_SWATCHES).map(([key, c]) => (
-                <button
-                  key={key}
-                  className="section-swatch"
-                  style={{ background: c.bg }}
-                  onClick={() => placeNote(key)}
-                  type="button"
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Sections / frames */}
-      <div className="section-btn-wrap">
-        <div className={`fj-split ${sectionPickerOpen ? 'open' : ''}`}>
-          <button
-            className={`fj-tool fj-tool-main ${currentTool === 'frame' ? 'active' : ''}`}
-            onClick={() => placeFrame(lastSectionColor)}
-            onPointerDown={stopToolbarPointer}
-            title="Section"
-            type="button"
-          ><FjSectionIcon /></button>
-          <button
-            className={`fj-tool fj-tool-caret ${sectionPickerOpen ? 'active' : ''}`}
-            onClick={() => { setSectionPickerOpen(o => !o); setStickyPickerOpen(false); setShapePickerOpen(false) }}
-            onPointerDown={stopToolbarPointer}
-            type="button"
-          ><FjChevronDownIcon /></button>
-        </div>
-        {sectionPickerOpen && (
-          <div className="section-picker" onClick={e => e.stopPropagation()}>
-            <div className="section-picker-title">Section color</div>
-            <div className="section-picker-grid">
-              {Object.entries(SECTION_SWATCHES).map(([key, c]) => (
-                <button
-                  key={key}
-                  className="section-swatch"
-                  style={{ background: c.bg, borderColor: c.stroke }}
-                  onClick={() => placeFrame(key)}
-                  type="button"
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Shapes */}
-      <div className="shape-btn-wrap">
-        <div className={`fj-split ${shapePickerOpen ? 'open' : ''}`}>
-          <button
-            className={`fj-tool fj-tool-main ${['geo', 'line'].includes(currentTool) ? 'active' : ''}`}
-            onClick={() => setShape(lastShape)}
-            onPointerDown={stopToolbarPointer}
-            title="Shapes"
-            type="button"
-          >
-            {lastShape === 'diamond' ? <FjDiamondIcon />
-              : lastShape === 'rectangle' ? <FjRectIcon />
-              : lastShape === 'line' ? <FjLineIcon />
-              : <FjEllipseIcon />}
-          </button>
-          <button
-            className={`fj-tool fj-tool-caret ${shapePickerOpen ? 'active' : ''}`}
-            onClick={() => { setShapePickerOpen(o => !o); setStickyPickerOpen(false); setSectionPickerOpen(false) }}
-            onPointerDown={stopToolbarPointer}
-            type="button"
-          ><FjChevronDownIcon /></button>
-        </div>
-        {shapePickerOpen && (
-          <div className="shape-picker" onClick={e => e.stopPropagation()}>
-            <button className="shape-option" onClick={() => setShape('rectangle')} type="button"><FjRectIcon /></button>
-            <button className="shape-option" onClick={() => setShape('ellipse')} type="button"><FjEllipseIcon /></button>
-            <button className="shape-option" onClick={() => setShape('diamond')} type="button"><FjDiamondIcon /></button>
-            <button className="shape-option" onClick={() => setShape('line')} type="button"><FjLineIcon /></button>
-          </div>
-        )}
-      </div>
-
-      <button
-        className={`fj-tool ${currentTool === 'text' ? 'active' : ''}`}
-        onClick={() => setTool('text')}
-        onPointerDown={stopToolbarPointer}
-        title="Text"
-        type="button"
-      ><FjTextIcon /></button>
-
-      <button
-        className={`fj-tool ${currentTool === 'arrow' ? 'active' : ''}`}
-        onClick={() => setTool('arrow')}
-        onPointerDown={stopToolbarPointer}
-        title="Connector"
-        type="button"
-      ><FjArrowIcon /></button>
-
-      <button
-        className={`fj-tool ${currentTool === 'draw' ? 'active' : ''}`}
-        onClick={() => setTool('draw')}
-        onPointerDown={stopToolbarPointer}
-        title="Draw"
-        type="button"
-      ><FjPenIcon /></button>
-
-      {selectedImage && (
-        <>
-          <div className="fj-sep" />
-          <button
-            className="fj-tool"
-            onClick={replaceImage}
-            onPointerDown={stopToolbarPointer}
-            title="Replace image"
-            type="button"
-          ><TldrawUiButtonIcon small icon="tool-media" /></button>
-          <button
-            className={`fj-tool ${currentTool.startsWith('select.crop') ? 'active' : ''}`}
-            onClick={startImageCrop}
-            onPointerDown={stopToolbarPointer}
-            title="Crop image"
-            type="button"
-          ><TldrawUiButtonIcon small icon="crop" /></button>
-          <button
-            className="fj-tool"
-            onClick={expandImage}
-            onPointerDown={stopToolbarPointer}
-            title="View full size"
-            type="button"
-          ><TldrawUiButtonIcon small icon="zoom-in" /></button>
-          <button
-            className="fj-tool"
-            onClick={downloadImage}
-            onPointerDown={stopToolbarPointer}
-            title="Download original"
-            type="button"
-          ><TldrawUiButtonIcon small icon="download" /></button>
-          {editingAltText ? (
-            <div
-              className="fj-alt-wrap"
-              onPointerDownCapture={stopToolbarPointer}
-              onMouseDownCapture={stopToolbarPointer}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <input
-                className="fj-alt-input"
-                value={altTextDraft}
-                onChange={(e) => setAltTextDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') saveAltText()
-                  if (e.key === 'Escape') setEditingAltText(false)
-                }}
-                placeholder="Alt text"
-              />
-              <button
-                className="fj-mini-btn"
-                onClick={saveAltText}
-                onPointerDown={stopToolbarPointer}
-                title="Save alt text"
-                type="button"
-              ><TldrawUiButtonIcon small icon="check" /></button>
-            </div>
-          ) : (
-            <button
-              className={`fj-tool ${selectedImage.meta?.altText ? 'active' : ''}`}
-              onClick={() => setEditingAltText(true)}
-              onPointerDown={stopToolbarPointer}
-              title="Edit alt text"
-              type="button"
-            ><span className="fj-alt-label">ALT</span></button>
-          )}
-        </>
-      )}
-    </div>
-    </>
-  )
-})
-
 export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug, onSaveState, colorMode, findQuery, onFindDismiss, findBoards, onNavigateBoard, findShapeIds }) {
   const boardIdRef = useRef(boardId)
   const readOnlyRef = useRef(readOnly)
@@ -1157,6 +257,10 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   const pointerRef = useRef(null)
   const [ghost, setGhost] = useState(null) // { x, y, color } | null
   const [lightbox, setLightbox] = useState(null) // { src, alt } | null
+  // Hide the canvas until the post-load fit-to-bounds completes; the snapshot
+  // restores whatever zoom the board was saved at, so without this gate users
+  // see a brief flash of oversized content before the camera lands.
+  const [boardFitting, setBoardFitting] = useState(true)
 
   const editorRef = useRef(null)
   const openLightboxRef = useRef(null)
@@ -1324,7 +428,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         // with (usually false). Without this, visitors can select + delete
         // shapes locally even though saves are blocked.
         editor.updateInstanceState({ isReadonly: ro })
-        fitBoardAfterOpen(editor)
+        fitBoardAfterOpen(editor, () => setBoardFitting(false))
       })
 
     const defaultFilesHandler = editor.externalContentHandlers.files
@@ -1460,12 +564,13 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   const ghostPx = ghost && editorRef.current
     ? getNotePreviewSizePx(editorRef.current)
     : 0
-  const ghostBg = ghost ? (STICKY_SWATCHES[ghost.color]?.bg || '#C8B0F5') : null
+  const ghostBg = ghost ? (STICKY_SWATCHES[ghost.color]?.bg || 'var(--s8-tl-lavender)') : null
 
   return (
     <div
       className={`tldraw-wrap${ghost ? ' sticky-placing' : ''}`}
       ref={wrapRef}
+      style={{ opacity: boardFitting ? 0 : 1, transition: 'opacity 200ms ease-out' }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onPointerDownCapture={handlePointerDownCapture}

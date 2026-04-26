@@ -34,8 +34,6 @@ const SEARCH_DB = {
     { kind: 'text', kindLabel: 'TEXT', board: 'Marine Biology Research', boardId: 'board-marine', snippet: 'Flash frequency at Site A: 4.2 Hz avg — 3.8x increase confirmed', matchId: 's2' },
     { kind: 'ocr', kindLabel: 'OCR', board: 'Marine Biology Research', boardId: 'board-marine', snippet: 'Sample A-2847 Atolla wyvillei depth 2400m', matchId: 'img1', source: 'OCR from image' },
     { kind: 'text', kindLabel: 'TEXT', board: 'Fieldwork Sites', boardId: 'board-fieldwork', snippet: 'Baseline bioluminescence data — 15 Atolla specimens tagged at Site B', matchId: 'f2s2' },
-    { kind: 'gdoc', kindLabel: 'GDOC', board: 'Draft: Bioluminescence & Vent Proximity', boardId: 'gdoc-paper', snippet: 'We report a 3.8x increase in flash frequency among cnidarians within 500m of active vents.' },
-    { kind: 'gsheet', kindLabel: 'SHEET', board: 'Specimen Tracking Log', boardId: 'gsheet-data', snippet: 'Atolla wyvillei — Site A — 4.2 Hz avg flash frequency — tagged 2026-03-12' },
   ],
   hydrothermal: [
     { kind: 'frame', kindLabel: 'FRAME', board: 'Fieldwork Sites', boardId: 'board-fieldwork', snippet: 'Site A — Juan de Fuca Ridge — Active hydrothermal vent field', matchId: 'f2s1' },
@@ -193,7 +191,6 @@ const BOARDS_MAP = {
 function StepBoard({ title, matchId, query, results, onBack }) {
   // Build ordered list of all navigable matches across boards
   const allMatches = results.filter(r => r.matchId)
-  const totalResults = results.length
   const [globalIdx, setGlobalIdx] = useState(0)
 
   useEffect(() => {
@@ -219,7 +216,7 @@ function StepBoard({ title, matchId, query, results, onBack }) {
   const idxOnBoard = matchesOnThisBoard.findIndex(r => r.matchId === currentMatch)
   const total = allMatches.length
 
-  const shapeCounter = total > 0 ? `${globalIdx + 1} of ${totalResults}` : '0 of 0'
+  const shapeCounter = total > 0 ? `${globalIdx + 1} of ${total}` : '0 of 0'
   const boardCounter = totalBoards > 1 ? ` · board ${currentBoardNum}/${totalBoards}` : ''
   const counter = shapeCounter + boardCounter
 
@@ -288,9 +285,9 @@ function StepBoard({ title, matchId, query, results, onBack }) {
 
       {/* Canvas */}
       <div className="db-canvas">
-        {/* Frame 1: Marine Biology Research — always visible */}
+        {/* Frame 1: Marine Biology Research */}
         {!isFieldwork && (
-          <div className="db-frame" style={{ left: '4%', top: '14%', width: '54%', height: '78%' }}>
+          <div className="db-frame" style={{ left: '2%', top: '16%', width: '48%', height: '74%' }}>
             <div className="db-frame-label">Marine Biology Research</div>
             <div className="db-frame-inner">
               {BOARD_ITEMS.map(item => renderItem(item, true))}
@@ -300,8 +297,8 @@ function StepBoard({ title, matchId, query, results, onBack }) {
 
         {/* Frame 2: Fieldwork Sites */}
         <div className="db-frame" style={isFieldwork
-          ? { left: '8%', top: '14%', width: '84%', height: '78%' }
-          : { left: '62%', top: '14%', width: '34%', height: '78%' }
+          ? { left: '5%', top: '16%', width: '90%', height: '74%' }
+          : { left: '52%', top: '16%', width: '46%', height: '74%' }
         }>
           <div className="db-frame-label">Fieldwork Sites</div>
           <div className={isFieldwork ? 'db-frame-inner' : 'db-frame-col'}>
@@ -445,43 +442,63 @@ function StepOwner() {
       <div className="do-canvas">
         <div className="db-pill-wrap">
           <div className="db-pill">
-            <button className="db-pill-back">☰</button>
+            <button className="db-pill-menu-btn">☰</button>
             <span className="db-pill-sep" />
             <span className="db-pill-title">Marine Biology Research</span>
           </div>
         </div>
         <div className="db-canvas">
-          <div className="db-frame" style={{ left: '4%', top: '14%', width: '54%', height: '78%' }}>
+          <div className="db-frame" style={{ left: '2%', top: '16%', width: '48%', height: '74%' }}>
             <div className="db-frame-label">Marine Biology Research</div>
             <div className="db-frame-inner">
-              {BOARD_ITEMS.slice(0, 4).map(item => (
-                <div key={item.id} className="db-item" style={{ gridColumn: item.col + 1, gridRow: item.row + 1 }}>
-                  <div className="db-sticky" style={{ backgroundColor: item.color, transform: `rotate(${item.rotation}deg)` }}>
-                    <div className="db-sticky-title">{item.title}</div>
-                    <div className="db-sticky-text">{item.text}</div>
+              {BOARD_ITEMS.map(item => {
+                const gridStyle = item.col != null ? { gridColumn: item.col + 1, gridRow: item.row + 1 } : {}
+                if (item.type === 'sticky') return (
+                  <div key={item.id} className="db-item" style={gridStyle}>
+                    <div className="db-sticky" style={{ backgroundColor: item.color, transform: `rotate(${item.rotation}deg)` }}>
+                      <div className="db-sticky-title">{item.title}</div>
+                      <div className="db-sticky-text">{item.text}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
-              {BOARD_ITEMS.filter(i => i.type === 'image').map(item => (
-                <div key={item.id} className="db-item" style={{ gridColumn: item.col + 1, gridRow: item.row + 1 }}>
-                  <div className="db-image-wrap">
-                    <img src={item.src} alt={item.alt} className="db-image" loading="lazy" />
+                )
+                if (item.type === 'image') return (
+                  <div key={item.id} className="db-item" style={gridStyle}>
+                    <div className="db-image-wrap">
+                      <img src={item.src} alt={item.alt} className="db-image" loading="lazy" />
+                      {item.ocrText && <div className="db-image-ocr-badge">OCR indexed</div>}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+                if (item.type === 'text') return (
+                  <div key={item.id} className="db-item" style={gridStyle}>
+                    <div className="db-text-block">{item.text}</div>
+                  </div>
+                )
+                return null
+              })}
             </div>
           </div>
-          <div className="db-frame" style={{ left: '62%', top: '8%', width: '34%', height: '84%' }}>
+          <div className="db-frame" style={{ left: '52%', top: '16%', width: '46%', height: '74%' }}>
             <div className="db-frame-label">Fieldwork Sites</div>
             <div className="db-frame-col">
-              {FRAME2_ITEMS.filter(i => i.type === 'sticky').map(item => (
-                <div key={item.id} className="db-item">
-                  <div className="db-sticky" style={{ backgroundColor: item.color, transform: `rotate(${item.rotation}deg)` }}>
-                    <div className="db-sticky-title">{item.title}</div>
-                    <div className="db-sticky-text">{item.text}</div>
+              {FRAME2_ITEMS.map(item => {
+                if (item.type === 'sticky') return (
+                  <div key={item.id} className="db-item">
+                    <div className="db-sticky" style={{ backgroundColor: item.color, transform: `rotate(${item.rotation}deg)` }}>
+                      <div className="db-sticky-title">{item.title}</div>
+                      <div className="db-sticky-text">{item.text}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+                if (item.type === 'image') return (
+                  <div key={item.id} className="db-item">
+                    <div className="db-image-wrap">
+                      <img src={item.src} alt={item.alt} className="db-image" loading="lazy" />
+                    </div>
+                  </div>
+                )
+                return null
+              })}
             </div>
           </div>
         </div>

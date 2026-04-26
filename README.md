@@ -2,6 +2,7 @@
 
 <div align="center">
 
+[![CI](https://github.com/Drakula5000/station8/actions/workflows/ci.yml/badge.svg)](https://github.com/Drakula5000/station8/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-black?style=flat&labelColor=black&color=aaffff)](./LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11-black?style=flat&labelColor=black&color=66ffff&logo=python&logoColor=white)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-3.1-black?style=flat&labelColor=black&color=33ffff&logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
@@ -20,14 +21,6 @@ Whiteboards beat walls of text. But FigJam and Miro can't search the images on t
 
 <br>
 
-![Product Demo](./.github/assets/demo.svg)
-
-<div align="center">
-<a href="https://drakula5000.github.io/station8/demo" style="color: #66ffff; text-decoration: none; font-family: 'Courier New', monospace; font-size: 11px; letter-spacing: 0.1em;">→ TRY THE LIVE DEMO</a>
-</div>
-
-<br>
-
 ![The problem with whiteboards.](./.github/assets/h-problem.svg)
 
 I use whiteboards for research, because people prefer it to reading pages of analysis and findings. But FigJam, Miro, et al. don't have the kind of searchability you get with documents. So a photo from a slide at a conference or a picture of a jellyfish is invisible to their search.
@@ -39,6 +32,14 @@ The search results also take you directly to the search hits, zooming your camer
 You can create or import Google Docs and Sheets directly into the same workspace, so people can search your entire research database in one spot.
 
 Station 8 is a free (or almost-free if depending on your usage) way to show-off your research and how you think. You could put a link in your résumé or recruiter outreach so they can see your research and passion on a relevant topic. The economy and labor market are tough right now, and I want you to shine without sacrificing meals.
+
+<div align="center">
+<a href="https://drakula5000.github.io/station8/demo" style="color: #66ffff; text-decoration: none; font-family: 'Courier New', monospace; font-size: 11px; letter-spacing: 0.1em;">→ TRY THE LIVE DEMO</a>
+</div>
+
+<br>
+
+![Product Demo](./.github/assets/demo.svg)
 
 <br>
 
