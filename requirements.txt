@@ -2,6 +2,7 @@ flask==3.1.0
 scikit-learn==1.5.2
 supabase==2.3.0
 gotrue==2.8.1
+httpx==0.24.1
 
 # Local-dev only: OCR fallback when browser-side Tesseract.js isn't available.
 # Not used in production (Render). Safe to remove if you don't need local OCR.
