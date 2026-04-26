@@ -136,6 +136,7 @@ When the deploy form appears:
   | `SUPABASE_URL` | Your Supabase Project URL from step 2. |
   | `SUPABASE_KEY` | Your Supabase anon key from step 2. |
   | `CORS_ALLOWED_ORIGINS` | Your Vercel URL (you'll get this in step 4 — come back and add it). Example: `https://my-station8.vercel.app`. If you later add a custom domain, add it here too, comma-separated. |
+  | `PYTHON_VERSION` | `3.11.0`. |
 
   `FLASK_SECRET_KEY` is auto-generated for you. You don't need to fill it in.
 
@@ -193,19 +194,30 @@ Left sidebar (☰) → **APIs & Services → Library**. Search and enable each s
 - **Google Sheets API** → **Enable** → back arrow
 
 **3. Configure the OAuth consent screen.**
-Left sidebar → **APIs & Services → OAuth consent screen** (in Google's newer UI this is called **Google Auth Platform** — click **Get started** if prompted). Pick **External** as the user type → **Create**.
+Left sidebar → **Google Auth Platform**. Click **Get started** if prompted, then pick **External** as the user type → **Create**.
 
 > "External" sounds scary but for self-hosting it just means non-Workspace Google accounts can authenticate. It doesn't make your data public — it only controls who can sign in.
 
-Fill in: app name `Station 8`, your email as "User support email", your email as "Developer contact". Click **Save and Continue** through every step (Scopes, Test users, Summary) — you can leave them all blank for now.
+Fill in: app name `Station 8`, your email as "User support email", your email as "Developer contact". Click **Save**.
 
-**4. Add yourself (and anyone else who'll use this Station 8) as a Test user.**
+**4. Register the scopes Station 8 needs.**
+Left sidebar → **Data Access → Add or remove scopes**. Scroll to **Manually add scopes** at the bottom and paste these three (one per line):
+
+```
+https://www.googleapis.com/auth/drive
+https://www.googleapis.com/auth/userinfo.email
+openid
+```
+
+Click **Add to table → Update**, then **Save** on the Data Access page.
+
+**5. Add yourself (and anyone else who'll use this Station 8) as a Test user.**
 Your OAuth app stays in **Testing** mode forever — you do NOT need to publish it or go through Google's app verification for personal/team self-hosting. But Testing mode means **only emails listed under Test users can sign in**. Up to 100 emails allowed.
 
-Go to the **Audience** tab (in the older UI: **OAuth consent screen → Test users**) → **Add users** → paste your Google email → **Save**. Add any other Station 8 users the same way. **If you skip this, you'll get an "Access blocked: Station 8 has not completed verification" error when you try to sign in.**
+Go to the **Audience** tab → **Add users** → paste your Google email → **Save**. Add any other Station 8 users the same way. **If you skip this, you'll get an "Access blocked: Station 8 has not completed verification" error when you try to sign in.**
 
-**5. Create the OAuth client credentials.**
-In the newer UI: **Clients** tab → **Create Client**. In the older UI: **APIs & Services → Credentials → + CREATE CREDENTIALS → OAuth client ID**.
+**6. Create the OAuth client credentials.**
+Go to the **Clients** tab → **Create Client**.
 - Application type: **Web application**
 - Name: `Station 8 Web`
 - Under **Authorized redirect URIs**, click "+ ADD URI" and paste your Render backend URL with the callback path:
@@ -213,17 +225,17 @@ In the newer UI: **Clients** tab → **Create Client**. In the older UI: **APIs 
   - If you also want to develop locally, add: `http://127.0.0.1:5001/api/google/callback`
 - **Create**.
 
-**6. Copy the Client ID and Client secret** from the popup. The secret is only shown once — copy it now or you'll have to regenerate.
+**7. Copy the Client ID and Client secret** from the popup. The secret is only shown once — copy it now or you'll have to regenerate.
 
-**7. Add the Google credentials to Render.**
+**8. Add the Google credentials to Render.**
 
 Go to your Render service → **Environment** and add these variables:
 
 | Variable | Value |
 |:---|:---|
-| `GOOGLE_CLIENT_ID` | The Client ID from step 6. |
-| `GOOGLE_CLIENT_SECRET` | The Client Secret from step 6. |
-| `GOOGLE_OAUTH_REDIRECT_URI` | `https://<your-app>.onrender.com/api/google/callback` (must match what you entered in step 5). |
+| `GOOGLE_CLIENT_ID` | The Client ID from step 7. |
+| `GOOGLE_CLIENT_SECRET` | The Client Secret from step 7. |
+| `GOOGLE_OAUTH_REDIRECT_URI` | `https://<your-app>.onrender.com/api/google/callback` (must match what you entered in step 6). |
 | `FRONTEND_URL` | Your Vercel URL (e.g. `https://my-station8.vercel.app`). This tells the backend where to redirect your browser after Google sign-in completes. Without it, the redirect goes to the wrong place. |
 
 Save. Render will redeploy with the new variables.
