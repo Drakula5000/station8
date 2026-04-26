@@ -56,11 +56,11 @@
   background-size: var(--s8-grid-tile) var(--s8-grid-tile);
   background-position: center;
   --s8-pulse-pos: -15%;
-  mask-image: linear-gradient(180deg,
+  mask-image: linear-gradient(to top left,
     transparent calc(var(--s8-pulse-pos) - 14%),
     var(--s8-mask-fg) var(--s8-pulse-pos),
     transparent calc(var(--s8-pulse-pos) + 14%));
-  -webkit-mask-image: linear-gradient(180deg,
+  -webkit-mask-image: linear-gradient(to top left,
     transparent calc(var(--s8-pulse-pos) - 14%),
     var(--s8-mask-fg) var(--s8-pulse-pos),
     transparent calc(var(--s8-pulse-pos) + 14%));
@@ -1324,4 +1324,3 @@
   border-radius: 0.5rem; padding: 0.5625rem 1rem; font-size: 0.8125rem; cursor: pointer;
 }
 .empty-main .cta:hover { background: var(--s8-accent); opacity: 0.85; }
-
