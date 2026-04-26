@@ -105,8 +105,6 @@ def _allowed_origins():
         'http://127.0.0.1:5173',
         'http://localhost:4173',
         'http://127.0.0.1:4173',
-        'https://YOUR_DOMAIN',
-        'https://YOUR_DOMAIN',
     }
     raw = os.getenv('CORS_ALLOWED_ORIGINS', '')
     extra = {origin.strip() for origin in raw.split(',') if origin.strip()}
@@ -1642,7 +1640,9 @@ def _frontend_origin():
     explicit = os.getenv('FRONTEND_URL')
     if explicit:
         return explicit.rstrip('/')
-    return 'https://YOUR_DOMAIN' if PRODUCTION else 'http://127.0.0.1:5173'
+    if PRODUCTION:
+        raise RuntimeError('FRONTEND_URL env var is required in production')
+    return 'http://127.0.0.1:5173'
 
 
 def _google_auth_state():
