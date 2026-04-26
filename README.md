@@ -255,7 +255,7 @@ Restart the dev server (`.env` is loaded by `start.sh` on launch — a running s
 </details>
 
 <details>
-<summary><strong>Adding R knits to your workspace</strong></summary>
+<summary><strong>Adding R knits to your workspace (not ready yet)</strong></summary>
 
 <br>
 
