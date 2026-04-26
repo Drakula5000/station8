@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef, useMemo, Fragment } from 'rea
 import TldrawCanvas from './TldrawCanvas'
 import {
   BoardIcon, SheetIcon, DocIcon, GoogleLogoIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon, ThemeToggleIcon, LogoutIcon,
-  SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon, GlobeIcon,
+  SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon, GlobeIcon, PinIcon,
 } from './icons'
 import './styles/index.css'
 
@@ -311,6 +311,10 @@ export default function App() {
   const [googleAuth, setGoogleAuth] = useState({ loading: true, connected: false, email: null })
   const [driveShareState, setDriveShareState] = useState({ busy: false, message: null })
   const driveShareMessageTimer = useRef(null)
+  const [driveConfig, setDriveConfig] = useState({ root_folder_id: null, root_folder_name: 'My Drive', mirror_folders: false })
+  const [driveSettingsOpen, setDriveSettingsOpen] = useState(false)
+  const [drivePickerOpen, setDrivePickerOpen] = useState(false)
+  const [drivePicker, setDrivePicker] = useState({ loading: false, error: null, folders: [], breadcrumb: [{ id: null, name: 'My Drive' }] })
   const [tagFilter, setTagFilter] = useState(null)
   const [tagInput, setTagInput] = useState('')
   const [tagInputOpen, setTagInputOpen] = useState(false)
@@ -440,9 +444,21 @@ export default function App() {
 
   const updateAuthStatus = useCallback(async () => {
     setAuth(current => ({ ...current, loading: true }))
-    const data = await fetchJson(`${API}/api/auth/status`, {}, {})
+    let data = null
+    let backendOffline = false
+    try {
+      const res = await fetch(`${API}/api/auth/status`, { credentials: 'include' })
+      if (res.status >= 500) {
+        backendOffline = true
+      } else if (res.ok) {
+        data = await res.json().catch(() => null)
+      }
+    } catch {
+      backendOffline = true
+    }
     setAuth({
       loading: false,
+      backendOffline,
       authenticated: Boolean(data?.authenticated),
       access: data?.access || null,
       configured: data?.configured !== false,
@@ -578,10 +594,80 @@ export default function App() {
     })
   }, [])
 
+  const refreshDriveConfig = useCallback(async () => {
+    const data = await fetchJson(`${API}/api/google/config`, {}, null)
+    if (data) {
+      setDriveConfig({
+        root_folder_id: data.root_folder_id || null,
+        root_folder_name: data.root_folder_name || 'My Drive',
+        mirror_folders: Boolean(data.mirror_folders),
+      })
+    }
+  }, [])
+
+  // Single fetch + state-update for the Drive folder picker. Each call site
+  // owns breadcrumb math; this just loads the children of `parentId` and
+  // commits them with the provided breadcrumb.
+  const loadDriveFolders = useCallback(async (parentId, nextBreadcrumb) => {
+    setDrivePicker(prev => ({ ...prev, loading: true, error: null, breadcrumb: nextBreadcrumb }))
+    const url = parentId
+      ? `${API}/api/google/folders?parent=${encodeURIComponent(parentId)}`
+      : `${API}/api/google/folders`
+    const data = await fetchJson(url, {}, null)
+    if (!data) {
+      setDrivePicker(prev => ({ ...prev, loading: false, error: 'Could not load folders.', folders: [] }))
+      return
+    }
+    setDrivePicker({ loading: false, error: null, folders: data.folders || [], breadcrumb: nextBreadcrumb })
+  }, [])
+
+  const openDrivePicker = useCallback(() => {
+    setDrivePickerOpen(true)
+    loadDriveFolders(null, [{ id: null, name: 'My Drive' }])
+  }, [loadDriveFolders])
+
+  const drivePickerEnter = (folder) => {
+    loadDriveFolders(folder.id, [...drivePicker.breadcrumb, folder])
+  }
+
+  const drivePickerJumpTo = (index) => {
+    const nextCrumbs = drivePicker.breadcrumb.slice(0, index + 1)
+    loadDriveFolders(nextCrumbs[nextCrumbs.length - 1].id, nextCrumbs)
+  }
+
+  const saveDriveRootFolder = useCallback(async (folderId) => {
+    const data = await fetchJsonPatch(`${API}/api/google/config`, { root_folder_id: folderId }, null)
+    if (data) {
+      setDriveConfig({
+        root_folder_id: data.root_folder_id || null,
+        root_folder_name: data.root_folder_name || 'My Drive',
+        mirror_folders: Boolean(data.mirror_folders),
+      })
+      setDrivePickerOpen(false)
+    }
+  }, [])
+
+  const toggleDriveMirror = useCallback(async () => {
+    const next = !driveConfig.mirror_folders
+    const data = await fetchJsonPatch(`${API}/api/google/config`, { mirror_folders: next }, null)
+    if (data) {
+      setDriveConfig({
+        root_folder_id: data.root_folder_id || null,
+        root_folder_name: data.root_folder_name || 'My Drive',
+        mirror_folders: Boolean(data.mirror_folders),
+      })
+    }
+  }, [driveConfig.mirror_folders])
+
   useEffect(() => {
     if (!auth.authenticated || !ownerMode) return
     refreshGoogleAuth()
   }, [auth.authenticated, ownerMode, refreshGoogleAuth])
+
+  useEffect(() => {
+    if (!googleAuth.connected) return
+    refreshDriveConfig()
+  }, [googleAuth.connected, refreshDriveConfig])
 
   useEffect(() => {
     // Google OAuth callback redirects back here with ?google=connected (or
@@ -1337,12 +1423,22 @@ export default function App() {
     setAuthBusy(true)
     setAuthError('')
     try {
-      const res = await fetch(`${API}/api/auth/login`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      })
+      let res
+      try {
+        res = await fetch(`${API}/api/auth/login`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        })
+      } catch {
+        setAuthError('Backend offline. Make sure dev.command is running.')
+        return
+      }
+      if (res.status >= 500) {
+        setAuthError('Backend offline. Make sure dev.command is running.')
+        return
+      }
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         if ((res.status === 409 && data.requires_setup) || data.setup_allowed === false || data.configured === false) {
@@ -1398,6 +1494,7 @@ export default function App() {
         requiresSetup={auth.requiresSetup}
         authConfigured={auth.configured}
         setupAllowed={auth.setupAllowed}
+        backendOffline={auth.backendOffline}
         authBusy={authBusy}
         authError={authError}
         loginPassword={loginPassword}
@@ -1539,6 +1636,14 @@ export default function App() {
                       </button>
                     )}
                     <button
+                      className={`sidebar-drive-icon${driveSettingsOpen ? ' is-active' : ''}`}
+                      onClick={() => setDriveSettingsOpen(o => !o)}
+                      title="Save location & folder mirroring"
+                      type="button"
+                    >
+                      <PinIcon />
+                    </button>
+                    <button
                       className="sidebar-drive-icon"
                       onClick={disconnectGoogle}
                       title="Disconnect"
@@ -1549,6 +1654,36 @@ export default function App() {
                   </div>
                 )}
               </div>
+              {googleAuth.connected && driveSettingsOpen && (
+                <div className="drive-settings-popover">
+                  <div className="drive-settings-row">
+                    <div className="drive-settings-label">Save new files to</div>
+                    <button
+                      className="drive-settings-folder-btn"
+                      onClick={openDrivePicker}
+                      type="button"
+                      title="Choose a Drive folder for new files"
+                    >
+                      <FolderOpenIcon />
+                      <span className="drive-settings-folder-name">{driveConfig.root_folder_name}</span>
+                      <span className="drive-settings-folder-edit">Change</span>
+                    </button>
+                  </div>
+                  <label className="drive-settings-toggle">
+                    <input
+                      type="checkbox"
+                      checked={driveConfig.mirror_folders}
+                      onChange={toggleDriveMirror}
+                    />
+                    <span className="drive-settings-toggle-text">
+                      <span className="drive-settings-toggle-title">Mirror Station 8 folders in Drive</span>
+                      <span className="drive-settings-toggle-sub">
+                        New files land inside a Drive folder that matches their Station 8 folder path. Existing files aren't moved.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              )}
               {googleAuth.connected ? (
                 <div className="sidebar-drive-body">
                   {driveShareState.busy
@@ -1989,7 +2124,9 @@ export default function App() {
             <p className="modal-copy">
               {deleteTarget.type === 'folder'
                 ? <>Choose what should happen to <strong>{deleteTarget.name}</strong>.</>
-                : <>Delete <strong>{deleteTarget.name}</strong>? This permanently removes it.</>}
+                : (deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet')
+                  ? <><strong>{deleteTarget.name}</strong> will be removed from Station 8. The file in your Google Drive stays put unless you opt in below.</>
+                  : <><strong>{deleteTarget.name}</strong> will be permanently removed.</>}
             </p>
 
             {deleteTarget.type === 'folder' && deleteImpact && !deleteImpact.isEmpty && (
@@ -2037,7 +2174,10 @@ export default function App() {
                   checked={deleteAlsoDrive}
                   onChange={(e) => setDeleteAlsoDrive(e.target.checked)}
                 />
-                <span>Also delete the underlying file from my Google Drive</span>
+                <span className="delete-drive-toggle-text">
+                  <span className="delete-drive-toggle-title">Also delete from Google Drive</span>
+                  <span className="delete-drive-toggle-sub">Permanently removes the underlying file from your Drive. This cannot be undone.</span>
+                </span>
               </label>
             )}
           </div>
@@ -2045,6 +2185,65 @@ export default function App() {
             <button className="btn-ghost" onClick={() => { setDeleteConfirmOpen(false); setDeleteTarget(null); setDeleteMode('move'); setDeleteAlsoDrive(false) }} type="button">Cancel</button>
             <button className="btn-primary btn-danger" onClick={handleDelete} type="button">
               {deleteTarget.type === 'folder' && deleteMode === 'move' ? 'Delete folder' : 'Delete permanently'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {drivePickerOpen && (
+        <Modal
+          onClose={() => setDrivePickerOpen(false)}
+          title="Choose a Drive folder"
+        >
+          <div className="drive-picker-body">
+            <div className="drive-picker-breadcrumb">
+              {drivePicker.breadcrumb.map((crumb, idx) => (
+                <span key={`${crumb.id || 'root'}-${idx}`} className="drive-picker-crumb-wrap">
+                  <button
+                    className="drive-picker-crumb"
+                    onClick={() => drivePickerJumpTo(idx)}
+                    disabled={idx === drivePicker.breadcrumb.length - 1 || drivePicker.loading}
+                    type="button"
+                  >{crumb.name}</button>
+                  {idx < drivePicker.breadcrumb.length - 1 && <span className="drive-picker-crumb-sep">›</span>}
+                </span>
+              ))}
+            </div>
+            <div className="drive-picker-list">
+              {drivePicker.loading && <div className="drive-picker-empty">Loading…</div>}
+              {!drivePicker.loading && drivePicker.error && <div className="drive-picker-empty">{drivePicker.error}</div>}
+              {!drivePicker.loading && !drivePicker.error && drivePicker.folders.length === 0 && (
+                <div className="drive-picker-empty">No subfolders here.</div>
+              )}
+              {!drivePicker.loading && !drivePicker.error && drivePicker.folders.map((f) => (
+                <button
+                  key={f.id}
+                  className="drive-picker-row"
+                  onClick={() => drivePickerEnter(f)}
+                  type="button"
+                >
+                  <FolderIcon />
+                  <span className="drive-picker-row-name">{f.name}</span>
+                  <ChevronRightIcon />
+                </button>
+              ))}
+            </div>
+            <p className="drive-picker-hint">
+              New Docs and Sheets will be saved to <strong>{drivePicker.breadcrumb[drivePicker.breadcrumb.length - 1]?.name || 'My Drive'}</strong>.
+            </p>
+          </div>
+          <div className="modal-footer">
+            <button className="btn-ghost" onClick={() => setDrivePickerOpen(false)} type="button">Cancel</button>
+            <button
+              className="btn-primary"
+              onClick={() => {
+                const target = drivePicker.breadcrumb[drivePicker.breadcrumb.length - 1]
+                saveDriveRootFolder(target?.id || null)
+              }}
+              type="button"
+              disabled={drivePicker.loading}
+            >
+              Save this folder
             </button>
           </div>
         </Modal>
@@ -2132,6 +2331,7 @@ function AccessGate({
   authConfigured = true,
   setupAllowed = false,
   requiresSetup = false,
+  backendOffline = false,
   authBusy = false,
   authError = '',
   loginPassword = '',
@@ -2150,6 +2350,31 @@ function AccessGate({
         <div className="auth-card auth-card-loading">
           <div className="auth-kicker">Station 8</div>
           <div className="auth-title">Loading access state…</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (backendOffline) {
+    return (
+      <div className="auth-shell s8-grid">
+        <div className="auth-card">
+          <div className="auth-kicker">Station 8</div>
+          <h1 className="auth-title">Backend offline</h1>
+          <p className="auth-copy">
+            The Station 8 backend isn't responding at <code>localhost:5001</code>.
+            Make sure <code>dev.command</code> is running, then reload this page.
+          </p>
+          <p className="auth-copy" style={{ marginTop: '0.625rem', fontSize: '0.75rem', opacity: 0.7 }}>
+            If it keeps failing, open <code>data/server.log</code> to see what crashed.
+          </p>
+          <button
+            className="auth-submit"
+            onClick={() => window.location.reload()}
+            type="button"
+          >
+            Reload
+          </button>
         </div>
       </div>
     )

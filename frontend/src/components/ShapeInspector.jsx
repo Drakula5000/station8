@@ -563,6 +563,13 @@ export const ShapeInspector = track(function ShapeInspector() {
         <div className="insp-row">
           <div className="insp-label">Size</div>
           <div className="insp-body insp-body-size">
+            {showTextSizeInput && (
+              <button
+                className={`insp-btn ${activeTextSizePx !== undefined && Math.abs(activeTextSizePx - 5) < 0.5 ? 'active' : ''}`}
+                onClick={() => applyTextSizePx(5)}
+                type="button"
+              >XS</button>
+            )}
             {SIZES.map((s) => (
               <button
                 key={s.id}

@@ -88,16 +88,48 @@
 }
 .delete-drive-toggle {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
-  color: var(--s8-text-mid);
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.6875rem 0.8125rem;
+  border: 0.0625rem solid var(--s8-input-border);
+  background: var(--s8-input-bg);
+  border-radius: 0.625rem;
   cursor: pointer;
   user-select: none;
+  transition: border-color 0.12s, background 0.12s;
+}
+.delete-drive-toggle:hover {
+  border-color: var(--s8-sidebar-border);
+}
+.delete-drive-toggle:has(input:checked) {
+  border-color: var(--s8-danger);
+  background: var(--s8-danger-dim);
 }
 .delete-drive-toggle input {
-  margin: 0;
+  width: 0.9375rem;
+  height: 0.9375rem;
+  margin: 0.125rem 0 0;
+  padding: 0;
   cursor: pointer;
+  accent-color: var(--s8-danger);
+  flex-shrink: 0;
+}
+.delete-drive-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+.delete-drive-toggle-title {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--s8-text);
+  line-height: 1.3;
+}
+.delete-drive-toggle-sub {
+  font-size: 0.6875rem;
+  color: var(--s8-text-mid);
+  line-height: 1.45;
 }
 .delete-mode-list {
   display: flex;

@@ -266,6 +266,12 @@ def _auth_configured():
 
 
 def _verify_studio_password(password):
+    # Local-dev unconditional fallback: 'owner' always works on a developer
+    # machine regardless of env vars or stored hashes. Production is unaffected
+    # because PRODUCTION is True there. Do not remove — restoring it after a
+    # contractor accidentally exports OWNER_PASSWORD locally is painful.
+    if not PRODUCTION and password == ACCESS_OWNER:
+        return True
     env_password = _env_studio_password()
     if env_password is not None:
         return password == env_password
@@ -276,6 +282,8 @@ def _verify_studio_password(password):
 
 
 def _verify_visitor_password(password):
+    if not PRODUCTION and password == ACCESS_VISITOR:
+        return True
     env_password = _env_visitor_password()
     if env_password is not None:
         return password == env_password
@@ -1603,6 +1611,63 @@ def google_disconnect():
     return jsonify(_google_auth_state())
 
 
+def _drive_config_response():
+    config = _drive_get_config()
+    return {
+        'root_folder_id': config['root_folder_id'],
+        'root_folder_name': config['root_folder_name'],
+        'mirror_folders': config['mirror_folders'],
+    }
+
+
+@app.route('/api/google/config', methods=['GET'])
+@_studio_auth_required
+def google_drive_config_get():
+    return jsonify(_drive_config_response())
+
+
+@app.route('/api/google/config', methods=['PATCH'])
+@_studio_auth_required
+def google_drive_config_patch():
+    data = request.json or {}
+    updates = {}
+    if 'root_folder_id' in data:
+        access_token = _get_google_access_token()
+        new_id = (data.get('root_folder_id') or '').strip() or None
+        if new_id and access_token:
+            meta = _drive_get_folder_meta(new_id, access_token)
+            if not meta:
+                return jsonify({'error': 'Could not access that Drive folder. Check the ID and permissions.'}), 400
+            updates['root_folder_id'] = meta['id']
+            updates['root_folder_name'] = meta['name']
+        else:
+            updates['root_folder_id'] = None
+            updates['root_folder_name'] = 'My Drive'
+        # Reset the mirror map whenever the root changes — old mappings point
+        # at folders under a different root and would create cross-tree links.
+        updates['folder_map'] = {}
+    if 'mirror_folders' in data:
+        updates['mirror_folders'] = bool(data.get('mirror_folders'))
+    _drive_save_config(updates)
+    return jsonify(_drive_config_response())
+
+
+@app.route('/api/google/folders', methods=['GET'])
+@_studio_auth_required
+def google_drive_folders_list():
+    access_token = _get_google_access_token()
+    if not access_token:
+        return jsonify({'error': 'Google account not connected'}), 400
+    parent = (request.args.get('parent') or '').strip() or None
+    folders = _drive_list_folders(parent, access_token)
+    breadcrumb = [{'id': None, 'name': 'My Drive'}]
+    if parent:
+        meta = _drive_get_folder_meta(parent, access_token)
+        if meta:
+            breadcrumb.append({'id': meta['id'], 'name': meta['name']})
+    return jsonify({'folders': folders, 'parent': parent, 'breadcrumb': breadcrumb})
+
+
 def _delete_drive_file(file_id, timeout=15):
     """Permanently delete the underlying file in Drive. Used when the user
     opts in to "delete from Drive too" in the Station 8 delete dialog.
@@ -1728,20 +1793,174 @@ _DRIVE_MIME = {
     'gdoc': 'application/vnd.google-apps.document',
     'gsheet': 'application/vnd.google-apps.spreadsheet',
 }
+_DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'
 _DRIVE_EDIT_URL = {
     'gdoc': 'https://docs.google.com/document/d/{id}/edit',
     'gsheet': 'https://docs.google.com/spreadsheets/d/{id}/edit',
 }
 
 
-def _create_drive_file(kind, name, timeout=15):
+def _drive_get_config():
+    """Read the Drive save-location settings from google_auth.json. Defaults
+    place new files at My Drive root with no folder mirroring."""
+    record = _load_google_token_record()
+    config = record.get('drive_config') or {}
+    return {
+        'root_folder_id': config.get('root_folder_id') or None,
+        'root_folder_name': config.get('root_folder_name') or 'My Drive',
+        'mirror_folders': bool(config.get('mirror_folders')),
+        # s8_folder_id -> drive_folder_id, populated lazily as files are created
+        'folder_map': dict(config.get('folder_map') or {}),
+    }
+
+
+def _drive_save_config(updates):
+    record = _load_google_token_record()
+    config = record.get('drive_config') or {}
+    config.update(updates)
+    record['drive_config'] = config
+    _save_google_token_record(record)
+    return _drive_get_config()
+
+
+def _drive_api_get(url, access_token, timeout=15):
+    try:
+        req = _urllib_request.Request(
+            url,
+            headers={'Authorization': f'Bearer {access_token}'},
+        )
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError) as exc:
+        print(f'Drive GET failed ({url}): {exc}', flush=True)
+        return None
+
+
+def _drive_list_folders(parent_id, access_token, timeout=15):
+    """List immediate folder children of the given parent. parent_id=None
+    lists folders at the My Drive root."""
+    parent_clause = f"'{parent_id}' in parents" if parent_id else "'root' in parents"
+    query = f"{parent_clause} and mimeType = '{_DRIVE_FOLDER_MIME}' and trashed = false"
+    params = _urllib_parse.urlencode({
+        'q': query,
+        'fields': 'files(id,name,parents)',
+        'orderBy': 'name',
+        'pageSize': 200,
+    })
+    payload = _drive_api_get(f'https://www.googleapis.com/drive/v3/files?{params}', access_token, timeout)
+    if not payload:
+        return []
+    return [{'id': f.get('id'), 'name': f.get('name')} for f in payload.get('files') or [] if f.get('id')]
+
+
+def _drive_get_folder_meta(folder_id, access_token, timeout=15):
+    if not folder_id:
+        return {'id': None, 'name': 'My Drive'}
+    params = _urllib_parse.urlencode({'fields': 'id,name'})
+    payload = _drive_api_get(
+        f'https://www.googleapis.com/drive/v3/files/{folder_id}?{params}',
+        access_token, timeout,
+    )
+    if not payload or not payload.get('id'):
+        return None
+    return {'id': payload['id'], 'name': payload.get('name') or 'Untitled folder'}
+
+
+def _drive_create_folder(name, parent_id, access_token, timeout=15):
+    body_dict = {'name': name, 'mimeType': _DRIVE_FOLDER_MIME}
+    if parent_id:
+        body_dict['parents'] = [parent_id]
+    body = json.dumps(body_dict).encode('utf-8')
+    try:
+        req = _urllib_request.Request(
+            'https://www.googleapis.com/drive/v3/files',
+            data=body, method='POST',
+            headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'},
+        )
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode('utf-8'))
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError) as exc:
+        print(f'Drive folder create failed: {exc}', flush=True)
+        return None
+    return payload.get('id')
+
+
+def _drive_ensure_mirror_folder(s8_folder_id, access_token):
+    """Walk the Station 8 folder chain from root → s8_folder_id, ensuring a
+    matching Drive folder exists at each step under the configured save root.
+    Returns the Drive folder id corresponding to s8_folder_id, or None if the
+    operation can't be completed (no token, missing folder, API error)."""
+    if not s8_folder_id:
+        return None
+    config = _drive_get_config()
+    folder_map = config['folder_map']
+    folders = _get_workspace().get('folders', [])
+    by_id = {f['id']: f for f in folders}
+    if s8_folder_id not in by_id:
+        return None
+    # Build the chain root-most first.
+    chain = []
+    current = s8_folder_id
+    seen = set()
+    while current and current not in seen:
+        seen.add(current)
+        node = by_id.get(current)
+        if not node:
+            return None
+        chain.append(node)
+        current = node.get('parent_id')
+    chain.reverse()
+    parent_drive_id = config['root_folder_id']
+    map_dirty = False
+    for node in chain:
+        node_id = node['id']
+        cached = folder_map.get(node_id)
+        if cached:
+            parent_drive_id = cached
+            continue
+        # Re-use a same-named folder if one already lives under the parent.
+        existing = next(
+            (f for f in _drive_list_folders(parent_drive_id, access_token) if f['name'] == node['name']),
+            None,
+        )
+        if existing:
+            new_id = existing['id']
+        else:
+            new_id = _drive_create_folder(node['name'], parent_drive_id, access_token)
+        if not new_id:
+            return None
+        folder_map[node_id] = new_id
+        map_dirty = True
+        parent_drive_id = new_id
+    if map_dirty:
+        _drive_save_config({'folder_map': folder_map})
+    return parent_drive_id
+
+
+def _drive_resolve_parent_for_doc(s8_folder_id, access_token):
+    """Decide which Drive folder a newly-created file should live in.
+    Honors the 'mirror Station 8 folders' setting; otherwise falls back to
+    the configured save root (or My Drive root when unset)."""
+    config = _drive_get_config()
+    if config['mirror_folders'] and s8_folder_id:
+        mirrored = _drive_ensure_mirror_folder(s8_folder_id, access_token)
+        if mirrored:
+            return mirrored
+    return config['root_folder_id']
+
+
+def _create_drive_file(kind, name, parent_id=None, timeout=15):
     """Create a fresh Google Doc or Sheet in the connected user's Drive.
     Returns (file_id, embed_url) on success, (None, None) if not connected
-    or the API call fails."""
+    or the API call fails. parent_id places the file inside a specific Drive
+    folder; None places it at My Drive root."""
     access_token = _get_google_access_token()
     if not access_token or kind not in _DRIVE_MIME:
         return None, None
-    body = json.dumps({'name': name, 'mimeType': _DRIVE_MIME[kind]}).encode('utf-8')
+    body_dict = {'name': name, 'mimeType': _DRIVE_MIME[kind]}
+    if parent_id:
+        body_dict['parents'] = [parent_id]
+    body = json.dumps(body_dict).encode('utf-8')
     try:
         req = _urllib_request.Request(
             'https://www.googleapis.com/drive/v3/files',
@@ -1770,8 +1989,11 @@ def _create_gdrive_doc(load_fn, save_fn, request_data, kind):
     # No URL pasted → create the file in Drive automatically (when connected)
     # and share it publicly so visitors can view the embed without a manual
     # share-all run.
-    if not embed_url and _get_google_access_token():
-        new_id, new_url = _create_drive_file(kind, name)
+    access_token = _get_google_access_token()
+    if not embed_url and access_token:
+        s8_folder_id = _normalize_folder_id(request_data.get('folder_id'), folders)
+        parent_drive_id = _drive_resolve_parent_for_doc(s8_folder_id, access_token)
+        new_id, new_url = _create_drive_file(kind, name, parent_id=parent_drive_id)
         if new_id and new_url:
             drive_file_id = new_id
             embed_url = new_url

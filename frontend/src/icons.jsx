@@ -82,6 +82,15 @@ export function GlobeIcon(props) {
   )
 }
 
+export function PinIcon(props) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M7 1.4c-2.21 0-4 1.74-4 3.88 0 2.91 4 7.32 4 7.32s4-4.41 4-7.32c0-2.14-1.79-3.88-4-3.88Z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round"/>
+      <circle cx="7" cy="5.3" r="1.35" stroke="currentColor" strokeWidth="1.1"/>
+    </svg>
+  )
+}
+
 export function FolderOpenIcon(props) {
   return (
     <svg {...common} {...props}>
