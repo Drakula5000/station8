@@ -1585,6 +1585,11 @@ def google_oauth_callback():
     except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError):
         pass
 
+    # Preserve drive_config (save root, mirror toggle, folder cache) and the
+    # prior refresh_token across reconnect — they survive token rotation and
+    # are user preferences, not auth state. Without this, any reconnect
+    # silently resets the user's Drive save location to "My Drive root".
+    prior = _load_google_token_record()
     record = {
         'connected': True,
         'email': email,
@@ -1594,11 +1599,11 @@ def google_oauth_callback():
     }
     if refresh_token:
         record['refresh_token'] = refresh_token
-    else:
+    elif prior.get('refresh_token'):
         # Re-auth without prompt=consent omits refresh_token; preserve the old one.
-        prior = _load_google_token_record()
-        if prior.get('refresh_token'):
-            record['refresh_token'] = prior['refresh_token']
+        record['refresh_token'] = prior['refresh_token']
+    if prior.get('drive_config'):
+        record['drive_config'] = prior['drive_config']
     _save_google_token_record(record)
 
     return redirect(f'{_frontend_origin()}/?google=connected')
@@ -1607,7 +1612,13 @@ def google_oauth_callback():
 @app.route('/api/google/disconnect', methods=['POST'])
 @_studio_auth_required
 def google_disconnect():
-    _save(GOOGLE_AUTH_FILE, {'connected': False, 'email': None})
+    # Clear auth tokens but keep drive_config so the user's save-location
+    # preferences survive a disconnect/reconnect cycle.
+    prior = _load_google_token_record()
+    new_record = {'connected': False, 'email': None}
+    if prior.get('drive_config'):
+        new_record['drive_config'] = prior['drive_config']
+    _save(GOOGLE_AUTH_FILE, new_record)
     return jsonify(_google_auth_state())
 
 

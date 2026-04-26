@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef, useMemo, Fragment } from 'rea
 import TldrawCanvas from './TldrawCanvas'
 import {
   BoardIcon, SheetIcon, DocIcon, GoogleLogoIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon, ThemeToggleIcon, LogoutIcon,
-  SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PlusIcon, GlobeIcon, PinIcon,
+  SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PencilIcon, PlusIcon, GlobeIcon, PinIcon,
 } from './icons'
 import './styles/index.css'
 
@@ -329,6 +329,7 @@ export default function App() {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleteMode, setDeleteMode] = useState('move')
   const [deleteAlsoDrive, setDeleteAlsoDrive] = useState(false)
+  const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState(null)
   const [errorVisible, setErrorVisible] = useState(false)
   const [saveState, setSaveState] = useState('idle')
@@ -353,6 +354,9 @@ export default function App() {
   }, [colorMode])
 
   const [titleMenuOpen, setTitleMenuOpen] = useState(false)
+  // Inline rename in sidebar — { type: 'folder' | 'board' | 'gdoc' | 'gsheet', id, value }
+  const [renameTarget, setRenameTarget] = useState(null)
+  const [renameValue, setRenameValue] = useState('')
   // Backend wake-up state for visitor/share mode
   const [backendStatus, setBackendStatus] = useState('checking') // 'checking' | 'ready'
   const backendReadyRef = useRef(false)
@@ -663,16 +667,36 @@ export default function App() {
   const [driveSyncBusy, setDriveSyncBusy] = useState(false)
   const [driveSyncResult, setDriveSyncResult] = useState(null)
 
-  const runDriveSyncExisting = useCallback(async () => {
+  const runDriveSyncExisting = async () => {
     setDriveSyncBusy(true)
     setDriveSyncResult(null)
     try {
-      const data = await fetchJsonPost(`${API}/api/google/sync-existing`, {}, null)
-      setDriveSyncResult(data || { error: true })
+      let res
+      try {
+        res = await fetch(`${API}/api/google/sync-existing`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        })
+      } catch {
+        setDriveSyncResult({ error: 'Network error — backend unreachable.' })
+        return
+      }
+      if (res.status === 404) {
+        setDriveSyncResult({ error: "This server hasn't been updated with the move feature yet. Run deploy-backend.command and try again." })
+        return
+      }
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data) {
+        setDriveSyncResult({ error: (data && data.error) || `Move failed (HTTP ${res.status}).` })
+        return
+      }
+      setDriveSyncResult(data)
     } finally {
       setDriveSyncBusy(false)
     }
-  }, [])
+  }
 
   useEffect(() => {
     if (!auth.authenticated || !ownerMode) return
@@ -929,6 +953,33 @@ export default function App() {
     else if (kind === 'gsheet') setGsheets(updater)
   }
 
+  const startRename = (item, isFolder) => {
+    setRenameTarget({ id: item.id, type: isFolder ? 'folder' : item.type })
+    setRenameValue(item.name || '')
+  }
+
+  const cancelRename = () => {
+    setRenameTarget(null)
+    setRenameValue('')
+  }
+
+  const commitRename = async (item, isFolder) => {
+    const next = renameValue.trim()
+    if (!renameTarget || renameTarget.id !== item.id) return
+    if (!next || next === item.name) { cancelRename(); return }
+    const url = isFolder
+      ? `${API}/api/folders/${item.id}`
+      : `${API}/api/${DOC_KIND_API[item.type]}/${item.id}`
+    const updated = await fetchJsonPatch(url, { name: next })
+    if (!updated) { cancelRename(); return }
+    if (isFolder) {
+      setFolders(fs => fs.map(f => f.id === updated.id ? updated : f))
+    } else {
+      setDocsForKind(item.type, items => items.map(i => i.id === updated.id ? updated : i))
+    }
+    cancelRename()
+  }
+
   const togglePrivate = async (item, isFolder) => {
     const effective = isEffectivelyPrivate(item, isFolder)
     let newValue
@@ -1089,23 +1140,53 @@ export default function App() {
     const active = activeId?.type === doc.type && activeId.id === doc.id
     const priv = isEffectivelyPrivate(doc, false)
     const isDragging = dragItem?.type === doc.type && dragItem.id === doc.id
+    const isRenaming = renameTarget?.id === doc.id && renameTarget.type === doc.type
     return (
-      <div key={`${doc.type}-${doc.id}`} className={`tree-item-shell ${active ? 'active' : ''}${isDragging ? ' is-dragging' : ''}`}>
-        <button
-          className={`sb-item sb-item-main tree-row tree-doc ${active ? 'active' : ''} ${priv ? 'sb-item-private' : ''}`}
-          style={{ paddingLeft: `${0.625 + depth * 1.125}rem` }}
-          draggable={!readOnly}
-          onDragEnd={handleItemDragEnd}
-          onDragStart={(event) => handleItemDragStart(event, doc)}
-          onClick={() => openDocument(doc.type, doc.id, doc.folder_id)}
-          type="button"
-        >
-          {docKindIcon(doc.type)}
-          <span className="sb-item-label">{doc.name}</span>
-          {priv && <span className="sb-private-badge"><LockIcon /></span>}
-        </button>
-        {!readOnly && (
+      <div key={`${doc.type}-${doc.id}`} className={`tree-item-shell ${active ? 'active' : ''}${isDragging ? ' is-dragging' : ''}${isRenaming ? ' is-renaming' : ''}`}>
+        {isRenaming ? (
+          <div
+            className={`sb-item sb-item-main tree-row tree-doc ${priv ? 'sb-item-private' : ''}`}
+            style={{ paddingLeft: `${0.625 + depth * 1.125}rem` }}
+          >
+            {docKindIcon(doc.type)}
+            <input
+              className="tree-rename-input"
+              autoFocus
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitRename(doc, false) }
+                else if (e.key === 'Escape') { e.preventDefault(); cancelRename() }
+              }}
+              onBlur={() => commitRename(doc, false)}
+            />
+          </div>
+        ) : (
+          <button
+            className={`sb-item sb-item-main tree-row tree-doc ${active ? 'active' : ''} ${priv ? 'sb-item-private' : ''}`}
+            style={{ paddingLeft: `${0.625 + depth * 1.125}rem` }}
+            draggable={!readOnly}
+            onDragEnd={handleItemDragEnd}
+            onDragStart={(event) => handleItemDragStart(event, doc)}
+            onClick={() => openDocument(doc.type, doc.id, doc.folder_id)}
+            type="button"
+          >
+            {docKindIcon(doc.type)}
+            <span className="sb-item-label">{doc.name}</span>
+            {priv && <span className="sb-private-badge"><LockIcon /></span>}
+          </button>
+        )}
+        {!readOnly && !isRenaming && (
           <div className="item-actions">
+            <button
+              className="tree-rename-btn"
+              aria-label={`Rename ${doc.name}`}
+              onClick={(e) => { e.stopPropagation(); startRename(doc, false) }}
+              title="Rename"
+              type="button"
+            >
+              <PencilIcon />
+            </button>
             <button
               className={`tree-privacy-btn ${priv ? 'is-private' : ''}`}
               aria-label={priv ? `Make ${doc.name} public` : `Make ${doc.name} private`}
@@ -1138,27 +1219,58 @@ export default function App() {
     const priv = isEffectivelyPrivate(folder, true)
     const isDragging = dragItem?.type === 'folder' && dragItem.id === folder.id
     const isDropTarget = dropTargetFolderId === folder.id
+    const isRenaming = renameTarget?.id === folder.id && renameTarget.type === 'folder'
     return (
       <div key={folder.id}>
-        <div className={`tree-item-shell${isDragging ? ' is-dragging' : ''}`}>
-          <button
-            className={`sb-item sb-item-main tree-row tree-folder ${expanded ? 'folder-open' : ''} ${priv ? 'sb-item-private' : ''}${isDropTarget ? ' is-drop-target' : ''}`}
-            style={{ paddingLeft: `${0.625 + depth * 1.125}rem` }}
-            draggable={!readOnly}
-            onDragEnd={handleItemDragEnd}
-            onDragOver={(event) => handleFolderDragOver(event, folder.id)}
-            onDragStart={(event) => handleItemDragStart(event, { ...folder, type: 'folder' })}
-            onDrop={(event) => handleFolderDrop(event, folder.id)}
-            onClick={() => toggleFolder(folder.id)}
-            type="button"
-          >
-            <span className={`tree-chevron ${expanded ? 'open' : ''}`}><ChevronRightIcon /></span>
-            {expanded ? <FolderOpenIcon /> : <FolderIcon />}
-            <span className="sb-item-label">{folder.name}</span>
-            {priv && <span className="sb-private-badge"><LockIcon /></span>}
-          </button>
-          {!readOnly && (
+        <div className={`tree-item-shell${isDragging ? ' is-dragging' : ''}${isRenaming ? ' is-renaming' : ''}`}>
+          {isRenaming ? (
+            <div
+              className={`sb-item sb-item-main tree-row tree-folder ${expanded ? 'folder-open' : ''} ${priv ? 'sb-item-private' : ''}`}
+              style={{ paddingLeft: `${0.625 + depth * 1.125}rem` }}
+            >
+              <span className={`tree-chevron ${expanded ? 'open' : ''}`}><ChevronRightIcon /></span>
+              {expanded ? <FolderOpenIcon /> : <FolderIcon />}
+              <input
+                className="tree-rename-input"
+                autoFocus
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); commitRename(folder, true) }
+                  else if (e.key === 'Escape') { e.preventDefault(); cancelRename() }
+                }}
+                onBlur={() => commitRename(folder, true)}
+              />
+            </div>
+          ) : (
+            <button
+              className={`sb-item sb-item-main tree-row tree-folder ${expanded ? 'folder-open' : ''} ${priv ? 'sb-item-private' : ''}${isDropTarget ? ' is-drop-target' : ''}`}
+              style={{ paddingLeft: `${0.625 + depth * 1.125}rem` }}
+              draggable={!readOnly}
+              onDragEnd={handleItemDragEnd}
+              onDragOver={(event) => handleFolderDragOver(event, folder.id)}
+              onDragStart={(event) => handleItemDragStart(event, { ...folder, type: 'folder' })}
+              onDrop={(event) => handleFolderDrop(event, folder.id)}
+              onClick={() => toggleFolder(folder.id)}
+              type="button"
+            >
+              <span className={`tree-chevron ${expanded ? 'open' : ''}`}><ChevronRightIcon /></span>
+              {expanded ? <FolderOpenIcon /> : <FolderIcon />}
+              <span className="sb-item-label">{folder.name}</span>
+              {priv && <span className="sb-private-badge"><LockIcon /></span>}
+            </button>
+          )}
+          {!readOnly && !isRenaming && (
             <div className="item-actions">
+              <button
+                className="tree-rename-btn"
+                aria-label={`Rename ${folder.name}`}
+                onClick={(e) => { e.stopPropagation(); startRename(folder, true) }}
+                title="Rename"
+                type="button"
+              >
+                <PencilIcon />
+              </button>
               <button
                 className={`tree-privacy-btn ${priv ? 'is-private' : ''}`}
                 aria-label={priv ? `Make ${folder.name} public` : `Make ${folder.name} private`}
@@ -1661,10 +1773,10 @@ export default function App() {
                     <button
                       className="sidebar-drive-icon"
                       onClick={disconnectGoogle}
-                      title="Disconnect"
+                      title="Disconnect Google"
                       type="button"
                     >
-                      <CloseIcon />
+                      <LogoutIcon />
                     </button>
                   </div>
                 )}
@@ -2216,9 +2328,16 @@ export default function App() {
       {driveSyncOpen && (
         <Modal
           onClose={() => { if (!driveSyncBusy) { setDriveSyncOpen(false); setDriveSyncResult(null) } }}
-          title={driveSyncResult ? 'Move complete' : 'Move existing files into folders?'}
+          title={driveSyncResult ? (driveSyncResult.error ? "Move couldn't run" : 'Move complete') : 'Move existing files into folders?'}
         >
-          {!driveSyncResult ? (
+          {driveSyncResult?.error ? (
+            <>
+              <p className="modal-copy">{driveSyncResult.error}</p>
+              <div className="modal-footer">
+                <button className="btn-primary" onClick={() => { setDriveSyncOpen(false); setDriveSyncResult(null) }} type="button">OK</button>
+              </div>
+            </>
+          ) : !driveSyncResult ? (
             <>
               <p className="modal-copy">
                 Every linked Doc and Sheet will be moved in your Google Drive into the folder that matches its Station 8 location. Files imported by URL paste (no underlying Drive file we own) are skipped.
