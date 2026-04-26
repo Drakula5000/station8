@@ -1167,6 +1167,39 @@ def push_report():
     return jsonify({'id': report_id, 'created': created, 'url': f'/reports/{report_id}'})
 
 
+@app.route('/api/reports/<report_id>', methods=['DELETE'])
+@_studio_auth_required
+def delete_report(report_id):
+    reports = _load_reports()
+    new_reports = [r for r in reports if r.get('id') != report_id]
+    if len(new_reports) == len(reports):
+        return jsonify({'error': 'not found'}), 404
+    _save_reports(new_reports)
+    _delete_report_files([report_id])
+    return jsonify({'ok': True})
+
+
+@app.route('/api/reports/<report_id>', methods=['PATCH'])
+@_studio_auth_required
+def patch_report(report_id):
+    body = request.get_json(silent=True) or {}
+    reports = _load_reports()
+    record = next((r for r in reports if r.get('id') == report_id), None)
+    if record is None:
+        return jsonify({'error': 'not found'}), 404
+    for field in ('name', 'folder_id', 'private'):
+        if field in body:
+            record[field] = body[field]
+    record['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+    _save_reports(reports)
+    blob = _load_report(report_id) or {}
+    if 'name' in body:
+        blob['name'] = body['name']
+        blob['updated_at'] = record['updated_at']
+        _save_report(report_id, blob)
+    return jsonify({'ok': True, 'report': record})
+
+
 @app.route('/api/folders', methods=['POST'])
 @_studio_auth_required
 def create_folder():
