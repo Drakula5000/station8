@@ -51,6 +51,8 @@ OCR_FILE = os.path.join(DATA_DIR, 'ocr.json')
 WORKSPACE_FILE = os.path.join(DATA_DIR, 'workspace.json')
 SHARES_FILE = os.path.join(DATA_DIR, 'shares.json')
 AUTH_FILE = os.path.join(DATA_DIR, 'auth.json')
+REPORTS_FILE = os.path.join(DATA_DIR, 'reports.json')
+R_TOKENS_FILE = os.path.join(DATA_DIR, 'r_tokens.json')
 
 SUPABASE_BUCKET = 'uploads'
 SUPABASE_TABLE = 'json_storage'
@@ -69,6 +71,8 @@ PRODUCTION = bool(
 
 ACCESS_OWNER = 'owner'
 ACCESS_VISITOR = 'visitor'
+
+MAX_REPORT_HTML_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 def _env_flag(name, default=False):
@@ -433,11 +437,11 @@ def _save_gsheets(gsheets):
 
 
 def _load_reports():
-    return _load('reports.json', [])
+    return _load(REPORTS_FILE, [])
 
 
 def _save_reports(reports):
-    _save('reports.json', reports)
+    _save(REPORTS_FILE, reports)
 
 
 def _load_report(report_id):
@@ -449,11 +453,11 @@ def _save_report(report_id, data):
 
 
 def _load_r_tokens():
-    return _load('r_tokens.json', [])
+    return _load(R_TOKENS_FILE, [])
 
 
 def _save_r_tokens(tokens):
-    _save('r_tokens.json', tokens)
+    _save(R_TOKENS_FILE, tokens)
 
 
 # ── Google Drive content sync (no-OAuth path) ────────────────────────────────
@@ -1088,6 +1092,79 @@ def mint_r_token():
     _save_r_tokens(tokens)
     token = _r_token_serializer().dumps({'kind': 'r-token', 'token_id': token_id})
     return jsonify({'token': token})
+
+
+@app.route('/api/reports/push', methods=['POST'])
+@_r_token_required
+def push_report():
+    if 'html' not in request.files:
+        return jsonify({'error': 'html file required'}), 400
+    html_file = request.files['html']
+    html_bytes = html_file.read()
+    if len(html_bytes) > MAX_REPORT_HTML_BYTES:
+        return jsonify({'error': f'html exceeds {MAX_REPORT_HTML_BYTES} bytes'}), 413
+    try:
+        html = html_bytes.decode('utf-8')
+    except UnicodeDecodeError:
+        return jsonify({'error': 'html must be utf-8'}), 400
+
+    name = (request.form.get('name') or '').strip()
+    path_hash = (request.form.get('path_hash') or '').strip()
+    override_name = (request.form.get('override_name') or '').strip() or None
+    if not name or not path_hash:
+        return jsonify({'error': 'name and path_hash required'}), 400
+
+    reports = _load_reports()
+    existing = None
+    if override_name:
+        existing = next((r for r in reports if r.get('override_name') == override_name), None)
+    if existing is None:
+        existing = next(
+            (r for r in reports if r.get('source_path_hash') == path_hash and not r.get('override_name')),
+            None,
+        )
+
+    now = datetime.utcnow().isoformat() + 'Z'
+    text = _text_from_report_html(html)
+
+    if existing is None:
+        report_id = uuid.uuid4().hex
+        record = {
+            'id': report_id,
+            'name': name,
+            'folder_id': None,
+            'private': None,
+            'source_path_hash': path_hash,
+            'override_name': override_name,
+            'created_at': now,
+            'updated_at': now,
+        }
+        reports.append(record)
+        created = True
+        created_at = now
+    else:
+        report_id = existing['id']
+        existing['name'] = name
+        existing['updated_at'] = now
+        if override_name:
+            existing['override_name'] = override_name
+        else:
+            existing['source_path_hash'] = path_hash
+        created = False
+        created_at = existing.get('created_at', now)
+
+    _save_reports(reports)
+    _save_report(report_id, {
+        'id': report_id,
+        'name': name,
+        'html': html,
+        'text': text,
+        'source_path_hash': path_hash,
+        'override_name': override_name,
+        'created_at': created_at,
+        'updated_at': now,
+    })
+    return jsonify({'id': report_id, 'created': created, 'url': f'/reports/{report_id}'})
 
 
 @app.route('/api/folders', methods=['POST'])
