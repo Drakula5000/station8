@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Tldraw, FrameShapeUtil } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { ShapeInspector } from './components/ShapeInspector'
@@ -9,23 +9,12 @@ import { FrameCornerStyles, GeoCornerStyles, ImageShapeStyles, ListStyles } from
 import { BrokenImageRetry } from './canvas/BrokenImageRetry'
 import { FindBar } from './canvas/FindBar'
 import { FjToolbar } from './canvas/FjToolbar'
+import { RichTextToolbar } from './canvas/RichTextToolbar'
+import { RICH_TEXT_EXTENSIONS } from './canvas/richTextExtensions'
+import { getSignedUploadUrl, setSignedUploadUrls } from './canvas/signedUploadUrls'
 import { isEditableTarget, resolveImageShapeUrl } from './canvas/shared'
 
 const API = import.meta.env.VITE_API_URL || ''
-
-// Direct-resolved Supabase signed URLs for `/uploads/<name>` references,
-// populated from the board-load response. Lets images load straight from the
-// Supabase CDN instead of bouncing every request through the slow Render
-// backend. Module-scoped so the static assetStore can read it.
-const signedUploadUrls = new Map()
-
-// eslint-disable-next-line react-refresh/only-export-components
-export function setSignedUploadUrls(map) {
-  if (!map) return
-  for (const [name, url] of Object.entries(map)) {
-    if (url) signedUploadUrls.set(name, url)
-  }
-}
 
 // Send uploads through our Flask endpoint so they're indexed for search. OCR
 // runs in the browser (Tesseract.js) because Render's Python native runtime
@@ -54,7 +43,7 @@ const assetStore = {
     if (!src) return null
     if (src.startsWith('/uploads/')) {
       const filename = src.slice('/uploads/'.length)
-      const signed = signedUploadUrls.get(filename)
+      const signed = getSignedUploadUrl(filename)
       if (signed) return signed
     }
     if (src.startsWith('/')) return `${API}${src}`
@@ -75,6 +64,7 @@ const TLDRAW_COMPONENTS = {
   DebugPanel: null,
   NavigationPanel: null,
   ImageToolbar: null,
+  RichTextToolbar,
 }
 const READONLY_TLDRAW_COMPONENTS = {
   ...TLDRAW_COMPONENTS,
@@ -265,6 +255,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   const [ghost, setGhost] = useState(null) // { x, y, color } | null
   const [lightbox, setLightbox] = useState(null) // { src, alt } | null
   const [hoverAffordance, setHoverAffordance] = useState({ cursor: '', tooltip: '' })
+  const [activeTool, setActiveTool] = useState('select')
   // Hide the canvas until the post-load fit-to-bounds completes; the snapshot
   // restores whatever zoom the board was saved at, so without this gate users
   // see a brief flash of oversized content before the camera lands.
@@ -623,10 +614,19 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     ? getNotePreviewSizePx(editorRef.current)
     : 0
   const ghostBg = ghost ? (STICKY_SWATCHES[ghost.color]?.bg || 'var(--s8-tl-lavender)') : null
+  const tldrawOptions = useMemo(() => ({
+    snapThreshold: 10,
+    text: {
+      tipTapConfig: {
+        extensions: RICH_TEXT_EXTENSIONS,
+      },
+    },
+  }), [])
 
   return (
     <div
       className={`tldraw-wrap${ghost ? ' sticky-placing' : ''}`}
+      data-active-tool={activeTool}
       ref={wrapRef}
       title={hoverAffordance.tooltip || undefined}
       style={{
@@ -643,11 +643,11 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         components={readOnly ? READONLY_TLDRAW_COMPONENTS : TLDRAW_COMPONENTS}
         onMount={handleMount}
         assets={assetStore}
-        options={{ snapThreshold: 10 }}
+        options={tldrawOptions}
         overrides={TLDRAW_UI_OVERRIDES}
         shapeUtils={FRAME_SHAPE_UTILS}
       >
-        {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} onOpenLightbox={openLightbox} />}
+        {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} onOpenLightbox={openLightbox} onToolChange={setActiveTool} />}
         {!readOnly && <ShapeInspector />}
         <FrameCornerStyles />
         <GeoCornerStyles />

@@ -1,5 +1,6 @@
 import { track, useEditor } from 'tldraw'
 import { AURORA_SWATCHES } from '../colors'
+import { RECT_CLASS_GEOS } from './styleOptions'
 
 // Reactive components that inject per-shape CSS based on tldraw shape state.
 // React 19 hoists <style> tags into <head> automatically, so each component
@@ -39,7 +40,6 @@ export const FrameCornerStyles = track(function FrameCornerStyles() {
 // corners anyway. The Inspector auto-flips dash to 'solid' when the user picks
 // any non-zero radius, so this only excludes shapes the user deliberately
 // keeps sketchy.
-const RECT_CLASS_GEOS = new Set(['rectangle', 'x-box', 'check-box'])
 
 // Match tldraw's STROKE_SIZES so the redrawn outline visually matches what the
 // stroke would have been. Size=s is bumped down to 1 to match the

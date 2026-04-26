@@ -361,3 +361,119 @@ export function FjInsightIcon() {
   )
 }
 
+
+export function FjTriangleIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 4L3 20h18z"/>
+    </svg>
+  )
+}
+
+export function FjHexagonIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <path d="M12 3L4.5 7.5v9L12 21l7.5-4.5v-9z"/>
+    </svg>
+  )
+}
+
+export function FjStarIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <path d="M12 3l2.47 6.17L21 9.97l-5 4.45L17.18 21 12 17.77 6.82 21 8 14.42 3 9.97l6.53-.8z"/>
+    </svg>
+  )
+}
+
+export function FjOvalIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <ellipse cx="12" cy="12" rx="9.5" ry="5"/>
+    </svg>
+  )
+}
+
+export function FjTrapezoidIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <path d="M7 6h10l3 12H4z"/>
+    </svg>
+  )
+}
+
+export function FjArrowRightIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <path d="M4 7h11l5 5-5 5H4z"/>
+    </svg>
+  )
+}
+
+export function FjArrowLeftIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <path d="M20 7H9L4 12l5 5h11z"/>
+    </svg>
+  )
+}
+
+export function FjArrowUpIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <path d="M7 20V9L12 4l5 5v11z"/>
+    </svg>
+  )
+}
+
+export function FjArrowDownIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <path d="M7 4v11l5 5 5-5V4z"/>
+    </svg>
+  )
+}
+
+export function FjXBoxIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="4" width="16" height="16" rx="1"/>
+      <path d="M8 8l8 8M16 8l-8 8"/>
+    </svg>
+  )
+}
+
+export function FjCheckBoxIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="4" width="16" height="16" rx="1"/>
+      <path d="M8 12.5l2.5 3L16 9"/>
+    </svg>
+  )
+}
+
+export function FjCloudIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+      <path d="M6 18h12a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.34 9.8 4 4 0 0 0 6 18z"/>
+    </svg>
+  )
+}
+
+export function FjHeartIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 7.5C10.5 4.5 6 4 4.5 7s-.5 6 7.5 12c8-6 9-9 7.5-12S13.5 4.5 12 7.5z"/>
+    </svg>
+  )
+}
+
+export function FjMarkerIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15.5 4.5l4 4-9.5 9.5H6v-4z" fill="currentColor" opacity="0.3"/>
+      <path d="M15.5 4.5l4 4-9.5 9.5H6v-4z"/>
+      <path d="M14 6l4 4"/>
+    </svg>
+  )
+}

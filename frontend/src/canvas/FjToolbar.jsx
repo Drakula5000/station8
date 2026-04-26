@@ -1,15 +1,20 @@
 import { useState, useEffect } from 'react'
 import {
   track, useEditor,
-  DefaultColorStyle, DefaultDashStyle, GeoShapeGeoStyle,
+  DefaultColorStyle, DefaultDashStyle, DefaultSizeStyle, GeoShapeGeoStyle,
   TldrawUiButtonIcon,
 } from 'tldraw'
 import {
   FjCursorIcon, FjHandIcon, FjStickyIcon, FjTextIcon, FjArrowIcon, FjPenIcon, FjSectionIcon,
   FjEllipseIcon, FjDiamondIcon, FjRectIcon, FjLineIcon, FjChevronDownIcon,
+  FjTriangleIcon, FjHexagonIcon, FjStarIcon, FjOvalIcon, FjTrapezoidIcon,
+  FjArrowRightIcon, FjArrowLeftIcon, FjArrowUpIcon, FjArrowDownIcon,
+  FjXBoxIcon, FjCheckBoxIcon, FjCloudIcon, FjHeartIcon,
+  FjMarkerIcon,
 } from '../icons'
-import { STICKY_SWATCHES } from '../colors'
+import { AURORA_SWATCHES, STICKY_SWATCHES } from '../colors'
 import { resolveImageShapeUrl } from './shared'
+import { STROKE_STYLE_OPTIONS, SIZE_OPTIONS } from './styleOptions'
 
 // Section/highlight pastel palette — bg/stroke pairs for FigJam-style frames.
 // Color values come from --s8-section-* tokens defined in App.css :root.
@@ -22,16 +27,44 @@ const SECTION_SWATCHES = {
   slate:  { bg: 'var(--s8-section-slate-bg)',  stroke: 'var(--s8-section-slate-stroke)',  tl: 'grey' },
 }
 
-export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox }) {
+const GEO_SHAPES = [
+  { id: 'rectangle',   Icon: FjRectIcon },
+  { id: 'ellipse',     Icon: FjEllipseIcon },
+  { id: 'triangle',    Icon: FjTriangleIcon },
+  { id: 'diamond',     Icon: FjDiamondIcon },
+  { id: 'hexagon',     Icon: FjHexagonIcon },
+  { id: 'star',        Icon: FjStarIcon },
+  { id: 'oval',        Icon: FjOvalIcon },
+  { id: 'trapezoid',   Icon: FjTrapezoidIcon },
+  { id: 'arrow-left',  Icon: FjArrowLeftIcon },
+  { id: 'arrow-up',    Icon: FjArrowUpIcon },
+  { id: 'arrow-down',  Icon: FjArrowDownIcon },
+  { id: 'arrow-right', Icon: FjArrowRightIcon },
+  { id: 'cloud',       Icon: FjCloudIcon },
+  { id: 'heart',       Icon: FjHeartIcon },
+  { id: 'x-box',       Icon: FjXBoxIcon },
+  { id: 'check-box',   Icon: FjCheckBoxIcon },
+]
+
+const SHAPE_ICON_MAP = Object.fromEntries([...GEO_SHAPES.map(s => [s.id, s.Icon]), ['line', FjLineIcon]])
+
+export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox, onToolChange }) {
   const editor = useEditor()
   const [stickyPickerOpen, setStickyPickerOpen] = useState(false)
   const [sectionPickerOpen, setSectionPickerOpen] = useState(false)
   const [shapePickerOpen, setShapePickerOpen] = useState(false)
+  const [drawPickerOpen, setDrawPickerOpen] = useState(false)
+  const [markerPickerOpen, setMarkerPickerOpen] = useState(false)
   const [editingAltText, setEditingAltText] = useState(false)
   const [altTextDraft, setAltTextDraft] = useState('')
   const [lastStickyColor, setLastStickyColor] = useState('yellow')
   const [lastSectionColor, setLastSectionColor] = useState('violet')
   const [lastShape, setLastShape] = useState('ellipse')
+  const [lastDrawColor, setLastDrawColor] = useState('blue')
+  const [lastDrawDash, setLastDrawDash] = useState('draw')
+  const [lastDrawSize, setLastDrawSize] = useState('m')
+  const [lastMarkerColor, setLastMarkerColor] = useState('blue')
+  const [lastMarkerSize, setLastMarkerSize] = useState('m')
 
   const currentTool = editor.getCurrentToolId()
   const selectedImage = editor.getOnlySelectedShape()?.type === 'image' ? editor.getOnlySelectedShape() : null
@@ -52,16 +85,24 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox 
   }
 
   useEffect(() => {
+    onToolChange?.(currentTool)
+  }, [currentTool, onToolChange])
+
+  useEffect(() => {
     const onClick = (e) => {
       if (!e.target.closest('.sticky-btn-wrap')) setStickyPickerOpen(false)
       if (!e.target.closest('.section-btn-wrap')) setSectionPickerOpen(false)
       if (!e.target.closest('.shape-btn-wrap')) setShapePickerOpen(false)
+      if (!e.target.closest('.draw-btn-wrap')) setDrawPickerOpen(false)
+      if (!e.target.closest('.marker-btn-wrap')) setMarkerPickerOpen(false)
     }
     const onKey = (e) => {
       if (e.key === 'Escape') {
         setStickyPickerOpen(false)
         setSectionPickerOpen(false)
         setShapePickerOpen(false)
+        setDrawPickerOpen(false)
+        setMarkerPickerOpen(false)
       }
     }
     window.addEventListener('click', onClick)
@@ -76,6 +117,8 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox 
     setStickyPickerOpen(false)
     setSectionPickerOpen(false)
     setShapePickerOpen(false)
+    setDrawPickerOpen(false)
+    setMarkerPickerOpen(false)
   }
 
   const stopToolbarPointer = (e) => {
@@ -153,19 +196,74 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox 
     closeAll()
   }
 
+  const applyNextDrawStyles = ({
+    color = lastDrawColor,
+    dash = lastDrawDash,
+    size = lastDrawSize,
+  } = {}) => {
+    setLastDrawColor(color)
+    setLastDrawDash(dash)
+    setLastDrawSize(size)
+    try { editor.setStyleForNextShapes(DefaultColorStyle, color) } catch { /* no-op */ }
+    try { editor.setStyleForNextShapes(DefaultDashStyle, dash) } catch { /* no-op */ }
+    try { editor.setStyleForNextShapes(DefaultSizeStyle, size) } catch { /* no-op */ }
+  }
+
+  const activateDraw = () => {
+    applyNextDrawStyles()
+    editor.setCurrentTool('draw')
+    closeAll()
+  }
+
+  const setDrawColor = (color) => {
+    applyNextDrawStyles({ color })
+    editor.setCurrentTool('draw')
+  }
+
+  const setDrawStroke = (strokeId) => {
+    applyNextDrawStyles({ dash: strokeId })
+    editor.setCurrentTool('draw')
+  }
+
+  const setDrawSize = (size) => {
+    applyNextDrawStyles({ size })
+    editor.setCurrentTool('draw')
+  }
+
+  const activateMarker = (color = lastMarkerColor, size = lastMarkerSize) => {
+    setLastMarkerColor(color)
+    setLastMarkerSize(size)
+    try { editor.setStyleForNextShapes(DefaultColorStyle, color) } catch { /* no-op */ }
+    try { editor.setStyleForNextShapes(DefaultSizeStyle, size) } catch { /* no-op */ }
+    editor.setCurrentTool('highlight')
+    closeAll()
+  }
+
+  const setMarkerColor = (color) => {
+    setLastMarkerColor(color)
+    try { editor.setStyleForNextShapes(DefaultColorStyle, color) } catch { /* no-op */ }
+    editor.setCurrentTool('highlight')
+  }
+
+  const setMarkerSize = (size) => {
+    setLastMarkerSize(size)
+    try { editor.setStyleForNextShapes(DefaultSizeStyle, size) } catch { /* no-op */ }
+    editor.setCurrentTool('highlight')
+  }
+
   const placeNote = (color) => {
     setLastStickyColor(color)
     if (toolInfoRef) toolInfoRef.current.stickyColor = color
     try { editor.setStyleForNextShapes(DefaultColorStyle, STICKY_SWATCHES[color]?.tl || 'yellow') } catch { /* no-op */ }
     editor.setCurrentTool('note')
-    setStickyPickerOpen(false)
+    closeAll()
   }
 
   const placeFrame = (color) => {
     setLastSectionColor(color)
     try { editor.setStyleForNextShapes(DefaultColorStyle, SECTION_SWATCHES[color]?.tl || 'blue') } catch { /* no-op */ }
     editor.setCurrentTool('frame')
-    setSectionPickerOpen(false)
+    closeAll()
   }
 
   const setShape = (shape) => {
@@ -222,7 +320,7 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox 
           ><FjStickyIcon color={lastStickyColor} /></button>
           <button
             className={`fj-tool fj-tool-caret ${stickyPickerOpen ? 'active' : ''}`}
-            onClick={() => { setStickyPickerOpen(o => !o); setSectionPickerOpen(false); setShapePickerOpen(false) }}
+            onClick={() => { setStickyPickerOpen(o => !o); setSectionPickerOpen(false); setShapePickerOpen(false); setDrawPickerOpen(false) }}
             onPointerDown={stopToolbarPointer}
             type="button"
           ><FjChevronDownIcon /></button>
@@ -257,7 +355,7 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox 
           ><FjSectionIcon /></button>
           <button
             className={`fj-tool fj-tool-caret ${sectionPickerOpen ? 'active' : ''}`}
-            onClick={() => { setSectionPickerOpen(o => !o); setStickyPickerOpen(false); setShapePickerOpen(false) }}
+            onClick={() => { setSectionPickerOpen(o => !o); setStickyPickerOpen(false); setShapePickerOpen(false); setDrawPickerOpen(false) }}
             onPointerDown={stopToolbarPointer}
             type="button"
           ><FjChevronDownIcon /></button>
@@ -290,24 +388,22 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox 
             title="Shapes"
             type="button"
           >
-            {lastShape === 'diamond' ? <FjDiamondIcon />
-              : lastShape === 'rectangle' ? <FjRectIcon />
-              : lastShape === 'line' ? <FjLineIcon />
-              : <FjEllipseIcon />}
+            {(() => { const Icon = SHAPE_ICON_MAP[lastShape] || FjRectIcon; return <Icon /> })()}
           </button>
           <button
             className={`fj-tool fj-tool-caret ${shapePickerOpen ? 'active' : ''}`}
-            onClick={() => { setShapePickerOpen(o => !o); setStickyPickerOpen(false); setSectionPickerOpen(false) }}
+            onClick={() => { setShapePickerOpen(o => !o); setStickyPickerOpen(false); setSectionPickerOpen(false); setDrawPickerOpen(false) }}
             onPointerDown={stopToolbarPointer}
             type="button"
           ><FjChevronDownIcon /></button>
         </div>
         {shapePickerOpen && (
           <div className="shape-picker" onClick={e => e.stopPropagation()}>
-            <button className="shape-option" onClick={() => setShape('rectangle')} type="button"><FjRectIcon /></button>
-            <button className="shape-option" onClick={() => setShape('ellipse')} type="button"><FjEllipseIcon /></button>
-            <button className="shape-option" onClick={() => setShape('diamond')} type="button"><FjDiamondIcon /></button>
-            <button className="shape-option" onClick={() => setShape('line')} type="button"><FjLineIcon /></button>
+            {GEO_SHAPES.map(({ id, Icon }) => (
+              <button key={id} className="shape-option" onClick={() => setShape(id)} title={id} type="button"><Icon /></button>
+            ))}
+            <div className="shape-picker-sep" />
+            <button className="shape-option shape-option-line" onClick={() => setShape('line')} title="line" type="button"><FjLineIcon /></button>
           </div>
         )}
       </div>
@@ -328,13 +424,127 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox 
         type="button"
       ><FjArrowIcon /></button>
 
-      <button
-        className={`fj-tool ${currentTool === 'draw' ? 'active' : ''}`}
-        onClick={() => setTool('draw')}
-        onPointerDown={stopToolbarPointer}
-        title="Draw"
-        type="button"
-      ><FjPenIcon /></button>
+      <div className="draw-btn-wrap">
+        <div className={`fj-split ${drawPickerOpen ? 'open' : ''}`}>
+          <button
+            className={`fj-tool fj-tool-main ${currentTool === 'draw' ? 'active' : ''}`}
+            onClick={activateDraw}
+            onPointerDown={stopToolbarPointer}
+            title="Draw"
+            type="button"
+          ><FjPenIcon /></button>
+          <button
+            className={`fj-tool fj-tool-caret ${drawPickerOpen ? 'active' : ''}`}
+            onClick={() => { setDrawPickerOpen((open) => !open); setStickyPickerOpen(false); setSectionPickerOpen(false); setShapePickerOpen(false) }}
+            onPointerDown={stopToolbarPointer}
+            title="Draw options"
+            type="button"
+          ><FjChevronDownIcon /></button>
+        </div>
+        {drawPickerOpen && (
+          <div className="tool-style-picker" onClick={(e) => e.stopPropagation()}>
+            <div className="section-picker-title">Pen defaults</div>
+            <div className="tool-style-row">
+              <div className="tool-style-label">Color</div>
+              <div className="tool-style-swatches" data-color-context="stroke">
+                {AURORA_SWATCHES.map((swatch) => (
+                  <button
+                    key={swatch.id}
+                    className={`tool-style-swatch ${lastDrawColor === swatch.tl ? 'active' : ''}`}
+                    style={{ background: swatch.bg }}
+                    onClick={() => setDrawColor(swatch.tl)}
+                    title={swatch.id}
+                    type="button"
+                    data-swatch-id={swatch.id}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="tool-style-row">
+              <div className="tool-style-label">Stroke</div>
+              <div className="tool-style-buttons">
+                {STROKE_STYLE_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    className={`tool-style-btn ${lastDrawDash === option.id ? 'active' : ''}`}
+                    onClick={() => setDrawStroke(option.id)}
+                    title={option.title}
+                    type="button"
+                  >
+                    <TldrawUiButtonIcon small icon={option.icon} />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="tool-style-row">
+              <div className="tool-style-label">Size</div>
+              <div className="tool-style-buttons">
+                {SIZE_OPTIONS.map((size) => (
+                  <button
+                    key={size.id}
+                    className={`tool-style-btn ${lastDrawSize === size.id ? 'active' : ''}`}
+                    onClick={() => setDrawSize(size.id)}
+                    type="button"
+                  >{size.label}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Marker (highlight) */}
+      <div className="marker-btn-wrap">
+        <div className={`fj-split ${markerPickerOpen ? 'open' : ''}`}>
+          <button
+            className={`fj-tool fj-tool-main ${currentTool === 'highlight' ? 'active' : ''}`}
+            onClick={() => activateMarker()}
+            onPointerDown={stopToolbarPointer}
+            title="Marker"
+            type="button"
+          ><FjMarkerIcon /></button>
+          <button
+            className={`fj-tool fj-tool-caret ${markerPickerOpen ? 'active' : ''}`}
+            onClick={() => { setMarkerPickerOpen(o => !o); setStickyPickerOpen(false); setSectionPickerOpen(false); setShapePickerOpen(false); setDrawPickerOpen(false) }}
+            onPointerDown={stopToolbarPointer}
+            type="button"
+          ><FjChevronDownIcon /></button>
+        </div>
+        {markerPickerOpen && (
+          <div className="tool-style-picker" onClick={(e) => e.stopPropagation()}>
+            <div className="section-picker-title">Marker defaults</div>
+            <div className="tool-style-row">
+              <div className="tool-style-label">Color</div>
+              <div className="tool-style-swatches" data-color-context="stroke">
+                {AURORA_SWATCHES.map((swatch) => (
+                  <button
+                    key={swatch.id}
+                    className={`tool-style-swatch ${lastMarkerColor === swatch.tl ? 'active' : ''}`}
+                    style={{ background: swatch.bg }}
+                    onClick={() => setMarkerColor(swatch.tl)}
+                    title={swatch.id}
+                    type="button"
+                    data-swatch-id={swatch.id}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="tool-style-row">
+              <div className="tool-style-label">Size</div>
+              <div className="tool-style-buttons">
+                {SIZE_OPTIONS.map((size) => (
+                  <button
+                    key={size.id}
+                    className={`tool-style-btn ${lastMarkerSize === size.id ? 'active' : ''}`}
+                    onClick={() => setMarkerSize(size.id)}
+                    type="button"
+                  >{size.label}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {selectedImage && (
         <>

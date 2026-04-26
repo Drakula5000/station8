@@ -13,6 +13,12 @@ import {
 } from 'tldraw'
 import { FjDraftIcon, FjDataIcon, FjAnalysisIcon, FjInsightIcon } from '../icons'
 import { AURORA_SWATCHES as COLOR_SWATCHES } from '../colors'
+import {
+  SHAPES_WITH_STROKE_STYLE,
+  SIZE_OPTIONS as SIZES,
+  STROKE_STYLE_OPTIONS,
+  RECT_CLASS_GEOS,
+} from '../canvas/styleOptions'
 
 const DEFAULT_FILL_OPACITY = 0.4
 
@@ -30,13 +36,6 @@ const FONTS = [
   { id: 'mono',  label: 'Data',     Icon: FjDataIcon },
   { id: 'sans',  label: 'Analysis', Icon: FjAnalysisIcon },
   { id: 'serif', label: 'Insight',  Icon: FjInsightIcon },
-]
-
-const SIZES = [
-  { id: 's',  label: 'S' },
-  { id: 'm',  label: 'M' },
-  { id: 'l',  label: 'L' },
-  { id: 'xl', label: 'XL' },
 ]
 
 // Mirrors tldraw's default text shape font sizes. Text shapes also support a
@@ -110,14 +109,14 @@ const SHAPES_WITH_IMAGE_STYLING = new Set(['image'])
 const SHAPES_WITH_FREEFORM_TEXT_SIZE = new Set(['text'])
 const SHAPES_WITH_LISTS = new Set(['note', 'text'])
 const SHAPES_WITH_ARROWHEADS = new Set(['arrow'])
-// Shapes where "no border" is meaningful: a rectangle/frame with a fill can
-// still read as a card without an outline. For arrows/lines/draws the stroke
+// Shapes where "no border" is meaningful: a geo rectangle with a fill can
+// still read as a card without an outline. Frames always have a border (it's
+// how they work), so they're excluded. For arrows/lines/draws the stroke
 // IS the visual, so the toggle would just hide the shape — exclude them.
-const SHAPES_WITH_STROKE_TOGGLE = new Set(['geo', 'frame'])
+const SHAPES_WITH_STROKE_TOGGLE = new Set(['geo'])
 // Rectangle-class geos can take a real corner radius (rendered via CSS
 // border-radius + overflow:hidden on the SVG container, see GeoCornerStyles).
 // Other geo subtypes (diamond, triangle, ellipse, etc.) skip the row.
-const RECT_CLASS_GEOS = new Set(['rectangle', 'x-box', 'check-box'])
 
 function allShapesMatch(shapes, set) {
   return shapes.length > 0 && shapes.every((s) => set.has(s.type))
@@ -307,6 +306,7 @@ export const ShapeInspector = track(function ShapeInspector() {
   const showTextSizeInput = allShapesMatch(shapes, SHAPES_WITH_FREEFORM_TEXT_SIZE)
   const showLists = allShapesMatch(shapes, SHAPES_WITH_LISTS)
   const showArrowheads = allShapesMatch(shapes, SHAPES_WITH_ARROWHEADS)
+  const showStrokeStyle = allShapesMatch(shapes, SHAPES_WITH_STROKE_STYLE)
   const showStrokeToggle = allShapesMatch(shapes, SHAPES_WITH_STROKE_TOGGLE)
 
   // Group selections and other unsupported shape sets previously rendered an
@@ -323,6 +323,7 @@ export const ShapeInspector = track(function ShapeInspector() {
     || showTextSizeInput
     || showLists
     || showArrowheads
+    || showStrokeStyle
     || showStrokeToggle
   )) {
     return null
@@ -369,6 +370,7 @@ export const ShapeInspector = track(function ShapeInspector() {
   const activeFont  = sharedStyle(editor, DefaultFontStyle)
   const activeSize  = sharedStyle(editor, DefaultSizeStyle)
   const activeAlign = sharedStyle(editor, DefaultHorizontalAlignStyle)
+  const activeStrokeStyle = showStrokeStyle ? sharedStyle(editor, DefaultDashStyle) : undefined
   const activeArrowheadStart = showArrowheads ? sharedStyle(editor, ArrowShapeArrowheadStartStyle) : undefined
   const activeArrowheadEnd   = showArrowheads ? sharedStyle(editor, ArrowShapeArrowheadEndStyle) : undefined
   const activeCorner = showCorners && shapes.every(
@@ -432,6 +434,7 @@ export const ShapeInspector = track(function ShapeInspector() {
     )
   })
   const applyFont   = (id) => editor.setStyleForSelectedShapes(DefaultFontStyle, id)
+  const applyStrokeStyle = (id) => editor.setStyleForSelectedShapes(DefaultDashStyle, id)
   const applyTextSizePx = (value) => {
     const nextSizePx = clampTextSizePx(value)
     const preset = getNearestSizePreset(nextSizePx)
@@ -621,6 +624,23 @@ export const ShapeInspector = track(function ShapeInspector() {
                 >{option.label}</button>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {showStrokeStyle && (
+        <div className="insp-row">
+          <div className="insp-label">Stroke</div>
+          <div className="insp-body">
+            {STROKE_STYLE_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                className={`insp-btn ${activeStrokeStyle === option.id ? 'active' : ''}`}
+                onClick={() => applyStrokeStyle(option.id)}
+                title={option.title}
+                type="button"
+              >{option.shortLabel}</button>
+            ))}
           </div>
         </div>
       )}
