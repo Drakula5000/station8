@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 24" width="260" height="24">
+<defs>
+  <style>
+    .lbl { font-family: 'Courier New', Courier, monospace; font-size: 11px; letter-spacing: 0.1em; }
+  </style>
+  <filter id="g" x="-30%" y="-80%" width="160%" height="260%">
+    <feGaussianBlur stdDeviation="1.2" result="blur"/>
+    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+</defs>
+<text class="lbl" x="130" y="16" fill="#66ffff" opacity="0.9" text-anchor="middle" filter="url(#g)">→ TRY THE LIVE DEMO</text>
+</svg>
