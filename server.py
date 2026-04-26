@@ -1401,9 +1401,13 @@ _GOOGLE_OAUTH_SCOPES = ' '.join([
 
 def _google_oauth_creds():
     """Return (client_id, client_secret, redirect_uri) or None if unconfigured."""
-    cid = os.getenv('GOOGLE_CLIENT_ID')
-    secret = os.getenv('GOOGLE_CLIENT_SECRET')
-    redirect = os.getenv('GOOGLE_OAUTH_REDIRECT_URI') or 'http://127.0.0.1:5001/api/google/callback'
+    # .strip() guards against trailing whitespace/newlines that the Render
+    # dashboard's value editor can silently paste — a single `\n` on
+    # GOOGLE_OAUTH_REDIRECT_URI breaks byte-exact matching against the
+    # authorized URI in Google Cloud and yields a generic invalid_request.
+    cid = (os.getenv('GOOGLE_CLIENT_ID') or '').strip()
+    secret = (os.getenv('GOOGLE_CLIENT_SECRET') or '').strip()
+    redirect = (os.getenv('GOOGLE_OAUTH_REDIRECT_URI') or '').strip() or 'http://127.0.0.1:5001/api/google/callback'
     if not cid or not secret:
         return None
     return cid, secret, redirect
