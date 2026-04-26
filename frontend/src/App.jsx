@@ -604,6 +604,10 @@ export default function App() {
   }, [refreshGoogleAuth])
 
   const showDatabaseHome = readOnly && !activeId
+  const scanSurfaceKey = showDatabaseHome
+    ? `${viewerMode || 'anon'}:dashboard:${route.shareToken || 'direct'}`
+    : `${viewerMode || 'anon'}:${activeId?.type || 'workspace'}:${activeId?.id || 'home'}:${route.shareToken || 'direct'}`
+  const mainClassName = `canvas-wrap${showDatabaseHome ? '' : ' s8-grid'}`
 
   useEffect(() => {
     const onKey = (e) => {
@@ -1599,7 +1603,7 @@ export default function App() {
         />
       )}
 
-      <main className="canvas-wrap s8-grid">
+      <main key={scanSurfaceKey} className={mainClassName}>
         {showDatabaseHome ? (
           <DatabaseHome
             query={query}

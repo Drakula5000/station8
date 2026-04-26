@@ -152,7 +152,8 @@
    the dashboard scrolls. .s8-grid uses position: absolute. */
 .database-home::before {
   position: fixed;
-  display: none;
+  display: block;
+  animation: s8-scan-idle 160s linear infinite;
 }
 .database-home::after {
   content: '';
@@ -847,5 +848,4 @@ html[data-mode="light"] .database-home .database-divider-line::after {
    only ever displayed below the tablet-landscape breakpoint. Default to
    hidden so it never appears on desktop. */
 .sidebar-scrim { display: none; }
-
 

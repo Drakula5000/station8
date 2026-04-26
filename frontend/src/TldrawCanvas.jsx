@@ -76,6 +76,12 @@ const TLDRAW_COMPONENTS = {
   NavigationPanel: null,
   ImageToolbar: null,
 }
+const READONLY_TLDRAW_COMPONENTS = {
+  ...TLDRAW_COMPONENTS,
+  ShapeIndicators: null,
+  SelectionBackground: null,
+  SelectionForeground: null,
+}
 
 // tldraw NOTE_SIZE is hardcoded at 200 canvas units. Use dynamic size mode so
 // newly placed notes stay a consistent on-screen size across zoom levels.
@@ -258,6 +264,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   const pointerRef = useRef(null)
   const [ghost, setGhost] = useState(null) // { x, y, color } | null
   const [lightbox, setLightbox] = useState(null) // { src, alt } | null
+  const [hoverAffordance, setHoverAffordance] = useState({ cursor: '', tooltip: '' })
   // Hide the canvas until the post-load fit-to-bounds completes; the snapshot
   // restores whatever zoom the board was saved at, so without this gate users
   // see a brief flash of oversized content before the camera lands.
@@ -317,6 +324,9 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   useEffect(() => {
     if (editorRef.current) {
       editorRef.current.updateInstanceState({ isReadonly: readOnly })
+    }
+    if (!readOnly) {
+      setHoverAffordance({ cursor: '', tooltip: '' })
     }
   }, [readOnly])
 
@@ -429,6 +439,10 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         // with (usually false). Without this, visitors can select + delete
         // shapes locally even though saves are blocked.
         editor.updateInstanceState({ isReadonly: ro })
+        if (ro) {
+          editor.selectNone()
+          editor.setHoveredShape(null)
+        }
         fitBoardAfterOpen(editor, () => setBoardFitting(false))
       })
 
@@ -533,14 +547,57 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     }
   }, [doSave])
 
+  const updateReadonlyHoverAffordance = useCallback((event) => {
+    if (!readOnlyRef.current) return
+
+    const editor = editorRef.current
+    if (!editor) return
+
+    let cursor = ''
+    let tooltip = ''
+
+    const target = event.target instanceof Element ? event.target : null
+    if (target?.closest('a[href]')) {
+      cursor = 'pointer'
+    }
+
+    const pagePoint = editor.screenToPage({ x: event.clientX, y: event.clientY })
+    const shape = editor.getShapeAtPoint(pagePoint, {
+      hitInside: true,
+      hitLabels: true,
+      renderingOnly: true,
+    })
+
+    if (shape?.type === 'image') {
+      tooltip = 'Double click to view'
+    }
+
+    const shapeUrl = typeof shape?.props?.url === 'string' ? shape.props.url.trim() : ''
+    if (!cursor && shapeUrl) {
+      cursor = 'pointer'
+    }
+
+    setHoverAffordance((prev) => (
+      prev.cursor === cursor && prev.tooltip === tooltip
+        ? prev
+        : { cursor, tooltip }
+    ))
+  }, [])
+
   const handleMouseMove = (e) => {
     pointerRef.current = { clientX: e.clientX, clientY: e.clientY }
     updateGhost(e.clientX, e.clientY)
+    updateReadonlyHoverAffordance(e)
   }
 
   const handleMouseLeave = () => {
     pointerRef.current = null
     setGhost(null)
+    setHoverAffordance((prev) => (
+      prev.cursor || prev.tooltip
+        ? { cursor: '', tooltip: '' }
+        : prev
+    ))
   }
 
   const handleWheelCapture = useCallback(() => {
@@ -571,14 +628,19 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     <div
       className={`tldraw-wrap${ghost ? ' sticky-placing' : ''}`}
       ref={wrapRef}
-      style={{ opacity: boardFitting ? 0 : 1, transition: 'opacity 200ms ease-out' }}
+      title={hoverAffordance.tooltip || undefined}
+      style={{
+        opacity: boardFitting ? 0 : 1,
+        transition: 'opacity 200ms ease-out',
+        cursor: hoverAffordance.cursor || undefined,
+      }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onPointerDownCapture={handlePointerDownCapture}
       onWheelCapture={handleWheelCapture}
     >
       <Tldraw
-        components={TLDRAW_COMPONENTS}
+        components={readOnly ? READONLY_TLDRAW_COMPONENTS : TLDRAW_COMPONENTS}
         onMount={handleMount}
         assets={assetStore}
         options={{ snapThreshold: 10 }}
