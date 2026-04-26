@@ -1176,6 +1176,16 @@ def push_report():
     return jsonify({'id': report_id, 'created': created, 'url': f'/reports/{report_id}'})
 
 
+@app.route('/api/reports/<report_id>', methods=['GET'])
+@_studio_auth_required
+def get_report(report_id):
+    record = next((r for r in _load_reports() if r.get('id') == report_id), None)
+    if record is None:
+        return jsonify({'error': 'not found'}), 404
+    blob = _load_report(report_id) or {}
+    return jsonify({**record, 'html': blob.get('html', '')})
+
+
 @app.route('/api/reports/<report_id>', methods=['DELETE'])
 @_studio_auth_required
 def delete_report(report_id):
