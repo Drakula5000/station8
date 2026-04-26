@@ -2471,6 +2471,12 @@ def get_visitor_gsheet(gsheet_id):
     return jsonify({'error': 'Not found'}), 404
 
 
+@app.route('/api/reports', methods=['GET'])
+@_studio_auth_required
+def list_reports():
+    return jsonify(_list_docs_sorted(_load_reports()))
+
+
 @app.route('/api/visitor/reports', methods=['GET'])
 @_viewer_auth_required
 def list_visitor_reports():
