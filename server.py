@@ -667,6 +667,15 @@ def _move_docs_from_folder(folder_ids, target_parent_id):
     if updated_sheets:
         _save_sheets(sheets)
 
+    reports = _load_reports()
+    updated_reports = False
+    for report in reports:
+        if report.get('folder_id') in folder_ids:
+            report['folder_id'] = target_parent_id
+            updated_reports = True
+    if updated_reports:
+        _save_reports(reports)
+
 
 def _move_direct_docs_from_folder(folder_id, target_parent_id):
     _move_docs_from_folder({folder_id}, target_parent_id)
@@ -1264,8 +1273,10 @@ def delete_folder(folder_id):
     folder_ids = _folder_with_descendants(folder_id, folders)
     boards_to_delete = [board for board in _load_boards() if board.get('folder_id') in folder_ids]
     sheets_to_delete = [sheet for sheet in _load_sheets() if sheet.get('folder_id') in folder_ids]
+    reports_to_delete = [r for r in _load_reports() if r.get('folder_id') in folder_ids]
     board_ids = [board.get('id') for board in boards_to_delete if board.get('id')]
     sheet_ids = [sheet.get('id') for sheet in sheets_to_delete if sheet.get('id')]
+    report_ids = [r.get('id') for r in reports_to_delete if r.get('id')]
     upload_filenames = set()
     for board_id in board_ids:
         upload_filenames.update(_board_upload_filenames(board_id))
@@ -1277,6 +1288,9 @@ def delete_folder(folder_id):
     if sheet_ids:
         _save_sheets([sheet for sheet in _load_sheets() if sheet.get('id') not in set(sheet_ids)])
         _delete_sheet_files(sheet_ids)
+    if report_ids:
+        _save_reports([r for r in _load_reports() if r.get('id') not in set(report_ids)])
+        _delete_report_files(report_ids)
     ws['folders'] = remaining
     _save(WORKSPACE_FILE, ws)
     _cleanup_unreferenced_uploads(upload_filenames)
