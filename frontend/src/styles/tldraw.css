@@ -12,6 +12,26 @@
   fill-opacity: var(--s8-geo-fill-opacity) !important;
 }
 
+/* "No border" toggle (Border row in ShapeInspector). The data attribute is
+   stamped by ShapeColorSync from shape.meta.strokeNone. Geo shapes still
+   render their fill (`data-geo-fill-custom` rule above), so a filled rect
+   with strokeNone reads as a card with no outline. Same idea for frames.
+
+   Selectors are broad on purpose: `dash: 'draw'` rectangles render as a
+   group of multiple sketchy <path> elements (one per side), and the stroke
+   may live as an attribute on the path OR be inherited from a wrapping
+   <g stroke="…">. Setting `stroke: transparent` on every <path>/<g>/<svg>
+   inside the wrapper covers all of these. */
+.tldraw-wrap [data-stroke-none="true"][data-shape-type="geo"] svg,
+.tldraw-wrap [data-stroke-none="true"][data-shape-type="geo"] svg g,
+.tldraw-wrap [data-stroke-none="true"][data-shape-type="geo"] svg path {
+  stroke: transparent !important;
+}
+.tldraw-wrap [data-stroke-none="true"][data-shape-type="frame"] .tl-frame__body,
+.tldraw-wrap [data-stroke-none="true"][data-shape-type="frame"] .tl-frame__body * {
+  stroke: transparent !important;
+}
+
 /* Keep non-frame small strokes aligned with the frame border weight. */
 .tldraw-wrap [data-shape-type='geo'][data-s8-size='s'] > svg [stroke],
 .tldraw-wrap [data-shape-type='line'][data-s8-size='s'] > svg [stroke],
@@ -59,6 +79,164 @@
 }
 .tldraw-wrap [data-tl-color='white'] .tl-note__container {
   background-color: var(--s8-tl-white) !important;
+}
+
+/* ─── Frame body / stroke / heading — Aurora override ─────────────────────
+   tldraw's default `frameFill` is mode-aware: in dark mode the body becomes
+   a near-black tint (e.g. #181212 for red), in light mode a near-white
+   tint (e.g. #fffbfb for red). Result: every frame in a row looks like the
+   same washed-out shape with a thin colored stroke — adjacent colors are
+   indistinguishable on canvas. These rules override the inline `fill`/
+   `stroke` SVG attrs and the `tl-frame-heading-hit-area` inline styles
+   with full Aurora swatch colors at fixed alpha, so a `lavender` frame
+   looks the same in both modes and reads as obviously different from a
+   `pink` or `blue` neighbour.
+
+   The body uses --s8-frame-body-alpha (subtle tint) so canvas content
+   stays legible on top. The heading hit-area uses --s8-frame-heading-alpha
+   (more saturated chip) and the stroke is the full hex.
+
+   Black + white deserve special-case alphas so they don't read as "no
+   color" — black gets a slightly higher alpha for visibility on light
+   bg, white gets the same for visibility on dark bg. */
+
+/* Lavender (light-violet) */
+.tldraw-wrap [data-tl-color='light-violet'][data-shape-type='frame'] .tl-frame__body {
+  fill: rgb(200 176 245 / var(--s8-frame-body-alpha)) !important;
+  stroke: var(--s8-tl-lavender) !important;
+}
+.tldraw-wrap [data-tl-color='light-violet'][data-shape-type='frame'] .tl-frame-heading-hit-area {
+  background-color: rgb(200 176 245 / var(--s8-frame-heading-alpha)) !important;
+  color: var(--s8-tl-lavender) !important;
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-tl-lavender) !important;
+}
+
+/* Violet (purple) */
+.tldraw-wrap [data-tl-color='violet'][data-shape-type='frame'] .tl-frame__body {
+  fill: rgb(159 122 236 / var(--s8-frame-body-alpha)) !important;
+  stroke: var(--s8-tl-violet) !important;
+}
+.tldraw-wrap [data-tl-color='violet'][data-shape-type='frame'] .tl-frame-heading-hit-area {
+  background-color: rgb(159 122 236 / var(--s8-frame-heading-alpha)) !important;
+  color: var(--s8-tl-violet) !important;
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-tl-violet) !important;
+}
+
+/* Pink (light-red) */
+.tldraw-wrap [data-tl-color='light-red'][data-shape-type='frame'] .tl-frame__body {
+  fill: rgb(240 168 192 / var(--s8-frame-body-alpha)) !important;
+  stroke: var(--s8-tl-pink) !important;
+}
+.tldraw-wrap [data-tl-color='light-red'][data-shape-type='frame'] .tl-frame-heading-hit-area {
+  background-color: rgb(240 168 192 / var(--s8-frame-heading-alpha)) !important;
+  color: var(--s8-tl-pink) !important;
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-tl-pink) !important;
+}
+
+/* Red */
+.tldraw-wrap [data-tl-color='red'][data-shape-type='frame'] .tl-frame__body {
+  fill: rgb(232 88 88 / var(--s8-frame-body-alpha)) !important;
+  stroke: var(--s8-tl-pink-strong) !important;
+}
+.tldraw-wrap [data-tl-color='red'][data-shape-type='frame'] .tl-frame-heading-hit-area {
+  background-color: rgb(232 88 88 / var(--s8-frame-heading-alpha)) !important;
+  color: var(--s8-tl-pink-strong) !important;
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-tl-pink-strong) !important;
+}
+
+/* Blue (light-blue + blue) */
+.tldraw-wrap [data-tl-color='light-blue'][data-shape-type='frame'] .tl-frame__body,
+.tldraw-wrap [data-tl-color='blue'][data-shape-type='frame'] .tl-frame__body {
+  fill: rgb(144 188 232 / var(--s8-frame-body-alpha)) !important;
+  stroke: var(--s8-tl-blue) !important;
+}
+.tldraw-wrap [data-tl-color='light-blue'][data-shape-type='frame'] .tl-frame-heading-hit-area,
+.tldraw-wrap [data-tl-color='blue'][data-shape-type='frame'] .tl-frame-heading-hit-area {
+  background-color: rgb(144 188 232 / var(--s8-frame-heading-alpha)) !important;
+  color: var(--s8-tl-blue) !important;
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-tl-blue) !important;
+}
+
+/* Teal (light-green + green) */
+.tldraw-wrap [data-tl-color='light-green'][data-shape-type='frame'] .tl-frame__body,
+.tldraw-wrap [data-tl-color='green'][data-shape-type='frame'] .tl-frame__body {
+  fill: rgb(136 212 176 / var(--s8-frame-body-alpha)) !important;
+  stroke: var(--s8-tl-teal) !important;
+}
+.tldraw-wrap [data-tl-color='light-green'][data-shape-type='frame'] .tl-frame-heading-hit-area,
+.tldraw-wrap [data-tl-color='green'][data-shape-type='frame'] .tl-frame-heading-hit-area {
+  background-color: rgb(136 212 176 / var(--s8-frame-heading-alpha)) !important;
+  color: var(--s8-tl-teal) !important;
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-tl-teal) !important;
+}
+
+/* Orange */
+.tldraw-wrap [data-tl-color='orange'][data-shape-type='frame'] .tl-frame__body {
+  fill: rgb(240 184 128 / var(--s8-frame-body-alpha)) !important;
+  stroke: var(--s8-tl-orange) !important;
+}
+.tldraw-wrap [data-tl-color='orange'][data-shape-type='frame'] .tl-frame-heading-hit-area {
+  background-color: rgb(240 184 128 / var(--s8-frame-heading-alpha)) !important;
+  color: var(--s8-tl-orange) !important;
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-tl-orange) !important;
+}
+
+/* Grey */
+.tldraw-wrap [data-tl-color='grey'][data-shape-type='frame'] .tl-frame__body {
+  fill: rgb(136 152 176 / var(--s8-frame-body-alpha)) !important;
+  stroke: var(--s8-tl-grey) !important;
+}
+.tldraw-wrap [data-tl-color='grey'][data-shape-type='frame'] .tl-frame-heading-hit-area {
+  background-color: rgb(136 152 176 / var(--s8-frame-heading-alpha)) !important;
+  color: var(--s8-tl-grey) !important;
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-tl-grey) !important;
+}
+
+/* Black — light mode: dark stroke + faint dark tint reads as a printed
+   card. Dark mode (legacy frames only — the swatch is disabled in the
+   inspector, see canvas.css): black-on-dark would be invisible, so
+   re-route the body fill, stroke, and heading to neutral mid-grey so
+   the frame is at least visible. The heading reads as "no color set"
+   rather than as a deliberate styled chip. */
+html[data-mode="light"] .tldraw-wrap [data-tl-color='black'][data-shape-type='frame'] .tl-frame__body {
+  fill: rgb(0 0 0 / 0.10) !important;
+  stroke: var(--s8-tl-text-on-light) !important;
+}
+html[data-mode="light"] .tldraw-wrap [data-tl-color='black'][data-shape-type='frame'] .tl-frame-heading-hit-area {
+  background-color: rgb(0 0 0 / 0.18) !important;
+  color: var(--s8-tl-text-on-light) !important;
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-tl-text-on-light) !important;
+}
+html[data-mode="dark"] .tldraw-wrap [data-tl-color='black'][data-shape-type='frame'] .tl-frame__body {
+  fill: rgb(255 255 255 / 0.04) !important;
+  stroke: var(--s8-text-mid) !important;
+}
+html[data-mode="dark"] .tldraw-wrap [data-tl-color='black'][data-shape-type='frame'] .tl-frame-heading-hit-area {
+  background-color: rgb(255 255 255 / 0.10) !important;
+  color: var(--s8-text-mid) !important;
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-text-mid) !important;
+}
+
+/* White — symmetric to black. Dark mode: white stroke + faint white
+   tint. Light mode (legacy only — swatch disabled in inspector):
+   white-on-light would vanish, so re-route to neutral mid-grey. */
+html[data-mode="dark"] .tldraw-wrap [data-tl-color='white'][data-shape-type='frame'] .tl-frame__body {
+  fill: rgb(255 255 255 / 0.10) !important;
+  stroke: var(--s8-tl-white) !important;
+}
+html[data-mode="dark"] .tldraw-wrap [data-tl-color='white'][data-shape-type='frame'] .tl-frame-heading-hit-area {
+  background-color: rgb(255 255 255 / 0.18) !important;
+  color: var(--s8-tl-white) !important;
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-tl-white) !important;
+}
+html[data-mode="light"] .tldraw-wrap [data-tl-color='white'][data-shape-type='frame'] .tl-frame__body {
+  fill: rgb(0 0 0 / 0.04) !important;
+  stroke: var(--s8-text-mid) !important;
+}
+html[data-mode="light"] .tldraw-wrap [data-tl-color='white'][data-shape-type='frame'] .tl-frame-heading-hit-area {
+  background-color: rgb(0 0 0 / 0.10) !important;
+  color: var(--s8-text-mid) !important;
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-text-mid) !important;
 }
 
 /* Aurora text-color overrides — text labels on non-note shapes render the

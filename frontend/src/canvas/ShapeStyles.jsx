@@ -1,4 +1,5 @@
 import { track, useEditor } from 'tldraw'
+import { AURORA_SWATCHES } from '../colors'
 
 // Reactive components that inject per-shape CSS based on tldraw shape state.
 // React 19 hoists <style> tags into <head> automatically, so each component
@@ -19,6 +20,75 @@ export const FrameCornerStyles = track(function FrameCornerStyles() {
       `[data-shape-id="${id}"] .tl-frame-heading-hit-area { border-radius: ${rx * 12 / 32}px }`,
     ].join('\n')
   }).join('\n')
+  return <style>{css}</style>
+})
+
+// Geo rectangles get 4 corner-radius options matching frames. tldraw renders
+// the rect body as a single SVG <path> following a sharp rectangle, so neither
+// `rx` nor a CSS clip will produce a clean rounded border — clipping at the
+// rounded edge cuts the corner stroke down to a thin sliver because the path
+// itself still draws a 90° corner. Instead:
+//   1. Clip the SVG container to the rounded rect (hides the fill that would
+//      otherwise show in the corner cutouts).
+//   2. Hide tldraw's stroke (transparent), since it can't follow the rounding.
+//   3. Redraw the stroke as a CSS outline on the wrapper, which honours
+//      border-radius natively and renders a uniform-thickness rounded border.
+//
+// Skip when dash !== 'solid' — sketchy/dashed/dotted strokes are part of the
+// path, can't be replicated cleanly by an outline, and look weird with rounded
+// corners anyway. The Inspector auto-flips dash to 'solid' when the user picks
+// any non-zero radius, so this only excludes shapes the user deliberately
+// keeps sketchy.
+const RECT_CLASS_GEOS = new Set(['rectangle', 'x-box', 'check-box'])
+
+// Match tldraw's STROKE_SIZES so the redrawn outline visually matches what the
+// stroke would have been. Size=s is bumped down to 1 to match the
+// `data-s8-size='s'` weight override in tldraw.css.
+const STROKE_WIDTH_BY_SIZE = { s: 1, m: 3.5, l: 5, xl: 10 }
+
+const TL_COLOR_TO_CSS = {
+  ...Object.fromEntries(AURORA_SWATCHES.map((s) => [s.tl, s.bg])),
+  // Aliases for tldraw color names not in the Aurora swatch list.
+  yellow: 'var(--s8-tl-lavender)',
+  green:  'var(--s8-tl-teal)',
+  // Black-on-canvas in dark mode reads as #1d1d1d (matches the text-label
+  // override in tldraw.css), not the literal #000 that disappears.
+  black:  'var(--s8-tl-text-on-light)',
+}
+
+export const GeoCornerStyles = track(function GeoCornerStyles() {
+  const editor = useEditor()
+  const rects = editor.getCurrentPageShapes().filter((s) => (
+    s.type === 'geo'
+    && RECT_CLASS_GEOS.has(s.props?.geo)
+    && s.props?.dash === 'solid'
+    && Number(s.meta?.cornerRadius ?? 0) > 0
+  ))
+  if (rects.length === 0) return null
+
+  const css = rects.map((shape) => {
+    const id = shape.id
+    const rx = Number(shape.meta.cornerRadius)
+    const baseSw = STROKE_WIDTH_BY_SIZE[shape.props.size] ?? 3.5
+    const sw = baseSw * (Number(shape.props.scale) || 1)
+    const color = TL_COLOR_TO_CSS[shape.props.color] || 'currentColor'
+    return [
+      // Clip the fill (and the now-hidden stroke path) to the rounded rect.
+      `[data-shape-id="${id}"] > .tl-svg-container { border-radius: ${rx}px; overflow: hidden; }`,
+      // Hide tldraw's stroke — it can't follow the rounding.
+      `[data-shape-id="${id}"] > .tl-svg-container [stroke] { stroke: transparent !important; }`,
+      // Redraw the stroke as an outline on the wrapper. outline-offset:
+      // -sw/2 centres it on the wrapper edge so the rounded border lands
+      // exactly where tldraw's stroke would have. Suppressed when the user
+      // toggles Border → Off (data-stroke-none="true").
+      `[data-shape-id="${id}"] { border-radius: ${rx}px; }`,
+      `[data-shape-id="${id}"]:not([data-stroke-none="true"]) {`,
+      `  outline: ${sw}px solid ${color};`,
+      `  outline-offset: -${sw / 2}px;`,
+      `}`,
+    ].join('\n')
+  }).join('\n')
+
   return <style>{css}</style>
 })
 

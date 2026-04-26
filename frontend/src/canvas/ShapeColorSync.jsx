@@ -39,6 +39,12 @@ export const ShapeColorSync = track(function ShapeColorSync() {
         el.style.removeProperty('--s8-geo-fill-color')
         el.style.removeProperty('--s8-geo-fill-opacity')
       }
+
+      if (shape.meta?.strokeNone) {
+        el.setAttribute('data-stroke-none', 'true')
+      } else {
+        el.removeAttribute('data-stroke-none')
+      }
     })
   })
   return null

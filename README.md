@@ -9,7 +9,7 @@
 
 <br>
 
-Searchable whiteboards for research. Every picture, sticky, and spreadsheet cell is indexed.<br>
+Searchable whiteboards for research. Every picture, sticky, knit, and spreadsheet cell is indexed.<br>
 Whiteboards beat walls of text. But FigJam and Miro can't search the images on them... and images are worth 1k words.
 
 </div>
@@ -20,11 +20,11 @@ Whiteboards beat walls of text. But FigJam and Miro can't search the images on t
 
 I use whiteboards for research, because people prefer it to reading pages of analysis and findings. But FigJam, Miro, et al. don't have the kind of searchability you get with documents. So a photo from a slide at a conference or a picture of a jellyfish is invisible to their search.
 
-Station 8 fixes that for me -- a searchable database for everything in my canvas-based research. Drop an image on a board and OCR runs in your browser, words printed inside the image become findable immediately. Tag the image with alt text and that's searchable too. Stickies, docs, spreadsheet cells, all of it indexed in one place.
+Station 8 fixes that for me -- a searchable database for everything in my canvas-based research. Drop an image on a board and OCR runs in your browser, words printed inside the image become findable immediately. Tag the image with alt text and that's searchable too. Stickies, docs, knits, spreadsheet cells, all of it indexed in one place.
 
 The search results also take you directly to the search hits, zooming your camera for you, and lighting up your find. Search specific boards or the whole database, our search will take you on the guided tour of your hits.
 
-You can create or import Google Docs and Sheets directly into the same workspace, so people can search your entire research database in one spot.
+You can create or import Google Docs + Sheets and R knits directly into the same workspace, so people can search your entire research database in one spot.
 
 Station 8 is a free (or almost-free depending on your usage) way to show off your research and how you think. You could put a link in your résumé or recruiter outreach so they can see your research and passion on a relevant topic. The economy and labor market are tough right now, and I want you to shine without sacrificing meals.
 

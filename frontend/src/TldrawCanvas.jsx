@@ -5,7 +5,7 @@ import { ShapeInspector } from './components/ShapeInspector'
 import { ImageLightbox } from './components/ImageLightbox'
 import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
-import { FrameCornerStyles, ImageShapeStyles, ListStyles } from './canvas/ShapeStyles'
+import { FrameCornerStyles, GeoCornerStyles, ImageShapeStyles, ListStyles } from './canvas/ShapeStyles'
 import { BrokenImageRetry } from './canvas/BrokenImageRetry'
 import { FindBar } from './canvas/FindBar'
 import { FjToolbar } from './canvas/FjToolbar'
@@ -650,6 +650,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} onOpenLightbox={openLightbox} />}
         {!readOnly && <ShapeInspector />}
         <FrameCornerStyles />
+        <GeoCornerStyles />
         <ImageShapeStyles />
         <BrokenImageRetry />
         <ListStyles />

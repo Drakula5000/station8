@@ -51,11 +51,17 @@ body {
   --s8-overlay-dark-18: var(--s8-overlay-dark-18);
   --s8-overlay-dark-45: rgba(0, 0, 0, 0.45);
 
-  /* Tldraw palette — must match colors.js swatches; theme-independent */
+  /* Tldraw palette — must match colors.js swatches; theme-independent.
+     `violet` and `pink-strong` are deliberately offset from `lavender` and
+     `pink` so the inspector swatches read as distinct hues — earlier values
+     (#B8A0F8 violet, #e87890 pink-strong) drifted into near-duplicates of
+     their light counterparts and frames using them looked identical on
+     canvas. Verify any further tweaks against the 10-frame swatch test in
+     dark + light mode before committing. */
   --s8-tl-lavender:      #C8B0F5;
-  --s8-tl-violet:        #B8A0F8;
+  --s8-tl-violet:        #9F7AEC;
   --s8-tl-pink:          #F0A8C0;
-  --s8-tl-pink-strong:   #e87890;
+  --s8-tl-pink-strong:   #E85858;
   --s8-tl-blue:          #90BCE8;
   --s8-tl-teal:          #88D4B0;
   --s8-tl-orange:        #F0B880;
@@ -63,6 +69,14 @@ body {
   --s8-tl-black:         #000000;
   --s8-tl-white:         #FFFFFF;
   --s8-tl-text-on-light: #1d1d1d;
+
+  /* Frame fill alphas — applied as rgba() to the body rect. Frames need to
+     be subtle enough that content reads on top, but saturated enough that
+     two adjacent frames in different colors are obviously different. The
+     same alpha works in both modes because the swatch hex carries the hue
+     and the canvas bg supplies the value (dark-on-dark, light-on-light). */
+  --s8-frame-body-alpha:    0.16;
+  --s8-frame-heading-alpha: 0.32;
 
   /* FigJam-style decorative icon accents */
   --s8-fj-pen-accent: #FF7AA2;
@@ -78,8 +92,8 @@ body {
   --s8-tl-teal-stroke:     #307060;
   --s8-tl-orange-fold:     #E0A068;
   --s8-tl-orange-stroke:   #B07020;
-  --s8-tl-violet-fold:     #A088F0;
-  --s8-tl-violet-stroke:   #5830B0;
+  --s8-tl-violet-fold:     #8A60D8;
+  --s8-tl-violet-stroke:   #4820A0;
 
   /* Section/highlight pastel palette (light bg + dark stroke pairs) */
   --s8-section-violet-bg:     #ede8ff;

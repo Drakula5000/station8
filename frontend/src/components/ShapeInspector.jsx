@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { track, useEditor, DefaultColorStyle, DefaultFillStyle, DefaultFontStyle, DefaultSizeStyle, DefaultHorizontalAlignStyle, DefaultDashStyle } from 'tldraw'
+import {
+  track,
+  useEditor,
+  DefaultColorStyle,
+  DefaultFillStyle,
+  DefaultFontStyle,
+  DefaultSizeStyle,
+  DefaultHorizontalAlignStyle,
+  DefaultDashStyle,
+  ArrowShapeArrowheadStartStyle,
+  ArrowShapeArrowheadEndStyle,
+} from 'tldraw'
 import { FjDraftIcon, FjDataIcon, FjAnalysisIcon, FjInsightIcon } from '../icons'
 import { AURORA_SWATCHES as COLOR_SWATCHES } from '../colors'
 
@@ -57,9 +68,23 @@ const CORNER_OPTIONS = [
   { id: 32, cls: 'corner-swatch-32', title: 'Pill' },
 ]
 
-const RECTANGLE_CORNER_OPTIONS = [
-  { id: 'sharp', cls: 'corner-swatch-0', title: 'Sharp' },
-  { id: 'round', cls: 'corner-swatch-8', title: 'Rounded' },
+// Arrow-tip pickers — value strings come straight from tldraw's
+// arrowheadTypes enum (TLArrowShape). Glyphs render compactly inside the
+// inspector; only the most common subset is exposed here to keep the row
+// readable. To surface more options, append them to this list.
+const ARROWHEAD_OPTIONS = [
+  { id: 'none',     glyph: '—', title: 'None' },
+  { id: 'arrow',    glyph: '➤', title: 'Arrow' },
+  { id: 'triangle', glyph: '▶', title: 'Triangle' },
+  { id: 'dot',      glyph: '●', title: 'Dot' },
+  { id: 'diamond',  glyph: '◆', title: 'Diamond' },
+  { id: 'square',   glyph: '■', title: 'Square' },
+  { id: 'bar',      glyph: '|', title: 'Bar' },
+]
+
+const STROKE_TOGGLE_OPTIONS = [
+  { id: 'on',  label: 'On',  title: 'Border on' },
+  { id: 'off', label: 'Off', title: 'No border' },
 ]
 
 const IMAGE_BORDER_OPTIONS = [
@@ -84,15 +109,23 @@ const SHAPES_WITH_CORNERS = new Set(['frame'])
 const SHAPES_WITH_IMAGE_STYLING = new Set(['image'])
 const SHAPES_WITH_FREEFORM_TEXT_SIZE = new Set(['text'])
 const SHAPES_WITH_LISTS = new Set(['note', 'text'])
+const SHAPES_WITH_ARROWHEADS = new Set(['arrow'])
+// Shapes where "no border" is meaningful: a rectangle/frame with a fill can
+// still read as a card without an outline. For arrows/lines/draws the stroke
+// IS the visual, so the toggle would just hide the shape — exclude them.
+const SHAPES_WITH_STROKE_TOGGLE = new Set(['geo', 'frame'])
+// Rectangle-class geos can take a real corner radius (rendered via CSS
+// border-radius + overflow:hidden on the SVG container, see GeoCornerStyles).
+// Other geo subtypes (diamond, triangle, ellipse, etc.) skip the row.
+const RECT_CLASS_GEOS = new Set(['rectangle', 'x-box', 'check-box'])
 
 function allShapesMatch(shapes, set) {
   return shapes.length > 0 && shapes.every((s) => set.has(s.type))
 }
 
-function allCorneredGeoShapes(shapes) {
-  const roundedGeoShapes = new Set(['ellipse', 'oval', 'cloud', 'heart'])
+function allRectangleGeoShapes(shapes) {
   return shapes.length > 0 && shapes.every(
-    (shape) => shape.type === 'geo' && !roundedGeoShapes.has(shape.props?.geo)
+    (shape) => shape.type === 'geo' && RECT_CLASS_GEOS.has(shape.props?.geo)
   )
 }
 
@@ -305,27 +338,29 @@ export const ShapeInspector = track(function ShapeInspector() {
   const showSize    = allShapesMatch(shapes, SHAPES_WITH_SIZE)
   const showAlign   = allShapesMatch(shapes, SHAPES_WITH_ALIGN)
   const showCorners = allShapesMatch(shapes, SHAPES_WITH_CORNERS)
-  const showGeoCorners = allCorneredGeoShapes(shapes)
+  const showGeoCorners = allRectangleGeoShapes(shapes)
   const showImageStyling = allShapesMatch(shapes, SHAPES_WITH_IMAGE_STYLING)
   const showTextSizeInput = allShapesMatch(shapes, SHAPES_WITH_FREEFORM_TEXT_SIZE)
   const showLists = allShapesMatch(shapes, SHAPES_WITH_LISTS)
+  const showArrowheads = allShapesMatch(shapes, SHAPES_WITH_ARROWHEADS)
+  const showStrokeToggle = allShapesMatch(shapes, SHAPES_WITH_STROKE_TOGGLE)
 
   const activeColor = sharedStyle(editor, DefaultColorStyle)
   const activeFillStyle = sharedStyle(editor, DefaultFillStyle)
-  const activeDash = sharedStyle(editor, DefaultDashStyle)
   const activeFont  = sharedStyle(editor, DefaultFontStyle)
   const activeSize  = sharedStyle(editor, DefaultSizeStyle)
   const activeAlign = sharedStyle(editor, DefaultHorizontalAlignStyle)
+  const activeArrowheadStart = showArrowheads ? sharedStyle(editor, ArrowShapeArrowheadStartStyle) : undefined
+  const activeArrowheadEnd   = showArrowheads ? sharedStyle(editor, ArrowShapeArrowheadEndStyle) : undefined
   const activeCorner = showCorners && shapes.every(
     s => Number(s.meta?.cornerRadius ?? 0) === Number(shapes[0].meta?.cornerRadius ?? 0)
   ) ? Number(shapes[0].meta?.cornerRadius ?? 0) : undefined
-  const activeGeoCorner = showGeoCorners
-    ? activeDash === 'draw'
-      ? 'round'
-      : activeDash === undefined
-        ? undefined
-        : 'sharp'
-    : undefined
+  const activeGeoCorner = showGeoCorners && shapes.every(
+    s => Number(s.meta?.cornerRadius ?? 0) === Number(shapes[0].meta?.cornerRadius ?? 0)
+  ) ? Number(shapes[0].meta?.cornerRadius ?? 0) : undefined
+  const activeStrokeNone = showStrokeToggle && shapes.every(
+    s => Boolean(s.meta?.strokeNone) === Boolean(shapes[0].meta?.strokeNone)
+  ) ? Boolean(shapes[0].meta?.strokeNone) : undefined
   const activeImageCorner = showImageStyling && shapes.every(
     s => Number(s.meta?.imageCornerRadius ?? 0) === Number(shapes[0].meta?.imageCornerRadius ?? 0)
   ) ? Number(shapes[0].meta?.imageCornerRadius ?? 0) : undefined
@@ -439,13 +474,20 @@ export const ShapeInspector = track(function ShapeInspector() {
     shapes.map(s => ({ id: s.id, type: s.type, meta: { ...s.meta, [key]: value } }))
   )
   const applyCorner = (rx) => updateMeta('cornerRadius', rx)
-  const applyGeoCorner = (cornerStyle) => editor.setStyleForSelectedShapes(
-    DefaultDashStyle,
-    cornerStyle === 'round' ? 'draw' : 'solid'
-  )
+  // GeoCornerStyles only rounds corners when dash !== 'draw' (sketchy strokes
+  // overshoot the bounding box and would be clipped). Auto-switch to solid
+  // when the user actually picks a non-zero radius so the click takes effect
+  // even on the default sketchy dash.
+  const applyGeoCorner = (rx) => editor.run(() => {
+    if (rx > 0) editor.setStyleForSelectedShapes(DefaultDashStyle, 'solid')
+    updateMeta('cornerRadius', rx)
+  })
   const applyImageCorner = (rx) => updateMeta('imageCornerRadius', rx)
   const applyImageBorder = (width) => updateMeta('imageBorderWidth', width)
   const applyImageBorderColor = (color) => updateMeta('imageBorderColor', color)
+  const applyArrowheadStart = (id) => editor.setStyleForSelectedShapes(ArrowShapeArrowheadStartStyle, id)
+  const applyArrowheadEnd   = (id) => editor.setStyleForSelectedShapes(ArrowShapeArrowheadEndStyle, id)
+  const applyStrokeNone = (none) => updateMeta('strokeNone', none)
   const applyListType = (listType) => {
     editor.updateShapes(
       shapes.map(s => ({
@@ -486,7 +528,10 @@ export const ShapeInspector = track(function ShapeInspector() {
       {(showColor || showImageStyling) && (
         <div className="insp-row">
           <div className="insp-label">Color</div>
-          <div className="insp-body insp-body-swatches">
+          <div
+            className="insp-body insp-body-swatches"
+            data-color-context={showImageStyling ? 'image' : 'stroke'}
+          >
             {COLOR_SWATCHES.map((c) => (
               <button
                 key={c.id}
@@ -495,6 +540,7 @@ export const ShapeInspector = track(function ShapeInspector() {
                 onClick={() => (showImageStyling ? applyImageBorderColor(c.bg) : applyColor(c.tl))}
                 title={c.id}
                 type="button"
+                data-swatch-id={c.id}
               />
             ))}
           </div>
@@ -504,7 +550,7 @@ export const ShapeInspector = track(function ShapeInspector() {
       {showFill && (
         <div className="insp-row">
           <div className="insp-label">Fill</div>
-          <div className="insp-body insp-body-swatches">
+          <div className="insp-body insp-body-swatches" data-color-context="fill">
             {COLOR_SWATCHES.map((c) => (
               <button
                 key={c.id}
@@ -513,6 +559,7 @@ export const ShapeInspector = track(function ShapeInspector() {
                 onClick={() => applyFillColor(c.bg)}
                 title={c.id}
                 type="button"
+                data-swatch-id={c.id}
               />
             ))}
           </div>
@@ -532,6 +579,29 @@ export const ShapeInspector = track(function ShapeInspector() {
                 type="button"
               >{option.label}</button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {showStrokeToggle && (
+        <div className="insp-row">
+          <div className="insp-label">Border</div>
+          <div className="insp-body">
+            {STROKE_TOGGLE_OPTIONS.map((option) => {
+              const isOn = option.id === 'on'
+              const active = activeStrokeNone === undefined
+                ? false
+                : isOn ? !activeStrokeNone : activeStrokeNone
+              return (
+                <button
+                  key={option.id}
+                  className={`insp-btn ${active ? 'active' : ''}`}
+                  onClick={() => applyStrokeNone(!isOn)}
+                  title={option.title}
+                  type="button"
+                >{option.label}</button>
+              )
+            })}
           </div>
         </div>
       )}
@@ -660,14 +730,48 @@ export const ShapeInspector = track(function ShapeInspector() {
         <div className="insp-row">
           <div className="insp-label">Corners</div>
           <div className="insp-body">
-            {RECTANGLE_CORNER_OPTIONS.map((option) => (
+            {CORNER_OPTIONS.map((c) => (
               <button
-                key={option.id}
-                className={`insp-btn ${activeGeoCorner === option.id ? 'active' : ''}`}
-                onClick={() => applyGeoCorner(option.id)}
-                title={option.title}
+                key={c.id}
+                className={`insp-btn ${activeGeoCorner === c.id ? 'active' : ''}`}
+                onClick={() => applyGeoCorner(c.id)}
+                title={c.title}
                 type="button"
-              ><span className={`corner-swatch ${option.cls}`} /></button>
+              ><span className={`corner-swatch ${c.cls}`} /></button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showArrowheads && (
+        <div className="insp-row">
+          <div className="insp-label">From</div>
+          <div className="insp-body insp-body-arrowheads">
+            {ARROWHEAD_OPTIONS.map((opt) => (
+              <button
+                key={opt.id}
+                className={`insp-btn insp-btn-glyph ${activeArrowheadStart === opt.id ? 'active' : ''}`}
+                onClick={() => applyArrowheadStart(opt.id)}
+                title={opt.title}
+                type="button"
+              >{opt.glyph}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showArrowheads && (
+        <div className="insp-row">
+          <div className="insp-label">To</div>
+          <div className="insp-body insp-body-arrowheads">
+            {ARROWHEAD_OPTIONS.map((opt) => (
+              <button
+                key={opt.id}
+                className={`insp-btn insp-btn-glyph ${activeArrowheadEnd === opt.id ? 'active' : ''}`}
+                onClick={() => applyArrowheadEnd(opt.id)}
+                title={opt.title}
+                type="button"
+              >{opt.glyph}</button>
             ))}
           </div>
         </div>

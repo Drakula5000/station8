@@ -925,6 +925,56 @@
 .shape-inspector .insp-swatch:hover { transform: scale(1.08); }
 .shape-inspector .insp-swatch.active { outline: 0.125rem solid var(--s8-text); outline-offset: 0.125rem; }
 
+/* Per-mode disabled swatches in the Color and Fill rows.
+     Dark: black stroke renders as tldraw's auto-inverted #f2f2f2 (the
+       note-bg + text-color overrides in tldraw.css don't reach SVG strokes
+       on text/arrows/lines), so a "black" pick lies about what lands on
+       canvas. Black notes/frames/fills in dark mode also disappear into
+       the bg.
+     Light: white is the symmetric case — white text on white bg is
+       unreadable, white-fill notes/frames/geos are invisible against the
+       canvas.
+   The selector covers BOTH stroke context (Color row for non-image shapes)
+   AND fill context (geo Fill row) via `:not([data-color-context="image"])`.
+   Image context still allows both colors because image borders use a CSS
+   variable and resolve to the literal hex regardless of mode — the image
+   itself supplies the contrast.
+   The strikethrough is an absolutely-positioned ::after diagonal so the
+   disabled state reads at a glance — earlier opacity-only dimming was too
+   easy to miss. */
+html[data-mode="dark"] .shape-inspector .insp-body-swatches:not([data-color-context="image"]) .insp-swatch[data-swatch-id="black"],
+html[data-mode="light"] .shape-inspector .insp-body-swatches:not([data-color-context="image"]) .insp-swatch[data-swatch-id="white"] {
+  position: relative;
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(0.4);
+  overflow: hidden;
+}
+html[data-mode="dark"] .shape-inspector .insp-body-swatches:not([data-color-context="image"]) .insp-swatch[data-swatch-id="black"]::after,
+html[data-mode="light"] .shape-inspector .insp-body-swatches:not([data-color-context="image"]) .insp-swatch[data-swatch-id="white"]::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -10%;
+  width: 120%;
+  height: 0.125rem;
+  background: var(--s8-danger);
+  transform: translateY(-50%) rotate(-45deg);
+  transform-origin: center;
+  pointer-events: none;
+  border-radius: 0.0625rem;
+  box-shadow: 0 0 0 0.0625rem rgba(0, 0, 0, 0.2);
+}
+
+.shape-inspector .insp-body-arrowheads { gap: 0.25rem; }
+.shape-inspector .insp-btn-glyph {
+  font-size: 0.875rem;
+  line-height: 1;
+  padding: 0;
+  min-width: 0;
+}
+
 .shape-inspector .insp-btn {
   flex: 1; height: 2rem;
   border: 0.0625rem solid var(--s8-input-border); background: var(--s8-input-bg); color: var(--s8-text);
