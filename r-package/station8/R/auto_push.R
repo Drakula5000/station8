@@ -45,7 +45,7 @@ auto_push <- function() {
     }
   })
 
-  assignInNamespace("render", new_render, ns = "rmarkdown")
+  utils::assignInNamespace("render", new_render, ns = "rmarkdown")
   message("[station8] auto-push enabled")
   invisible(TRUE)
 }
