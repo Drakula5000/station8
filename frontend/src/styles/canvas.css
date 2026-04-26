@@ -74,6 +74,19 @@
   92%  { opacity: 1; }
   100% { --s8-pulse-pos: 115%; opacity: 0; }
 }
+
+/* Canvas board view: sweep once then idle ~2.5 min before repeating.
+   Total cycle = 160s; the 11s sweep occupies the first ~7%. */
+@keyframes s8-scan-idle {
+  0%    { --s8-pulse-pos: -15%; opacity: 0; }
+  0.5%  { opacity: 1; }
+  6.4%  { opacity: 1; }
+  6.9%  { --s8-pulse-pos: 115%; opacity: 0; }
+  100%  { --s8-pulse-pos: 115%; opacity: 0; }
+}
+.canvas-wrap.s8-grid::before {
+  animation: s8-scan-idle 160s linear infinite;
+}
 @media (prefers-reduced-motion: reduce) {
   .s8-grid { animation: none; }
   .s8-grid::before { animation: none; opacity: 0; }
