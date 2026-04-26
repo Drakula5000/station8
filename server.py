@@ -2981,11 +2981,12 @@ def _text_from_sheet(data):
     return out
 
 
-def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None):
+def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None):
     board_items = boards if boards is not None else _load_boards()
     sheet_items = sheets if sheets is not None else _load_sheets()
     gdoc_items = gdocs if gdocs is not None else _load_gdocs()
     gsheet_items = gsheets if gsheets is not None else _load_gsheets()
+    report_items = reports if reports is not None else _load_reports()
     drive_contents = _load_gdrive_contents()
 
     # Index every doc's name + tags so searches like "test" surface docs whose
@@ -2993,6 +2994,7 @@ def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None):
     for doc_type, items in (
         ('board', board_items), ('sheet', sheet_items),
         ('gdoc', gdoc_items),   ('gsheet', gsheet_items),
+        ('report', report_items),
     ):
         for item in items:
             name = (item.get('name') or '').strip()
@@ -3061,6 +3063,18 @@ def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None):
                 'kind': 'gsheet',
                 'text': cell,
             }
+    for report in report_items:
+        blob = _load(_report_file(report['id']), {}) or {}
+        text = (blob.get('text') or '').strip()
+        if not text:
+            continue
+        yield {
+            'doc_type': 'report',
+            'doc_id': report['id'],
+            'doc_name': report.get('name') or '',
+            'kind': 'report',
+            'text': text,
+        }
 
 
 _vectorizer = None
@@ -3117,13 +3131,13 @@ def _keyword(text, query):
     return score
 
 
-def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None):
+def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None):
     body = request.json or {}
     query = (body.get('query') or '').strip()
     if not query:
         return {'hits': []}
 
-    items = list(_all_items(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets))
+    items = list(_all_items(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets, reports=reports))
     if not items:
         return {'hits': []}
 
@@ -3162,6 +3176,7 @@ def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None):
                     'sheet': 'spreadsheet cell',
                     'gdoc': 'Doc',
                     'gsheet': 'Sheet',
+                    'report': 'Report',
                 }.get(item['kind'], item['kind']),
                 'score': combined,
                 'shape_id': item.get('shape_id'),
@@ -3186,7 +3201,8 @@ def visitor_search():
     sheets = [s for s in _load_sheets() if _doc_is_visitor_visible(s, folders)]
     gdocs = [d for d in _load_gdocs() if _doc_is_visitor_visible(d, folders)]
     gsheets = [d for d in _load_gsheets() if _doc_is_visitor_visible(d, folders)]
-    return jsonify(_search_payload(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets))
+    reports = [r for r in _load_reports() if _doc_is_visitor_visible(r, folders)]
+    return jsonify(_search_payload(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets, reports=reports))
 
 
 @app.route('/api/share/<token>/search', methods=['POST'])
