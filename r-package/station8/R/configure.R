@@ -2,12 +2,11 @@
 #' exchanges them for a long-lived token, stores both at ~/.station8/.
 #'
 #' @param hub_url Optional hub URL (your Render backend URL). If NULL, prompts interactively.
-#' @param password Optional password. If NULL, prompts interactively via \code{getPass::getPass}.
+#' @param password Optional password. If NULL, prompts interactively.
 #' @export
 configure <- function(hub_url = NULL, password = NULL) {
   if (is.null(hub_url)) {
-    cat("Hub URL (your Render backend URL, e.g. https://your-app.onrender.com): ")
-    hub_url <- trimws(readLines(con = "stdin", n = 1))
+    hub_url <- trimws(readline("Hub URL (your Render backend URL, e.g. https://your-app.onrender.com): "))
     if (!nzchar(hub_url)) {
       message("[station8] hub URL required; aborted")
       return(invisible(FALSE))
@@ -15,11 +14,7 @@ configure <- function(hub_url = NULL, password = NULL) {
   }
 
   if (is.null(password)) {
-    if (!requireNamespace("getPass", quietly = TRUE)) {
-      message("[station8] getPass package not installed; install it or pass `password` argument directly")
-      return(invisible(FALSE))
-    }
-    password <- getPass::getPass("Owner password: ")
+    password <- trimws(readline("Owner password: "))
   }
   if (!nzchar(password)) {
     message("[station8] password required; aborted")

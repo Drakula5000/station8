@@ -271,11 +271,10 @@ Every time you knit an `.Rmd`, a native macOS dialog appears: *"Push [filename] 
 
 The package lives in your forked repo at `r-package/station8/`. Open an R session and run:
 
-```r
-# Install dependencies from CRAN first
-install.packages(c("knitr", "httr2", "digest", "getPass", "jsonlite", "curl"))
+In the RStudio console, run:
 
-# Then install the station8 package from your local repo
+```r
+# Install the station8 package from your local repo
 install.packages(
   "/path/to/your/station8/r-package/station8",
   repos = NULL,
@@ -285,6 +284,14 @@ install.packages(
 
 Replace `/path/to/your/station8` with the actual path to your forked repo on disk. On a Mac this is typically something like `/Users/yourname/Documents/station8`.
 
+If you get a dependency error, install missing packages first:
+
+```r
+install.packages(c("knitr", "httr2", "digest", "getPass", "jsonlite", "curl"))
+```
+
+Then re-run the `install.packages` command above.
+
 **2. Connect to your hub.**
 
 In the RStudio console, run:
@@ -293,23 +300,28 @@ In the RStudio console, run:
 station8::configure()
 ```
 
-It will ask for your hub URL — this is your backend URL from step 3 of setup above. It looks like `https://your-app.onrender.com`, or your custom domain if you set one up (e.g. `https://api.yourdomain.com`). Then it asks for your owner password (the `OWNER_PASSWORD` you set in Render). It exchanges them for a long-lived token stored at `~/.station8/token`. You only do this once per machine.
+It will prompt for two things — type each and press Enter:
+
+1. **Hub URL** — your backend URL from step 3 above. Looks like `https://your-app.onrender.com`, or your custom domain if you set one up.
+2. **Owner password** — the `OWNER_PASSWORD` you set in Render. Note: it will be visible as you type.
+
+When it says `[station8] configured.` you're done. The token is stored at `~/.station8/token`. You only do this once per machine.
 
 **3. Register the auto-push hook.**
 
-In the RStudio console, run this to open your `~/.Rprofile` for editing:
+In the RStudio console, run:
 
 ```r
 file.edit("~/.Rprofile")
 ```
 
-Add this line, save, and close the file:
+This opens your R startup file. Add this one line, then save and close it:
 
 ```r
 station8::auto_push()
 ```
 
-The hook activates every R session from that point on. No further setup needed.
+The hook activates in every R session from that point on. No further setup needed.
 
 **Identity and deduplication**
 
