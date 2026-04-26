@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback, useRef, useMemo, Fragment } from 'react'
 import TldrawCanvas from './TldrawCanvas'
 import {
-  BoardIcon, SheetIcon, DocIcon, GoogleLogoIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon, ThemeToggleIcon, LogoutIcon,
+  BoardIcon, SheetIcon, DocIcon, ReportIcon, GoogleLogoIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon, ThemeToggleIcon, LogoutIcon,
   SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PencilIcon, PlusIcon, GlobeIcon, PinIcon,
 } from './icons'
+import ReportViewer from './components/ReportViewer'
 import './styles/index.css'
 
 const API = import.meta.env.VITE_API_URL || ''
@@ -20,18 +21,20 @@ if (typeof document !== 'undefined') {
 
 // Doc-type kinds. `gdoc`/`gsheet` are Google Drive-backed (iframe embeds);
 // `board` is the tldraw canvas.
-const DOC_KINDS = ['board', 'gdoc', 'gsheet']
+const DOC_KINDS = ['board', 'gdoc', 'gsheet', 'report']
 
 const DOC_KIND_API = {
   board: 'boards',
   gdoc: 'gdocs',
   gsheet: 'gsheets',
+  report: 'reports',
 }
 
 const DOC_KIND_LABEL = {
   board: 'Board',
   gdoc: 'Doc',
   gsheet: 'Sheet',
+  report: 'Report',
 }
 
 const compareByName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
@@ -72,7 +75,7 @@ function buildFolderOptions(folders, parentId = null, depth = 0, seen = new Set(
     })
 }
 
-const DOC_KIND_ORDER = { board: 0, gdoc: 1, gsheet: 2 }
+const DOC_KIND_ORDER = { board: 0, gdoc: 1, gsheet: 2, report: 3 }
 
 function sortDocs(items) {
   return [...items].sort((a, b) => {
@@ -169,6 +172,7 @@ function docKindIcon(type) {
   if (type === 'board') return <BoardIcon />
   if (type === 'gdoc') return <DocIcon />
   if (type === 'gsheet') return <SheetIcon />
+  if (type === 'report') return <ReportIcon />
   return <BoardIcon />
 }
 
@@ -180,6 +184,7 @@ const KIND_PILL_LABEL = {
   sheet:  'CELL',
   gdoc:   'DOC',
   gsheet: 'SHEET',
+  report: 'REPORT',
   name:   'NAME',
   tag:    'TAG',
 }
@@ -263,6 +268,7 @@ export default function App() {
   const [boards, setBoards] = useState([])
   const [gdocs, setGdocs] = useState([])
   const [gsheets, setGsheets] = useState([])
+  const [reports, setReports] = useState([])
   const [folders, setFolders] = useState([])
   const foldersRef = useRef([])
   const [expandedFolders, setExpandedFolders] = useState({})
@@ -411,7 +417,8 @@ export default function App() {
     board: boards,
     gdoc: gdocs,
     gsheet: gsheets,
-  }), [boards, gdocs, gsheets])
+    report: reports,
+  }), [boards, gdocs, gsheets, reports])
   const activeDoc = activeId
     ? (docsByKind[activeId.type] || []).find(item => item.id === activeId.id) || null
     : null
@@ -534,6 +541,7 @@ export default function App() {
       setBoards(nextDocsByKind.board || [])
       setGdocs(nextDocsByKind.gdoc || [])
       setGsheets(nextDocsByKind.gsheet || [])
+      setReports(nextDocsByKind.report || [])
       setFolders(nextFolders)
       setExpandedFolders((current) => {
         const next = { ...current }
@@ -563,16 +571,18 @@ export default function App() {
         board: data.boards || [],
         gdoc: data.gdocs || [],
         gsheet: data.gsheets || [],
+        report: data.reports || [],
       }
       applyResult(nextDocsByKind, data.workspace?.folders || [], data.workspace || null)
       return
     }
 
     const prefix = viewerMode === 'visitor' ? 'visitor/' : ''
-    const [bs, gd, gs, ws] = await Promise.all([
+    const [bs, gd, gs, rp, ws] = await Promise.all([
       fetchJson(`${API}/api/${prefix}boards`, {}, []),
       fetchJson(`${API}/api/${prefix}gdocs`, {}, []),
       fetchJson(`${API}/api/${prefix}gsheets`, {}, []),
+      fetchJson(`${API}/api/${prefix}reports`, {}, []),
       fetchJson(`${API}/api/${prefix}workspace`, {}, null),
     ])
 
@@ -580,6 +590,7 @@ export default function App() {
       board: Array.isArray(bs) ? bs : [],
       gdoc: Array.isArray(gd) ? gd : [],
       gsheet: Array.isArray(gs) ? gs : [],
+      report: Array.isArray(rp) ? rp : [],
     }
     if (ownerMode && ws && !ws.owner && !ownerPromptDismissed) setOwnerPromptOpen(true)
     applyResult(nextDocsByKind, ws?.folders || [], ws)
@@ -951,6 +962,7 @@ export default function App() {
     if (kind === 'board') setBoards(updater)
     else if (kind === 'gdoc') setGdocs(updater)
     else if (kind === 'gsheet') setGsheets(updater)
+    else if (kind === 'report') setReports(updater)
   }
 
   const startRename = (item, isFolder) => {
@@ -1314,9 +1326,9 @@ export default function App() {
   // Map a search hit's `kind` field to our doc-type kinds.
   // Backend returns 'board' for board hits and 'sheet' for the legacy
   // spreadsheet (no longer creatable, but old data may still index).
-  // Future: backend will return 'gdoc' / 'gsheet' for indexed Drive content.
+  // Backend returns 'gdoc' / 'gsheet' / 'report' for non-board doc hits.
   const hitKindToDocType = (kind) => {
-    if (kind === 'gdoc' || kind === 'gsheet') return kind
+    if (kind === 'gdoc' || kind === 'gsheet' || kind === 'report') return kind
     return 'board'
   }
 
@@ -2076,6 +2088,12 @@ export default function App() {
                   readOnly={readOnly}
                   googleConnected={googleAuth.connected}
                   onConnectGoogle={openGoogleConnect}
+                />
+              )}
+              {activeId?.type === 'report' && activeDoc && (
+                <ReportViewer
+                  reportId={activeId.id}
+                  viewerMode={readOnly ? 'visitor' : 'owner'}
                 />
               )}
               {!activeId && ownerMode && (

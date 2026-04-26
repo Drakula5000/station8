@@ -32,6 +32,19 @@ export function SheetIcon(props) {
   )
 }
 
+export function ReportIcon(props) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...props}>
+      <rect x="1.5" y="1.5" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.1"/>
+      <polyline points="3.5,9.5 6,7 8,8.5 10.5,4.5" stroke="currentColor" strokeWidth="1.1" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx="3.5" cy="9.5" r="0.7" fill="currentColor"/>
+      <circle cx="6" cy="7" r="0.7" fill="currentColor"/>
+      <circle cx="8" cy="8.5" r="0.7" fill="currentColor"/>
+      <circle cx="10.5" cy="4.5" r="0.7" fill="currentColor"/>
+    </svg>
+  )
+}
+
 export function DocIcon(props) {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...props}>

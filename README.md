@@ -254,6 +254,67 @@ Restart the dev server (`.env` is loaded by `start.sh` on launch — a running s
 
 </details>
 
+<details>
+<summary><strong>Adding R knits to your workspace</strong></summary>
+
+<br>
+
+Knitted R Markdown files are a first-class document type in Station 8 — they live in the sidebar alongside boards and docs, their text content is fully searchable, and re-knitting the same `.Rmd` updates the same report in place rather than creating a duplicate. Setup is a one-time five-minute job; after that it's invisible.
+
+**macOS only.** The push dialog uses `osascript`, which is macOS-specific. On other platforms the hook silently skips and knits complete normally.
+
+**How it works**
+
+Every time you knit an `.Rmd`, a native macOS dialog appears: *"Push [filename] to Station 8?"* with Push / Skip buttons and a 30-second auto-skip timeout. Click Push and the rendered HTML appears in your hub sidebar under Unfiled within a few seconds. Re-knit the same file — same report updates. Move the report to a folder once and it stays there across every future re-knit.
+
+**1. Install the Station 8 R package.**
+
+From an R session, with your Station 8 repo on disk:
+
+```r
+install.packages(
+  "/path/to/station8/r-package/station8",
+  repos = NULL,
+  type  = "source"
+)
+```
+
+The package depends on `knitr`, `httr2`, `digest`, `getPass`, `jsonlite`, `curl`, and `tools` — all available from CRAN.
+
+**2. Connect to your hub.**
+
+```r
+station8::configure()
+```
+
+This prompts for your hub URL (default `https://YOUR_API_DOMAIN`) and your owner password. It exchanges them for a long-lived token stored at `~/.station8/token` (mode 0600 — readable only by you). You only do this once per machine.
+
+**3. Register the auto-push hook.**
+
+Add one line to your `~/.Rprofile`:
+
+```r
+station8::auto_push()
+```
+
+The hook activates every R session from that point on. No further setup needed.
+
+**Identity and deduplication**
+
+Station 8 uses `sha256(absolute path to .Rmd)` to identify reports. As long as the file stays at the same path, every re-knit updates the same report. If you move the `.Rmd`, add a one-line comment at the top (within the first 20 lines) to preserve identity across moves:
+
+```r
+# @station8: name = "Q3 churn"
+```
+
+Reports without this comment that are moved to a new path will create a new report (the old one stays — you can delete it manually).
+
+**Revoking access**
+
+To disconnect a machine, delete `~/.station8/token` on that machine. To permanently invalidate a token server-side, set its entry to `"active": false` in `data/r_tokens.json` on your Render instance, or regenerate via `station8::configure()` (which mints a new token but does not revoke old ones automatically — manual revocation is `data/r_tokens.json`).
+
+</details>
+
 <br>
 
 <a id="local-dev"></a>
@@ -294,6 +355,8 @@ cd frontend && npm install && cd ..
 Visit `http://127.0.0.1:5173` and log in with your `OWNER_PASSWORD` (default: `owner`).
 
 > **Google Docs and Sheets** work locally too. Add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:5001/api/google/callback` to your `.env`. Make sure `http://127.0.0.1:5001/api/google/callback` is listed as an authorized redirect URI in your Google Cloud credentials.
+
+> **R knits** work locally too. Run `station8::configure()` in R and enter `http://127.0.0.1:5001` as the hub URL when prompted. The rest of the setup is identical to production.
 
 </details>
 

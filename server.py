@@ -8,8 +8,10 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta as _timedelta
 from functools import wraps
+from html.parser import HTMLParser as _StdlibHTMLParser
 
 from flask import Flask, jsonify, request, send_from_directory, session, redirect
+from itsdangerous import URLSafeSerializer, BadSignature
 from werkzeug.security import check_password_hash, generate_password_hash
 from supabase import create_client, Client
 
@@ -49,6 +51,8 @@ OCR_FILE = os.path.join(DATA_DIR, 'ocr.json')
 WORKSPACE_FILE = os.path.join(DATA_DIR, 'workspace.json')
 SHARES_FILE = os.path.join(DATA_DIR, 'shares.json')
 AUTH_FILE = os.path.join(DATA_DIR, 'auth.json')
+REPORTS_FILE = os.path.join(DATA_DIR, 'reports.json')
+R_TOKENS_FILE = os.path.join(DATA_DIR, 'r_tokens.json')
 
 SUPABASE_BUCKET = 'uploads'
 SUPABASE_TABLE = 'json_storage'
@@ -67,6 +71,8 @@ PRODUCTION = bool(
 
 ACCESS_OWNER = 'owner'
 ACCESS_VISITOR = 'visitor'
+
+MAX_REPORT_HTML_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 def _env_flag(name, default=False):
@@ -192,6 +198,10 @@ def _board_file(item_id):
 
 def _sheet_file(item_id):
     return os.path.join(DATA_DIR, f'sheet-{item_id}.json')
+
+
+def _report_file(item_id):
+    return os.path.join(DATA_DIR, f'report-{item_id}.json')
 
 
 def _get_env_password(env_names, dev_default):
@@ -426,6 +436,30 @@ def _save_gsheets(gsheets):
     _save(GSHEETS_FILE, [_normalize_gdrive_doc(d, folders) for d in gsheets])
 
 
+def _load_reports():
+    return _load(REPORTS_FILE, [])
+
+
+def _save_reports(reports):
+    _save(REPORTS_FILE, reports)
+
+
+def _load_report(report_id):
+    return _load(_report_file(report_id), None)
+
+
+def _save_report(report_id, data):
+    _save(_report_file(report_id), data)
+
+
+def _load_r_tokens():
+    return _load(R_TOKENS_FILE, [])
+
+
+def _save_r_tokens(tokens):
+    _save(R_TOKENS_FILE, tokens)
+
+
 # ── Google Drive content sync (no-OAuth path) ────────────────────────────────
 #
 # Drive serves a public plaintext export of any file shared as "anyone with
@@ -632,6 +666,15 @@ def _move_docs_from_folder(folder_ids, target_parent_id):
             updated_sheets = True
     if updated_sheets:
         _save_sheets(sheets)
+
+    reports = _load_reports()
+    updated_reports = False
+    for report in reports:
+        if report.get('folder_id') in folder_ids:
+            report['folder_id'] = target_parent_id
+            updated_reports = True
+    if updated_reports:
+        _save_reports(reports)
 
 
 def _move_direct_docs_from_folder(folder_id, target_parent_id):
@@ -900,6 +943,13 @@ def _delete_sheet_files(sheet_ids):
             os.remove(fp)
 
 
+def _delete_report_files(report_ids):
+    for report_id in report_ids:
+        fp = _report_file(report_id)
+        if os.path.exists(fp):
+            os.remove(fp)
+
+
 def _validate_share_scope(scope_type, scope_id):
     ws = _get_workspace()
     boards = _load_boards()
@@ -1008,6 +1058,167 @@ def auth_logout():
     return '', 204
 
 
+def _r_token_serializer():
+    return URLSafeSerializer(app.secret_key, salt='station8-r-token')
+
+
+def _r_token_required(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'missing bearer token'}), 401
+        token = auth_header[len('Bearer '):].strip()
+        try:
+            payload = _r_token_serializer().loads(token)
+        except BadSignature:
+            return jsonify({'error': 'invalid token'}), 401
+        if not isinstance(payload, dict) or payload.get('kind') != 'r-token':
+            return jsonify({'error': 'invalid token kind'}), 401
+        token_id = payload.get('token_id')
+        active_ids = {t['id'] for t in _load_r_tokens() if t.get('active', True)}
+        if token_id not in active_ids:
+            return jsonify({'error': 'token revoked'}), 401
+        return fn(*args, **kwargs)
+    return wrapped
+
+
+@app.route('/api/auth/r-token', methods=['POST'])
+def mint_r_token():
+    body = request.get_json(silent=True) or {}
+    password = (body.get('password') or '').strip()
+    if not password:
+        return jsonify({'error': 'password required'}), 400
+    if not _verify_studio_password(password):
+        return jsonify({'error': 'invalid password'}), 401
+    token_id = uuid.uuid4().hex
+    tokens = _load_r_tokens()
+    tokens.append({
+        'id': token_id,
+        'created_at': datetime.utcnow().isoformat() + 'Z',
+        'active': True,
+    })
+    _save_r_tokens(tokens)
+    token = _r_token_serializer().dumps({'kind': 'r-token', 'token_id': token_id})
+    return jsonify({'token': token})
+
+
+@app.route('/api/reports/push', methods=['POST'])
+@_r_token_required
+def push_report():
+    if 'html' not in request.files:
+        return jsonify({'error': 'html file required'}), 400
+    html_file = request.files['html']
+    html_bytes = html_file.read()
+    if len(html_bytes) > MAX_REPORT_HTML_BYTES:
+        return jsonify({'error': f'html exceeds {MAX_REPORT_HTML_BYTES} bytes'}), 413
+    try:
+        html = html_bytes.decode('utf-8')
+    except UnicodeDecodeError:
+        return jsonify({'error': 'html must be utf-8'}), 400
+
+    name = (request.form.get('name') or '').strip()
+    path_hash = (request.form.get('path_hash') or '').strip()
+    override_name = (request.form.get('override_name') or '').strip() or None
+    if not name or not path_hash:
+        return jsonify({'error': 'name and path_hash required'}), 400
+
+    reports = _load_reports()
+    existing = None
+    if override_name:
+        existing = next((r for r in reports if r.get('override_name') == override_name), None)
+    if existing is None:
+        existing = next(
+            (r for r in reports if r.get('source_path_hash') == path_hash and not r.get('override_name')),
+            None,
+        )
+
+    now = datetime.utcnow().isoformat() + 'Z'
+    text = _text_from_report_html(html)
+
+    if existing is None:
+        report_id = uuid.uuid4().hex
+        record = {
+            'id': report_id,
+            'name': name,
+            'folder_id': None,
+            'private': None,
+            'source_path_hash': path_hash,
+            'override_name': override_name,
+            'created_at': now,
+            'updated_at': now,
+        }
+        reports.append(record)
+        created = True
+        created_at = now
+    else:
+        report_id = existing['id']
+        existing['name'] = name
+        existing['updated_at'] = now
+        if override_name:
+            existing['override_name'] = override_name
+        else:
+            existing['source_path_hash'] = path_hash
+        created = False
+        created_at = existing.get('created_at', now)
+
+    _save_reports(reports)
+    _save_report(report_id, {
+        'id': report_id,
+        'name': name,
+        'html': html,
+        'text': text,
+        'source_path_hash': path_hash,
+        'override_name': override_name,
+        'created_at': created_at,
+        'updated_at': now,
+    })
+    return jsonify({'id': report_id, 'created': created, 'url': f'/reports/{report_id}'})
+
+
+@app.route('/api/reports/<report_id>', methods=['GET'])
+@_studio_auth_required
+def get_report(report_id):
+    record = next((r for r in _load_reports() if r.get('id') == report_id), None)
+    if record is None:
+        return jsonify({'error': 'not found'}), 404
+    blob = _load_report(report_id) or {}
+    return jsonify({**record, 'html': blob.get('html', '')})
+
+
+@app.route('/api/reports/<report_id>', methods=['DELETE'])
+@_studio_auth_required
+def delete_report(report_id):
+    reports = _load_reports()
+    new_reports = [r for r in reports if r.get('id') != report_id]
+    if len(new_reports) == len(reports):
+        return jsonify({'error': 'not found'}), 404
+    _save_reports(new_reports)
+    _delete_report_files([report_id])
+    return jsonify({'ok': True})
+
+
+@app.route('/api/reports/<report_id>', methods=['PATCH'])
+@_studio_auth_required
+def patch_report(report_id):
+    body = request.get_json(silent=True) or {}
+    reports = _load_reports()
+    record = next((r for r in reports if r.get('id') == report_id), None)
+    if record is None:
+        return jsonify({'error': 'not found'}), 404
+    for field in ('name', 'folder_id', 'private'):
+        if field in body:
+            record[field] = body[field]
+    record['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+    _save_reports(reports)
+    blob = _load_report(report_id) or {}
+    if 'name' in body:
+        blob['name'] = body['name']
+        blob['updated_at'] = record['updated_at']
+        _save_report(report_id, blob)
+    return jsonify({'ok': True, 'report': record})
+
+
 @app.route('/api/folders', methods=['POST'])
 @_studio_auth_required
 def create_folder():
@@ -1072,8 +1283,10 @@ def delete_folder(folder_id):
     folder_ids = _folder_with_descendants(folder_id, folders)
     boards_to_delete = [board for board in _load_boards() if board.get('folder_id') in folder_ids]
     sheets_to_delete = [sheet for sheet in _load_sheets() if sheet.get('folder_id') in folder_ids]
+    reports_to_delete = [r for r in _load_reports() if r.get('folder_id') in folder_ids]
     board_ids = [board.get('id') for board in boards_to_delete if board.get('id')]
     sheet_ids = [sheet.get('id') for sheet in sheets_to_delete if sheet.get('id')]
+    report_ids = [r.get('id') for r in reports_to_delete if r.get('id')]
     upload_filenames = set()
     for board_id in board_ids:
         upload_filenames.update(_board_upload_filenames(board_id))
@@ -1085,6 +1298,9 @@ def delete_folder(folder_id):
     if sheet_ids:
         _save_sheets([sheet for sheet in _load_sheets() if sheet.get('id') not in set(sheet_ids)])
         _delete_sheet_files(sheet_ids)
+    if report_ids:
+        _save_reports([r for r in _load_reports() if r.get('id') not in set(report_ids)])
+        _delete_report_files(report_ids)
     ws['folders'] = remaining
     _save(WORKSPACE_FILE, ws)
     _cleanup_unreferenced_uploads(upload_filenames)
@@ -2266,6 +2482,38 @@ def get_visitor_gsheet(gsheet_id):
     return jsonify({'error': 'Not found'}), 404
 
 
+@app.route('/api/reports', methods=['GET'])
+@_studio_auth_required
+def list_reports():
+    return jsonify(_list_docs_sorted(_load_reports()))
+
+
+@app.route('/api/visitor/reports', methods=['GET'])
+@_viewer_auth_required
+def list_visitor_reports():
+    return jsonify(_list_docs_sorted(_load_reports(), visitor=True))
+
+
+@app.route('/api/visitor/reports/<report_id>', methods=['GET'])
+@_viewer_auth_required
+def get_visitor_report(report_id):
+    payload, error = _visitor_doc_load(
+        report_id,
+        load_index=_load_reports,
+        doc_file_fn=_report_file,
+        default_payload={'html': ''},
+    )
+    if error:
+        return error
+    return jsonify({
+        'id': report_id,
+        'name': payload.get('name', ''),
+        'html': payload.get('html', ''),
+        'created_at': payload.get('created_at'),
+        'updated_at': payload.get('updated_at'),
+    })
+
+
 # ── Uploads + OCR ────────────────────────────────────────────────────────────
 
 # Images render on the canvas at a few hundred pixels wide at most. Full-res
@@ -2677,6 +2925,49 @@ def _extract_rich_text(node):
     return ' '.join(parts)
 
 
+class _ReportTextExtractor(_StdlibHTMLParser):
+    """Walks a knitted HTML doc and accumulates visible body text.
+
+    Skips <script>, <style>, and <head> contents so the search index
+    isn't polluted with CSS rules, JS strings, or meta tags.
+    """
+    _SKIP_TAGS = frozenset({'script', 'style', 'head', 'title'})
+
+    def __init__(self):
+        super().__init__()
+        self._depth_skip = 0
+        self._chunks = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._SKIP_TAGS:
+            self._depth_skip += 1
+
+    def handle_endtag(self, tag):
+        if tag in self._SKIP_TAGS and self._depth_skip > 0:
+            self._depth_skip -= 1
+
+    def handle_data(self, data):
+        if self._depth_skip == 0:
+            text = data.strip()
+            if text:
+                self._chunks.append(text)
+
+    def text(self):
+        return ' '.join(self._chunks)
+
+
+def _text_from_report_html(html: str) -> str:
+    if not html:
+        return ''
+    parser = _ReportTextExtractor()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        return ''
+    return parser.text()
+
+
 def _text_from_tldraw(snapshot):
     out = []
     if not snapshot:
@@ -2731,11 +3022,12 @@ def _text_from_sheet(data):
     return out
 
 
-def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None):
+def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None):
     board_items = boards if boards is not None else _load_boards()
     sheet_items = sheets if sheets is not None else _load_sheets()
     gdoc_items = gdocs if gdocs is not None else _load_gdocs()
     gsheet_items = gsheets if gsheets is not None else _load_gsheets()
+    report_items = reports if reports is not None else _load_reports()
     drive_contents = _load_gdrive_contents()
 
     # Index every doc's name + tags so searches like "test" surface docs whose
@@ -2743,6 +3035,7 @@ def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None):
     for doc_type, items in (
         ('board', board_items), ('sheet', sheet_items),
         ('gdoc', gdoc_items),   ('gsheet', gsheet_items),
+        ('report', report_items),
     ):
         for item in items:
             name = (item.get('name') or '').strip()
@@ -2811,6 +3104,18 @@ def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None):
                 'kind': 'gsheet',
                 'text': cell,
             }
+    for report in report_items:
+        blob = _load(_report_file(report['id']), {}) or {}
+        text = (blob.get('text') or '').strip()
+        if not text:
+            continue
+        yield {
+            'doc_type': 'report',
+            'doc_id': report['id'],
+            'doc_name': report.get('name') or '',
+            'kind': 'report',
+            'text': text,
+        }
 
 
 _vectorizer = None
@@ -2867,13 +3172,13 @@ def _keyword(text, query):
     return score
 
 
-def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None):
+def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None):
     body = request.json or {}
     query = (body.get('query') or '').strip()
     if not query:
         return {'hits': []}
 
-    items = list(_all_items(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets))
+    items = list(_all_items(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets, reports=reports))
     if not items:
         return {'hits': []}
 
@@ -2912,6 +3217,7 @@ def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None):
                     'sheet': 'spreadsheet cell',
                     'gdoc': 'Doc',
                     'gsheet': 'Sheet',
+                    'report': 'Report',
                 }.get(item['kind'], item['kind']),
                 'score': combined,
                 'shape_id': item.get('shape_id'),
@@ -2936,7 +3242,8 @@ def visitor_search():
     sheets = [s for s in _load_sheets() if _doc_is_visitor_visible(s, folders)]
     gdocs = [d for d in _load_gdocs() if _doc_is_visitor_visible(d, folders)]
     gsheets = [d for d in _load_gsheets() if _doc_is_visitor_visible(d, folders)]
-    return jsonify(_search_payload(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets))
+    reports = [r for r in _load_reports() if _doc_is_visitor_visible(r, folders)]
+    return jsonify(_search_payload(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets, reports=reports))
 
 
 @app.route('/api/share/<token>/search', methods=['POST'])
