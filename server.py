@@ -1515,7 +1515,7 @@ def google_auth_start():
         'access_type': 'offline',
         'prompt': 'consent',  # force refresh_token issuance even on re-auth
         'state': state,
-    })
+    }, safe=':/', quote_via=_urllib_parse.quote)
     return redirect(f'https://accounts.google.com/o/oauth2/v2/auth?{params}')
 
 
