@@ -1,35 +1,40 @@
-#' Registers a knitr document hook that, after every knit completes,
-#' shows a macOS dialog asking whether to push the rendered HTML to Station 8.
-#' Idempotent — calling twice replaces the previous hook.
+#' Wraps rmarkdown::render so that, after every knit completes,
+#' a macOS dialog asks whether to push the rendered HTML to Station 8.
+#' Idempotent — calling twice does not double-wrap.
 #' @export
 auto_push <- function() {
-  if (!requireNamespace("knitr", quietly = TRUE)) {
-    message("[station8] knitr not installed; auto_push disabled")
+  if (!requireNamespace("rmarkdown", quietly = TRUE)) {
+    message("[station8] rmarkdown not installed; auto_push disabled")
     return(invisible(FALSE))
   }
-  knitr::knit_hooks$set(document = function(x) {
-    out_format <- knitr::opts_knit$get("rmarkdown.pandoc.to")
-    if (!identical(out_format, "html")) {
-      return(x)
-    }
-    rmd_path <- knitr::current_input(dir = TRUE)
-    if (is.null(rmd_path) || !nzchar(rmd_path)) return(x)
-    output_dir <- knitr::opts_knit$get("output.dir") %||% dirname(rmd_path)
-    base <- tools::file_path_sans_ext(basename(rmd_path))
-    html_path <- file.path(output_dir, paste0(base, ".html"))
+  current <- rmarkdown::render
+  if (isTRUE(attr(current, "station8_wrapped"))) {
+    message("[station8] auto-push already enabled")
+    return(invisible(TRUE))
+  }
+  original_render <- current
 
-    on.exit({
-      if (file.exists(html_path)) {
-        report_name <- base
-        if (station8_prompt(report_name)) {
-          push_now(html_path, report_name = report_name, rmd_path = rmd_path)
-        } else {
-          message("[station8] skipped: ", report_name)
+  new_render <- function(...) {
+    args <- list(...)
+    output <- original_render(...)
+    if (is.character(output) && length(output) >= 1) {
+      out_path <- output[1]
+      if (grepl("\\.html$", out_path, ignore.case = TRUE) && file.exists(out_path)) {
+        rmd_path <- args$input %||% (if (length(args) >= 1 && is.character(args[[1]])) args[[1]] else NULL)
+        base <- tools::file_path_sans_ext(basename(out_path))
+        if (!is.null(rmd_path) && nzchar(rmd_path)) {
+          if (station8_prompt(base)) {
+            push_now(out_path, report_name = base, rmd_path = rmd_path)
+          } else {
+            message("[station8] skipped: ", base)
+          }
         }
       }
-    }, add = TRUE)
-    x
-  })
+    }
+    output
+  }
+  attr(new_render, "station8_wrapped") <- TRUE
+  assignInNamespace("render", new_render, ns = "rmarkdown")
   message("[station8] auto-push enabled")
   invisible(TRUE)
 }
