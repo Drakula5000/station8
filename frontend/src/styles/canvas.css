@@ -934,16 +934,20 @@
      Light: white is the symmetric case — white text on white bg is
        unreadable, white-fill notes/frames/geos are invisible against the
        canvas.
-   The selector covers BOTH stroke context (Color row for non-image shapes)
-   AND fill context (geo Fill row) via `:not([data-color-context="image"])`.
-   Image context still allows both colors because image borders use a CSS
-   variable and resolve to the literal hex regardless of mode — the image
-   itself supplies the contrast.
+   Three contexts opt out of the disable:
+     - 'image': image borders use a literal CSS variable, image itself
+       supplies contrast.
+     - 'permissive': text/draw/highlight selections — these often sit on
+       filled shapes where the carrier supplies contrast even when the
+       canvas mode would otherwise hide them. ShapeInspector switches the
+       Color row into this context when ALL selected shapes are in
+       SHAPES_WITH_PERMISSIVE_COLOR; the marker + pen pickers (FjToolbar)
+       set it permanently for the same reason.
    The strikethrough is an absolutely-positioned ::after diagonal so the
    disabled state reads at a glance — earlier opacity-only dimming was too
    easy to miss. */
-html[data-mode="dark"] .shape-inspector .insp-body-swatches:not([data-color-context="image"]) .insp-swatch[data-swatch-id="black"],
-html[data-mode="light"] .shape-inspector .insp-body-swatches:not([data-color-context="image"]) .insp-swatch[data-swatch-id="white"] {
+html[data-mode="dark"] .shape-inspector .insp-body-swatches:not([data-color-context="image"]):not([data-color-context="permissive"]) .insp-swatch[data-swatch-id="black"],
+html[data-mode="light"] .shape-inspector .insp-body-swatches:not([data-color-context="image"]):not([data-color-context="permissive"]) .insp-swatch[data-swatch-id="white"] {
   position: relative;
   opacity: 0.45;
   cursor: not-allowed;
@@ -951,8 +955,8 @@ html[data-mode="light"] .shape-inspector .insp-body-swatches:not([data-color-con
   filter: grayscale(0.4);
   overflow: hidden;
 }
-html[data-mode="dark"] .shape-inspector .insp-body-swatches:not([data-color-context="image"]) .insp-swatch[data-swatch-id="black"]::after,
-html[data-mode="light"] .shape-inspector .insp-body-swatches:not([data-color-context="image"]) .insp-swatch[data-swatch-id="white"]::after {
+html[data-mode="dark"] .shape-inspector .insp-body-swatches:not([data-color-context="image"]):not([data-color-context="permissive"]) .insp-swatch[data-swatch-id="black"]::after,
+html[data-mode="light"] .shape-inspector .insp-body-swatches:not([data-color-context="image"]):not([data-color-context="permissive"]) .insp-swatch[data-swatch-id="white"]::after {
   content: '';
   position: absolute;
   top: 50%;
@@ -1238,8 +1242,16 @@ html[data-mode="light"] .shape-inspector .insp-body-swatches:not([data-color-con
   outline: 0.125rem solid var(--s8-text);
   outline-offset: 0.125rem;
 }
-html[data-mode="dark"] .tool-style-swatches:not([data-color-context="image"]) .tool-style-swatch[data-swatch-id="black"],
-html[data-mode="light"] .tool-style-swatches:not([data-color-context="image"]) .tool-style-swatch[data-swatch-id="white"] {
+/* Per-mode disable on toolbar swatches — same intent as the inspector
+   rule below. The `:not([data-color-context="image"])` excludes image
+   borders. The `:not([data-color-context="permissive"])` excludes the
+   pen + marker pickers, which always allow every color (those tools draw
+   on top of filled shapes where black/white can supply contrast even
+   when the canvas mode would otherwise hide them). Frame, sticky, and
+   section pickers stay strict because those shapes sit directly on the
+   canvas. */
+html[data-mode="dark"] .tool-style-swatches:not([data-color-context="image"]):not([data-color-context="permissive"]) .tool-style-swatch[data-swatch-id="black"],
+html[data-mode="light"] .tool-style-swatches:not([data-color-context="image"]):not([data-color-context="permissive"]) .tool-style-swatch[data-swatch-id="white"] {
   position: relative;
   opacity: 0.45;
   cursor: not-allowed;
@@ -1247,8 +1259,8 @@ html[data-mode="light"] .tool-style-swatches:not([data-color-context="image"]) .
   filter: grayscale(0.4);
   overflow: hidden;
 }
-html[data-mode="dark"] .tool-style-swatches:not([data-color-context="image"]) .tool-style-swatch[data-swatch-id="black"]::after,
-html[data-mode="light"] .tool-style-swatches:not([data-color-context="image"]) .tool-style-swatch[data-swatch-id="white"]::after {
+html[data-mode="dark"] .tool-style-swatches:not([data-color-context="image"]):not([data-color-context="permissive"]) .tool-style-swatch[data-swatch-id="black"]::after,
+html[data-mode="light"] .tool-style-swatches:not([data-color-context="image"]):not([data-color-context="permissive"]) .tool-style-swatch[data-swatch-id="white"]::after {
   content: '';
   position: absolute;
   top: 50%;
@@ -1261,6 +1273,51 @@ html[data-mode="light"] .tool-style-swatches:not([data-color-context="image"]) .
   pointer-events: none;
   border-radius: 0.0625rem;
   box-shadow: 0 0 0 0.0625rem rgba(0, 0, 0, 0.2);
+}
+
+/* Marker picker icons render the actual rendered highlight color per mode.
+   Each swatch sets --s8-highlight-bg and --s8-highlight-bg-dark inline; this
+   rule resolves which one paints the icon. Default is light; dark-mode html
+   attribute swaps to the dark value. */
+.tool-style-swatch[data-highlight-icon="true"] {
+  background: var(--s8-highlight-bg) !important;
+}
+html[data-mode="dark"] .tool-style-swatch[data-highlight-icon="true"] {
+  background: var(--s8-highlight-bg-dark) !important;
+}
+
+/* Magic / Auto swatch — half black + half white, signalling the swatch
+   resolves to whichever color contrasts the current canvas mode. The
+   swatch doesn't carry a stored color value, only behavior, so it's not
+   part of AURORA_SWATCHES — it's a one-off control rendered by FjToolbar's
+   pen picker AND by ShapeInspector's Color row when the selection is in
+   the auto-eligible context (text / draw). Selector targets
+   `[data-swatch-id="auto"]` so the same rule covers both render paths.
+   The diagonal split is a conic-gradient so it stays crisp at any size
+   and doesn't anti-alias into a grey bar. */
+.tool-style-swatch[data-swatch-id="auto"],
+.insp-swatch[data-swatch-id="auto"] {
+  background: conic-gradient(
+    from 225deg,
+    #ffffff 0deg 180deg,
+    #000000 180deg 360deg
+  ) !important;
+  border: 0.0625rem solid var(--s8-text-mid) !important;
+}
+
+/* Orphan-row centering for permissive Color grids.
+   The Auto swatch adds a 11th item to a 5-column grid — so row 1 has 5,
+   row 2 has 5, and row 3 has a single orphan in column 1. Looks sloppy.
+   `:nth-child(5n+1):last-child` matches ONLY when the last child is alone
+   in its own row (positions 1, 6, 11, 16…). When that happens, span the
+   item across all columns and `justify-self: center` so the orphan reads
+   as a centered chip rather than a left-anchored stray.
+   The selector is intentionally narrow — it ignores the 10-item marker
+   picker and any other non-orphan grid layouts. */
+.shape-inspector .insp-body-swatches .insp-swatch:nth-child(5n+1):last-child,
+.tool-style-swatches .tool-style-swatch:nth-child(5n+1):last-child {
+  grid-column: 1 / -1;
+  justify-self: center;
 }
 .tool-style-buttons {
   display: grid;

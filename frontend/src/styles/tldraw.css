@@ -248,29 +248,32 @@ html[data-mode="light"] .tldraw-wrap [data-tl-color='white'][data-shape-type='fr
   border-style: dashed !important;
 }
 
-/* Legacy fallback for non-frame shapes — same intent as the frame block
-   above, but no dashed stroke (notes/text/geo/arrows don't have a stroke
-   we can dash without breaking tldraw's native rendering). Use the dim
-   token so the rendered shape clearly reads as "fallback" rather than
-   colliding with the grey swatch.
+/* Legacy fallback for shapes whose Color picker DOES enforce the per-mode
+   black/white disable (notes, geo, line, arrow). These types can't pick
+   the disabled swatch from the inspector, but legacy data may carry it —
+   render those as text-dim grey so they're visible.
 
-   Notes: black bg in dark mode and white bg in light mode would both be
-   invisible, so swap the bg to text-dim. The note label color
-   (`tl-note-text` token) stays whatever tldraw computes for it.
-   Non-note text labels: my upstream override (`color: var(--s8-tl-text-on-light)`)
-   forces black text to #1d1d1d in EVERY mode, which is invisible on
-   the dark canvas. Re-override to text-dim in dark mode so the label
-   reads. Symmetric for white-in-light. */
+   Text/draw/highlight are deliberately EXCLUDED from this fallback. Their
+   inspector Color row uses `data-color-context="permissive"` and lets
+   users pick black or white in any mode (often to overlay on a filled
+   shape). Forcing them to text-dim would clobber the user's deliberate
+   choice — they instead render via the upstream `data-tl-color` text
+   rules above this block (white text in dark mode renders white; black
+   text in light mode renders black). */
 html[data-mode="dark"] .tldraw-wrap [data-tl-color='black'] .tl-note__container {
   background-color: var(--s8-text-dim) !important;
 }
-html[data-mode="dark"] .tldraw-wrap [data-tl-color='black']:not([data-shape-type='note']):not([data-shape-type='frame']) .tl-text-content__wrapper {
+html[data-mode="dark"] .tldraw-wrap [data-tl-color='black'][data-shape-type='geo'] .tl-text-content__wrapper,
+html[data-mode="dark"] .tldraw-wrap [data-tl-color='black'][data-shape-type='line'] .tl-text-content__wrapper,
+html[data-mode="dark"] .tldraw-wrap [data-tl-color='black'][data-shape-type='arrow'] .tl-text-content__wrapper {
   color: var(--s8-text-dim) !important;
 }
 html[data-mode="light"] .tldraw-wrap [data-tl-color='white'] .tl-note__container {
   background-color: var(--s8-text-dim) !important;
 }
-html[data-mode="light"] .tldraw-wrap [data-tl-color='white']:not([data-shape-type='note']):not([data-shape-type='frame']) .tl-text-content__wrapper {
+html[data-mode="light"] .tldraw-wrap [data-tl-color='white'][data-shape-type='geo'] .tl-text-content__wrapper,
+html[data-mode="light"] .tldraw-wrap [data-tl-color='white'][data-shape-type='line'] .tl-text-content__wrapper,
+html[data-mode="light"] .tldraw-wrap [data-tl-color='white'][data-shape-type='arrow'] .tl-text-content__wrapper {
   color: var(--s8-text-dim) !important;
 }
 
@@ -278,11 +281,16 @@ html[data-mode="light"] .tldraw-wrap [data-tl-color='white']:not([data-shape-typ
    literal swatch the user picked instead of tldraw's auto-inverted variants
    (e.g. `black` defaulting to #f2f2f2 in dark mode). Same rule fires in both
    modes for design-system consistency. Notes are excluded; their labelColor
-   stays as tldraw's noteText so it contrasts with the colored note bg. */
-.tldraw-wrap [data-tl-color='black']:not([data-shape-type='note']) .tl-text-content__wrapper {
+   stays as tldraw's noteText so it contrasts with the colored note bg.
+   `[data-auto-color='true']` is excluded from the black/white rules so
+   magic-pen / inspector-Auto shapes can fall back to tldraw's NATIVE
+   mode-aware rendering — that's how the magic swatch live-binds to the
+   viewer's current canvas mode. Other color rules don't need the
+   exception because autoColor shapes always store props.color='black'. */
+.tldraw-wrap [data-tl-color='black']:not([data-shape-type='note']):not([data-auto-color='true']) .tl-text-content__wrapper {
   color: var(--s8-tl-text-on-light) !important;
 }
-.tldraw-wrap [data-tl-color='white']:not([data-shape-type='note']) .tl-text-content__wrapper {
+.tldraw-wrap [data-tl-color='white']:not([data-shape-type='note']):not([data-auto-color='true']) .tl-text-content__wrapper {
   color: var(--s8-tl-white) !important;
 }
 .tldraw-wrap [data-tl-color='light-violet']:not([data-shape-type='note']) .tl-text-content__wrapper,

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   track, useEditor,
   DefaultColorStyle, DefaultDashStyle, DefaultSizeStyle, GeoShapeGeoStyle,
@@ -12,7 +12,7 @@ import {
   FjXBoxIcon, FjCheckBoxIcon, FjCloudIcon, FjHeartIcon,
   FjMarkerIcon,
 } from '../icons'
-import { AURORA_SWATCHES, STICKY_SWATCHES } from '../colors'
+import { AURORA_SWATCHES, STICKY_SWATCHES, HIGHLIGHT_SWATCHES } from '../colors'
 import { resolveImageShapeUrl } from './shared'
 import { STROKE_STYLE_OPTIONS, SIZE_OPTIONS } from './styleOptions'
 
@@ -63,6 +63,11 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
   const [lastDrawColor, setLastDrawColor] = useState('blue')
   const [lastDrawDash, setLastDrawDash] = useState('draw')
   const [lastDrawSize, setLastDrawSize] = useState('m')
+  // True while "Auto" is the active pen color. The next-shape style API
+  // doesn't carry meta, so we use a ref + a sideEffects handler to inject
+  // meta.autoColor on each draw shape created while this is on. Switching
+  // to any explicit color flips this back to false.
+  const pendingAutoColorRef = useRef(false)
   const [lastMarkerColor, setLastMarkerColor] = useState('blue')
   const [lastMarkerSize, setLastMarkerSize] = useState('m')
 
@@ -216,9 +221,47 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
   }
 
   const setDrawColor = (color) => {
+    // Picking an explicit color exits magic-pen mode so subsequent strokes
+    // get a fixed hue without the auto-flip behavior.
+    pendingAutoColorRef.current = false
     applyNextDrawStyles({ color })
     editor.setCurrentTool('draw')
   }
+
+  // "Magic" pen — applies tldraw color 'black' as the carrier and arms a
+  // ref so the sideEffects handler below stamps meta.autoColor=true on
+  // each draw shape created while the magic mode is active. Tldraw's
+  // native palette renders 'black' as #1d1d1d in light mode and #f2f2f2
+  // in dark mode; combined with the `:not([data-auto-color='true'])`
+  // exception in tldraw.css, the resulting stroke color live-binds to
+  // whatever mode the viewer is currently in — flips on toggle.
+  const setDrawColorAuto = () => {
+    applyNextDrawStyles({ color: 'black' })
+    editor.setCurrentTool('draw')
+    pendingAutoColorRef.current = true
+  }
+
+  useEffect(() => {
+    // Side-effect handler: any draw/highlight shape created while the
+    // magic pen is armed gets meta.autoColor=true so ShapeColorSync stamps
+    // data-auto-color on it. Filter to draw + highlight only — other
+    // shape types could be created via different tools and shouldn't
+    // accidentally inherit the flag.
+    const cleanup = editor.sideEffects.register({
+      shape: {
+        afterCreate: (shape) => {
+          if (!pendingAutoColorRef.current) return
+          if (shape.type !== 'draw' && shape.type !== 'highlight') return
+          editor.updateShape({
+            id: shape.id,
+            type: shape.type,
+            meta: { ...shape.meta, autoColor: true },
+          })
+        },
+      },
+    })
+    return cleanup
+  }, [editor])
 
   const setDrawStroke = (strokeId) => {
     applyNextDrawStyles({ dash: strokeId })
@@ -446,7 +489,17 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
             <div className="section-picker-title">Pen defaults</div>
             <div className="tool-style-row">
               <div className="tool-style-label">Color</div>
-              <div className="tool-style-swatches" data-color-context="stroke">
+              {/* `data-color-context="permissive"` opts out of the per-mode
+                  black/white disable rule in canvas.css. Pens often draw on
+                  top of filled shapes, so the user always needs every color. */}
+              <div className="tool-style-swatches" data-color-context="permissive">
+                <button
+                  className="tool-style-swatch"
+                  onClick={setDrawColorAuto}
+                  title="Auto (black on light canvas, white on dark)"
+                  type="button"
+                  data-swatch-id="auto"
+                />
                 {AURORA_SWATCHES.map((swatch) => (
                   <button
                     key={swatch.id}
@@ -515,16 +568,30 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
             <div className="section-picker-title">Marker defaults</div>
             <div className="tool-style-row">
               <div className="tool-style-label">Color</div>
-              <div className="tool-style-swatches" data-color-context="stroke">
-                {AURORA_SWATCHES.map((swatch) => (
+              {/* HIGHLIGHT_SWATCHES (not AURORA_SWATCHES): tldraw's highlight
+                  tool re-maps every color name to its `highlightSrgb` hex,
+                  so the AURORA swatch hex was lying about what landed on
+                  canvas (e.g. AURORA `black` rendered as yellow). The
+                  swatch icons here are the actual rendered highlight hex.
+                  `permissive` context: highlights frequently sit over
+                  filled shapes, so all colors stay enabled in both modes. */}
+              <div className="tool-style-swatches" data-color-context="permissive">
+                {HIGHLIGHT_SWATCHES.map((swatch) => (
                   <button
                     key={swatch.id}
                     className={`tool-style-swatch ${lastMarkerColor === swatch.tl ? 'active' : ''}`}
-                    style={{ background: swatch.bg }}
+                    style={{
+                      // Both light + dark hexes are exposed as custom props;
+                      // the .tool-style-swatch[data-highlight-icon] CSS rule
+                      // resolves which one renders per html[data-mode].
+                      '--s8-highlight-bg': swatch.bg,
+                      '--s8-highlight-bg-dark': swatch.bgDark,
+                    }}
                     onClick={() => setMarkerColor(swatch.tl)}
                     title={swatch.id}
                     type="button"
                     data-swatch-id={swatch.id}
+                    data-highlight-icon="true"
                   />
                 ))}
               </div>

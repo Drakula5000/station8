@@ -117,6 +117,19 @@ const SHAPES_WITH_STROKE_TOGGLE = new Set(['geo'])
 // Rectangle-class geos can take a real corner radius (rendered via CSS
 // border-radius + overflow:hidden on the SVG container, see GeoCornerStyles).
 // Other geo subtypes (diamond, triangle, ellipse, etc.) skip the row.
+// Color-row context decides whether the per-mode black/white disable rule
+// fires. Shapes that frequently sit on top of filled shapes (text, draw,
+// highlight) need every color in every mode — black text on a white sticky
+// is meaningful even on a dark canvas. Frames/geos/lines/arrows/notes go
+// through the strict 'stroke' context where black-in-dark / white-in-light
+// are dimmed + struck through (see canvas.css).
+const SHAPES_WITH_PERMISSIVE_COLOR = new Set(['text', 'draw', 'highlight'])
+// Auto / Magic swatch is only meaningful for shapes whose color renders
+// via tldraw's `solid` palette (which natively auto-inverts black across
+// modes). Highlights use `highlightSrgb` instead and would render any
+// color name as a fluorescent variant — black-highlight = yellow, so
+// "auto" can't actually flip with mode. Restrict the swatch to text/draw.
+const SHAPES_WITH_AUTO_COLOR = new Set(['text', 'draw'])
 
 function allShapesMatch(shapes, set) {
   return shapes.length > 0 && shapes.every((s) => set.has(s.type))
@@ -296,6 +309,9 @@ export const ShapeInspector = track(function ShapeInspector() {
   if (editing) return null
 
   const showColor = allShapesMatch(shapes, SHAPES_WITH_COLOR)
+  const isPermissiveColor = allShapesMatch(shapes, SHAPES_WITH_PERMISSIVE_COLOR)
+  const isAutoEligible = allShapesMatch(shapes, SHAPES_WITH_AUTO_COLOR)
+  const isAllAutoColor = isAutoEligible && shapes.every((s) => s.meta?.autoColor === true)
   const showFill = allShapesMatch(shapes, SHAPES_WITH_FILL)
   const showFont = allShapesMatch(shapes, SHAPES_WITH_TEXT)
   const showSize = allShapesMatch(shapes, SHAPES_WITH_SIZE)
@@ -400,7 +416,32 @@ export const ShapeInspector = track(function ShapeInspector() {
   const activeSizeButton = showTextSizeInput ? getPresetSizeId(activeTextSizePx) : activeSize
   const activeListType = showLists ? getSharedListType(shapes) : 'none'
 
-  const applyColor  = (tl) => editor.setStyleForSelectedShapes(DefaultColorStyle, tl)
+  // Picking any regular color clears meta.autoColor on every selected shape
+  // — otherwise a previously-magic shape would silently keep auto-flipping
+  // after the user picked an explicit color.
+  const applyColor = (tl) => editor.run(() => {
+    editor.setStyleForSelectedShapes(DefaultColorStyle, tl)
+    if (shapes.some((s) => s.meta?.autoColor)) {
+      editor.updateShapes(
+        shapes.map((s) => ({ id: s.id, type: s.type, meta: { ...s.meta, autoColor: false } }))
+      )
+    }
+  })
+  // Magic / Auto swatch: stores props.color='black' AND meta.autoColor=true
+  // on every selected shape. The 'black' value is the carrier — tldraw's
+  // native auto-invert renders it as #1d1d1d in light mode and #f2f2f2 in
+  // dark mode. The autoColor meta flag is what ShapeColorSync stamps as
+  // `data-auto-color="true"` on the DOM, which lets tldraw.css EXCEPT this
+  // shape from the `[data-tl-color='black'] .tl-text-content__wrapper`
+  // override (so tldraw's mode-aware inline color wins). Result: when the
+  // viewer toggles dark/light mode, the shape's text/stroke flips colors
+  // automatically — true live-binding, not apply-time.
+  const applyColorAuto = () => editor.run(() => {
+    editor.setStyleForSelectedShapes(DefaultColorStyle, 'black')
+    editor.updateShapes(
+      shapes.map((s) => ({ id: s.id, type: s.type, meta: { ...s.meta, autoColor: true } }))
+    )
+  })
   const applyFillColor = (color) => editor.run(() => {
     editor.setStyleForSelectedShapes(DefaultFillStyle, 'solid')
     editor.updateShapes(
@@ -552,19 +593,51 @@ export const ShapeInspector = track(function ShapeInspector() {
           <div className="insp-label">Color</div>
           <div
             className="insp-body insp-body-swatches"
-            data-color-context={showImageStyling ? 'image' : 'stroke'}
+            data-color-context={
+              showImageStyling
+                ? 'image'
+                : isPermissiveColor
+                  ? 'permissive'
+                  : 'stroke'
+            }
           >
-            {COLOR_SWATCHES.map((c) => (
+            {/* Auto / Magic swatch — only renders when SHAPES_WITH_AUTO_COLOR
+                covers the whole selection (text / draw). Highlight is in
+                SHAPES_WITH_PERMISSIVE_COLOR but NOT here, because tldraw's
+                highlight tool re-maps every color name to a fluorescent
+                hex (`black` highlight = yellow), which would defeat the
+                "auto-flip with mode" intent. The active class fires when
+                every selected shape carries meta.autoColor — that's the
+                source of truth for "this shape is in magic mode". */}
+            {isAutoEligible && (
               <button
-                key={c.id}
-                className={`insp-swatch ${(showImageStyling ? activeImageBorderColor === c.bg : activeColor === c.tl) ? 'active' : ''}`}
-                style={{ background: c.bg }}
-                onClick={() => (showImageStyling ? applyImageBorderColor(c.bg) : applyColor(c.tl))}
-                title={c.id}
+                key="auto"
+                className={`insp-swatch ${isAllAutoColor ? 'active' : ''}`}
+                onClick={applyColorAuto}
+                title="Auto (follows canvas mode — flips with light/dark toggle)"
                 type="button"
-                data-swatch-id={c.id}
+                data-swatch-id="auto"
               />
-            ))}
+            )}
+            {COLOR_SWATCHES.map((c) => {
+              // When the selection is in magic mode, suppress regular
+              // active highlights — the Auto chip is the active one even
+              // though the stored props.color is 'black'.
+              const colorActive = showImageStyling
+                ? activeImageBorderColor === c.bg
+                : !isAllAutoColor && activeColor === c.tl
+              return (
+                <button
+                  key={c.id}
+                  className={`insp-swatch ${colorActive ? 'active' : ''}`}
+                  style={{ background: c.bg }}
+                  onClick={() => (showImageStyling ? applyImageBorderColor(c.bg) : applyColor(c.tl))}
+                  title={c.id}
+                  type="button"
+                  data-swatch-id={c.id}
+                />
+              )
+            })}
           </div>
         </div>
       )}

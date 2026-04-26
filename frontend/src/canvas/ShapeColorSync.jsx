@@ -45,6 +45,18 @@ export const ShapeColorSync = track(function ShapeColorSync() {
       } else {
         el.removeAttribute('data-stroke-none')
       }
+
+      // Magic / Auto color flag — when true, CSS in tldraw.css excepts this
+      // shape from the upstream `data-tl-color='black'` text-color override
+      // and lets tldraw's native auto-invert render the label per mode
+      // (#1d1d1d in light, #f2f2f2 in dark). The stored props.color is
+      // always 'black' for autoColor shapes; tldraw flips it natively, so
+      // the shape live-binds to whatever mode the viewer is currently in.
+      if (shape.meta?.autoColor) {
+        el.setAttribute('data-auto-color', 'true')
+      } else {
+        el.removeAttribute('data-auto-color')
+      }
     })
   })
   return null
