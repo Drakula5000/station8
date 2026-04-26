@@ -296,6 +296,38 @@ export const ShapeInspector = track(function ShapeInspector() {
   const editing = editor.getEditingShapeId()
   if (editing) return null
 
+  const showColor = allShapesMatch(shapes, SHAPES_WITH_COLOR)
+  const showFill = allShapesMatch(shapes, SHAPES_WITH_FILL)
+  const showFont = allShapesMatch(shapes, SHAPES_WITH_TEXT)
+  const showSize = allShapesMatch(shapes, SHAPES_WITH_SIZE)
+  const showAlign = allShapesMatch(shapes, SHAPES_WITH_ALIGN)
+  const showCorners = allShapesMatch(shapes, SHAPES_WITH_CORNERS)
+  const showGeoCorners = allRectangleGeoShapes(shapes)
+  const showImageStyling = allShapesMatch(shapes, SHAPES_WITH_IMAGE_STYLING)
+  const showTextSizeInput = allShapesMatch(shapes, SHAPES_WITH_FREEFORM_TEXT_SIZE)
+  const showLists = allShapesMatch(shapes, SHAPES_WITH_LISTS)
+  const showArrowheads = allShapesMatch(shapes, SHAPES_WITH_ARROWHEADS)
+  const showStrokeToggle = allShapesMatch(shapes, SHAPES_WITH_STROKE_TOGGLE)
+
+  // Group selections and other unsupported shape sets previously rendered an
+  // empty inspector shell here, which showed up as a blank floating bar.
+  if (!(
+    showColor
+    || showFill
+    || showFont
+    || showSize
+    || showAlign
+    || showCorners
+    || showGeoCorners
+    || showImageStyling
+    || showTextSizeInput
+    || showLists
+    || showArrowheads
+    || showStrokeToggle
+  )) {
+    return null
+  }
+
   const bounds = editor.getSelectionRotatedPageBounds()
   if (!bounds) return null
 
@@ -331,19 +363,6 @@ export const ShapeInspector = track(function ShapeInspector() {
       ? clamp(belowY, minY, maxY)
       : clamp(aboveY, minY, maxY)
   )
-
-  const showColor   = allShapesMatch(shapes, SHAPES_WITH_COLOR)
-  const showFill    = allShapesMatch(shapes, SHAPES_WITH_FILL)
-  const showFont    = allShapesMatch(shapes, SHAPES_WITH_TEXT)
-  const showSize    = allShapesMatch(shapes, SHAPES_WITH_SIZE)
-  const showAlign   = allShapesMatch(shapes, SHAPES_WITH_ALIGN)
-  const showCorners = allShapesMatch(shapes, SHAPES_WITH_CORNERS)
-  const showGeoCorners = allRectangleGeoShapes(shapes)
-  const showImageStyling = allShapesMatch(shapes, SHAPES_WITH_IMAGE_STYLING)
-  const showTextSizeInput = allShapesMatch(shapes, SHAPES_WITH_FREEFORM_TEXT_SIZE)
-  const showLists = allShapesMatch(shapes, SHAPES_WITH_LISTS)
-  const showArrowheads = allShapesMatch(shapes, SHAPES_WITH_ARROWHEADS)
-  const showStrokeToggle = allShapesMatch(shapes, SHAPES_WITH_STROKE_TOGGLE)
 
   const activeColor = sharedStyle(editor, DefaultColorStyle)
   const activeFillStyle = sharedStyle(editor, DefaultFillStyle)
