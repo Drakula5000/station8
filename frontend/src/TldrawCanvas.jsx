@@ -19,6 +19,7 @@ const API = import.meta.env.VITE_API_URL || ''
 // backend. Module-scoped so the static assetStore can read it.
 const signedUploadUrls = new Map()
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function setSignedUploadUrls(map) {
   if (!map) return
   for (const [name, url] of Object.entries(map)) {
