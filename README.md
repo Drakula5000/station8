@@ -269,17 +269,21 @@ Every time you knit an `.Rmd`, a native macOS dialog appears: *"Push [filename] 
 
 **1. Install the Station 8 R package.**
 
-From an R session, with your Station 8 repo on disk:
+The package lives in your forked repo at `r-package/station8/`. Open an R session and run:
 
 ```r
+# Install dependencies from CRAN first
+install.packages(c("knitr", "httr2", "digest", "getPass", "jsonlite", "curl"))
+
+# Then install the station8 package from your local repo
 install.packages(
-  "/path/to/station8/r-package/station8",
+  "/path/to/your/station8/r-package/station8",
   repos = NULL,
   type  = "source"
 )
 ```
 
-The package depends on `knitr`, `httr2`, `digest`, `getPass`, `jsonlite`, `curl`, and `tools` — all available from CRAN.
+Replace `/path/to/your/station8` with the actual path to your forked repo on disk. On a Mac this is typically something like `/Users/yourname/Documents/station8`.
 
 **2. Connect to your hub.**
 
