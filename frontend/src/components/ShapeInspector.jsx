@@ -309,6 +309,23 @@ export const ShapeInspector = track(function ShapeInspector() {
     return () => observer.disconnect()
   }, [])
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key !== 'i' && e.key !== 'I') return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const tag = document.activeElement?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (document.activeElement?.isContentEditable) return
+      if (editor.getEditingShapeId()) return
+      if (editor.getSelectedShapes().length === 0) return
+      e.preventDefault()
+      const currentKey = editor.getSelectedShapes().map((s) => s.id).sort().join(',')
+      setDismissedKey((prev) => (prev === currentKey ? null : currentKey))
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [editor])
+
   if (shapes.length === 0) return null
 
   // User clicked the X for this exact selection — stay hidden until selection changes.
