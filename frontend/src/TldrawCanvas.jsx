@@ -354,9 +354,12 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       const hasAccel = e.metaKey || e.ctrlKey
 
       if (!readOnly && hasAccel && key === 'z') {
-        e.preventDefault()
         const editor = editorRef.current
         if (!editor) return
+        // When the editor is focused, tldraw handles Cmd+Z natively — calling
+        // editor.undo() here would fire on top of that and undo twice.
+        if (editor.getInstanceState().isFocused) return
+        e.preventDefault()
         editor.focus()
         if (e.shiftKey) {
           editor.redo()
@@ -367,9 +370,10 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       }
 
       if (!readOnly && hasAccel && key === 'y') {
-        e.preventDefault()
         const editor = editorRef.current
         if (!editor) return
+        if (editor.getInstanceState().isFocused) return
+        e.preventDefault()
         editor.focus()
         editor.redo()
         return

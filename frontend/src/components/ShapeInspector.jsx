@@ -274,8 +274,15 @@ export const ShapeInspector = track(function ShapeInspector() {
   const inspectorRef = useRef(null)
   const [textSizeDraft, setTextSizeDraft] = useState('')
   const [panelSize, setPanelSize] = useState({ width: 340, height: 0 })
+  // Dismiss-without-deselect: clicking the X stashes the current selection's ID
+  // signature here, which suppresses the panel for that exact selection. The
+  // shape stays selected (so the user can drag it freely without the inspector
+  // covering the canvas), and the panel reappears the moment selection changes
+  // — pick a different shape, or click off and back on.
+  const [dismissedKey, setDismissedKey] = useState(null)
 
   const shapes = editor.getSelectedShapes()
+  const selectionKey = shapes.map((s) => s.id).sort().join(',')
   const activeTextSizePx = getSharedTextSizePx(shapes)
 
   useEffect(() => {
@@ -303,6 +310,9 @@ export const ShapeInspector = track(function ShapeInspector() {
   }, [])
 
   if (shapes.length === 0) return null
+
+  // User clicked the X for this exact selection — stay hidden until selection changes.
+  if (dismissedKey !== null && dismissedKey === selectionKey) return null
 
   // Don't interrupt typing / resizing / rotating
   const editing = editor.getEditingShapeId()
@@ -926,8 +936,8 @@ export const ShapeInspector = track(function ShapeInspector() {
       </div>
       <button
         className="insp-close"
-        onClick={() => editor.selectNone()}
-        title="Dismiss inspector (deselects shape)"
+        onClick={() => setDismissedKey(selectionKey)}
+        title="Hide inspector (selection stays — pick another shape to bring it back)"
         type="button"
       >
         <CloseIcon />
