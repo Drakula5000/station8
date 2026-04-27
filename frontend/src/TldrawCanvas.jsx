@@ -491,25 +491,40 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       const updates = newImages
         .map((image) => editor.getShape(image.id))
         .filter(Boolean)
+        .filter((shape) => !shape.meta?.isAutoResized)
         .map((shape) => {
-        const target = getDroppedImageTargetSize(editor, shape)
-        if (!target) return null
+          const target = getDroppedImageTargetSize(editor, shape)
+          if (!target) return null
 
-        const currentW = Number(shape.props?.w ?? 0)
-        const currentH = Number(shape.props?.h ?? 0)
-        const w = target?.w ?? Number(shape.props?.w ?? 0)
-        const h = target?.h ?? Number(shape.props?.h ?? 0)
-        return {
-          id: shape.id,
-          type: 'image',
-          x: shape.x + (currentW - w) / 2,
-          y: shape.y + (currentH - h) / 2,
-          props: { w, h },
-        }
-      })
+          const currentW = Number(shape.props?.w ?? 0)
+          const currentH = Number(shape.props?.h ?? 0)
+          const w = target?.w ?? Number(shape.props?.w ?? 0)
+          const h = target?.h ?? Number(shape.props?.h ?? 0)
+
+          // Only update if there's a significant size change or we need to set the flag
+          const sizeChanged = Math.abs(currentW - w) > 0.1 || Math.abs(currentH - h) > 0.1
+          if (!sizeChanged) {
+            return {
+              id: shape.id,
+              type: 'image',
+              meta: { ...shape.meta, isAutoResized: true },
+            }
+          }
+
+          return {
+            id: shape.id,
+            type: 'image',
+            x: shape.x + (currentW - w) / 2,
+            y: shape.y + (currentH - h) / 2,
+            props: { w, h },
+            meta: { ...shape.meta, isAutoResized: true },
+          }
+        })
         .filter(Boolean)
 
-      editor.updateShapes(updates)
+      if (updates.length > 0) {
+        editor.updateShapes(updates)
+      }
     }, { source: 'user', scope: 'document' })
 
     // Double-click on an image shape opens the lightbox. Hook into tldraw's
