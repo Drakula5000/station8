@@ -263,9 +263,11 @@ Knitted R Markdown files are a first-class document type in Station 8 — they l
 
 **macOS only.** The push dialog uses `osascript`, which is macOS-specific. On other platforms the hook silently skips and knits complete normally.
 
+**HTML output only.** Station 8 only supports `output: html_document` knits. PDF, Word, and other formats are silently skipped — they knit normally, the push dialog just won't appear.
+
 **How it works**
 
-Every time you knit an `.Rmd`, a native macOS dialog appears: *"Push [filename] to Station 8?"* with Push / Skip buttons and a 30-second auto-skip timeout. Click Push and the rendered HTML appears in your hub sidebar under Unfiled within a few seconds. Re-knit the same file — same report updates. Move the report to a folder once and it stays there across every future re-knit.
+Every time you knit an `.Rmd` to HTML, a native macOS dialog appears: *"Push [filename] to Station 8? (HTML knits only)"* with Push / Skip buttons and a 30-second auto-skip timeout. Click Push and the rendered HTML appears in your hub sidebar under Unfiled within a few seconds. Re-knit the same file — same report updates. Move the report to a folder once and it stays there across every future re-knit.
 
 **1. Install the Station 8 R package.**
 

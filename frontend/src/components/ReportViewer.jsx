@@ -25,17 +25,26 @@ export default function ReportViewer({ reportId, viewerMode = 'owner' }) {
     return () => { cancelled = true }
   }, [reportId, viewerMode])
 
-  if (error) return <div className="report-viewer report-viewer-error">Could not load report: {error}</div>
-  if (html === null) return <div className="report-viewer report-viewer-loading">Loading…</div>
+  if (error) return (
+    <div className="report-embed-wrap">
+      <div className="report-embed-error">Could not load report: {error}</div>
+    </div>
+  )
+  if (html === null) return (
+    <div className="report-embed-wrap">
+      <div className="report-embed-loading">Loading…</div>
+    </div>
+  )
 
   return (
-    <iframe
-      ref={iframeRef}
-      className="report-viewer"
-      sandbox="allow-same-origin"
-      srcDoc={html}
-      title="Report"
-      style={{ width: '100%', height: '100%', border: 'none', background: 'white' }}
-    />
+    <div className="report-embed-wrap">
+      <iframe
+        ref={iframeRef}
+        className="report-embed-frame"
+        sandbox="allow-same-origin"
+        srcDoc={html}
+        title="Report"
+      />
+    </div>
   )
 }

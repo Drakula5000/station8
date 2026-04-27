@@ -6,7 +6,7 @@ station8_prompt <- function(report_name) {
   }
   safe_name <- gsub('"', '\\\\"', report_name)
   script <- sprintf(
-    'display dialog "Push %s to Station 8?" buttons {"Skip", "Push"} default button "Push" giving up after 30 with title "Station 8"',
+    'display dialog "Push %s to Station 8? (HTML knits only)" buttons {"Skip", "Push"} default button "Push" giving up after 30 with title "Station 8"',
     safe_name
   )
   result <- tryCatch(
