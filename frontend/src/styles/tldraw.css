@@ -361,6 +361,31 @@ html[data-mode="light"] .tldraw-wrap [data-tl-color='white'][data-shape-type='ar
   color: inherit !important;
 }
 
+/* Text-shape font sizes — Station's table (s:8, m:12, l:16, xl:22) is
+   ~half tldraw's default (s:18, m:24, l:36, xl:44). StationTextShapeUtil
+   sizes the bounding box with these values via getMinDimensions; this
+   block re-points the rendered font-size to match. min-height is also
+   overridden because RichTextLabel sets `min-height: floor(fontSize *
+   lineHeight)` inline from tldraw's larger fontSize, which would otherwise
+   keep the box visually tall even when our `height` is small.
+   The data-s8-size attribute is stamped by ShapeColorSync. */
+.tldraw-wrap [data-shape-type='text'][data-s8-size='s'] .tl-text-content__wrapper {
+  font-size: 8px !important;
+  min-height: calc(8px * 1.35) !important;
+}
+.tldraw-wrap [data-shape-type='text'][data-s8-size='m'] .tl-text-content__wrapper {
+  font-size: 12px !important;
+  min-height: calc(12px * 1.35) !important;
+}
+.tldraw-wrap [data-shape-type='text'][data-s8-size='l'] .tl-text-content__wrapper {
+  font-size: 16px !important;
+  min-height: calc(16px * 1.35) !important;
+}
+.tldraw-wrap [data-shape-type='text'][data-s8-size='xl'] .tl-text-content__wrapper {
+  font-size: 22px !important;
+  min-height: calc(22px * 1.35) !important;
+}
+
 /* Nested list styling: proper numbering hierarchy */
 /* Bullet lists: •, ◦, ▪ at each level */
 .tldraw-wrap ul { list-style-type: disc; }

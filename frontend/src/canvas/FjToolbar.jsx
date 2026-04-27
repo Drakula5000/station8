@@ -197,6 +197,16 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
   }
 
   const setTool = (tool) => {
+    if (tool === 'text') {
+      // Text shapes default to size 's' (8px in our table) and to auto-color
+      // so the label renders white in dark mode and dark in light mode
+      // (via tldraw's native 'black' auto-invert + meta.autoColor).
+      try { editor.setStyleForNextShapes(DefaultSizeStyle, 's') } catch { /* no-op */ }
+      try { editor.setStyleForNextShapes(DefaultColorStyle, 'black') } catch { /* no-op */ }
+      pendingAutoColorRef.current = true
+    } else {
+      pendingAutoColorRef.current = false
+    }
     editor.setCurrentTool(tool)
     closeAll()
   }
@@ -242,16 +252,15 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
   }
 
   useEffect(() => {
-    // Side-effect handler: any draw/highlight shape created while the
-    // magic pen is armed gets meta.autoColor=true so ShapeColorSync stamps
-    // data-auto-color on it. Filter to draw + highlight only — other
-    // shape types could be created via different tools and shouldn't
-    // accidentally inherit the flag.
+    // Side-effect handler: any draw/highlight/text shape created while
+    // pendingAutoColorRef is armed gets meta.autoColor=true so ShapeColorSync
+    // stamps data-auto-color on it. Magic pen arms it for draw + highlight;
+    // selecting the text tool arms it for text.
     const cleanup = editor.sideEffects.register({
       shape: {
         afterCreate: (shape) => {
           if (!pendingAutoColorRef.current) return
-          if (shape.type !== 'draw' && shape.type !== 'highlight') return
+          if (shape.type !== 'draw' && shape.type !== 'highlight' && shape.type !== 'text') return
           editor.updateShape({
             id: shape.id,
             type: shape.type,

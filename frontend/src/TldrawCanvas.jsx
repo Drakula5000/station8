@@ -6,6 +6,7 @@ import { ImageLightbox } from './components/ImageLightbox'
 import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
 import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'
+import { StationTextShapeUtil } from './canvas/StationTextShapeUtil'
 import { FrameCornerStyles, GeoCornerStyles, ImageShapeStyles, ListStyles } from './canvas/ShapeStyles'
 import { BrokenImageRetry } from './canvas/BrokenImageRetry'
 import { FindBar } from './canvas/FindBar'
@@ -83,9 +84,12 @@ const FRAME_DROPPED_IMAGE_INSET = 32
 // StationNoteShapeUtil replaces tldraw's default note: instead of growing
 // vertically when text overflows, it keeps a fixed square and shrinks the
 // font to fit. See StationNoteShapeUtil.js for the rationale.
+// StationTextShapeUtil sizes text shapes with our smaller font table; the
+// rendered font-size is overridden via CSS to match — see StationTextShapeUtil.js.
 const STATION_SHAPE_UTILS = [
   FrameShapeUtil.configure({ showColors: true }),
   StationNoteShapeUtil,
+  StationTextShapeUtil,
 ]
 const FIGMA_REORDER_SHORTCUTS = {
   bringForward: 'cmd+],ctrl+]',
