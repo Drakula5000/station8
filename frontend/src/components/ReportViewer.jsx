@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
+const API = import.meta.env.VITE_API_URL || ''
+
 export default function ReportViewer({ reportId, viewerMode = 'owner' }) {
   const [html, setHtml] = useState(null)
   const [error, setError] = useState(null)
@@ -8,8 +10,8 @@ export default function ReportViewer({ reportId, viewerMode = 'owner' }) {
   useEffect(() => {
     let cancelled = false
     const url = viewerMode === 'visitor'
-      ? `/api/visitor/reports/${reportId}`
-      : `/api/reports/${reportId}`
+      ? `${API}/api/visitor/reports/${reportId}`
+      : `${API}/api/reports/${reportId}`
 
     fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`http ${r.status}`)))
