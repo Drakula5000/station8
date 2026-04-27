@@ -255,7 +255,7 @@ Restart the dev server (`.env` is loaded by `start.sh` on launch — a running s
 </details>
 
 <details>
-<summary><strong>Adding R knits to your workspace (not ready yet)</strong></summary>
+<summary><strong>Adding R knits to your workspace</strong></summary>
 
 <br>
 
@@ -271,9 +271,7 @@ Every time you knit an `.Rmd` to HTML, a native macOS dialog appears: *"Push [fi
 
 **1. Install the Station 8 R package.**
 
-The package lives in your forked repo at `r-package/station8/`. Open an R session and run:
-
-In the RStudio console, run:
+The package lives in your forked repo at `r-package/station8/`. In the RStudio console, run:
 
 ```r
 # Install the station8 package from your local repo
