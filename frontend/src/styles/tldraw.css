@@ -81,28 +81,36 @@
   background-color: var(--s8-tl-white) !important;
 }
 
-/* Note text — mode-aware, not swatch-aware. Aurora note backgrounds are
-   always light pastels regardless of canvas mode, so tldraw's per-swatch
-   noteText logic (which maps to dark fills in dark mode → light text) gets
-   things wrong. Instead: dark mode → white text on every note, light mode →
-   dark text on every note. Two swatches need an inversion:
-     • `white` swatch in dark mode: bg = #fff (no dark-mode bg override)
-       → dark text needed or it's white-on-white invisible.
-     • `black` swatch in light mode: bg = #000 (no light-mode bg override)
-       → white text needed or it's black-on-black invisible.
-   html:not([data-mode]) is dark (the boot default per theme.css). */
-html[data-mode="dark"] .tldraw-wrap [data-shape-type="note"] .tl-text-content__wrapper,
-html:not([data-mode]) .tldraw-wrap [data-shape-type="note"] .tl-text-content__wrapper {
-  color: var(--s8-tl-white) !important;
-}
-html[data-mode="dark"] .tldraw-wrap [data-tl-color="white"] .tl-note__container .tl-text-content__wrapper,
-html:not([data-mode]) .tldraw-wrap [data-tl-color="white"] .tl-note__container .tl-text-content__wrapper {
+/* Note text — Aurora notes contrast against the swatch bg, not the
+   tldraw default. Stock tldraw maps `labelColor='black'` (note default) to
+   `getColorValue(theme, color, 'noteText')`, which in dark mode resolves
+   to #f2f2f2 — fine on tldraw's own dark note fills (#7a3333, #014429,
+   etc.), but illegible on Aurora's pastel pastels (#90BCE8 blue, #C8B0F5
+   lavender). Likewise in light mode the `black` swatch bg is overridden
+   to #000 here, but tldraw's noteText for `black` is also #000 →
+   black-on-black. Force the contrasting color per swatch via the inline
+   `color` style on `.tl-text-content__wrapper`.
+
+   Identical in both modes — the swatch palette itself is theme-agnostic
+   (see "Note backgrounds" block above). The disabled-mode legacy cases
+   (black-in-dark, white-in-light, where bg is overridden to text-dim)
+   keep the `var(--s8-tl-white)` rule for black and `var(--s8-tl-text-on-light)`
+   for white, both of which still pass against the medium dim shade. */
+.tldraw-wrap [data-tl-color='light-violet'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='yellow'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='violet'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='light-red'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='red'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='light-blue'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='blue'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='light-green'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='green'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='orange'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='grey'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='white'] .tl-note__container .tl-text-content__wrapper {
   color: var(--s8-tl-text-on-light) !important;
 }
-html[data-mode="light"] .tldraw-wrap [data-shape-type="note"] .tl-text-content__wrapper {
-  color: var(--s8-tl-text-on-light) !important;
-}
-html[data-mode="light"] .tldraw-wrap [data-tl-color="black"] .tl-note__container .tl-text-content__wrapper {
+.tldraw-wrap [data-tl-color='black'] .tl-note__container .tl-text-content__wrapper {
   color: var(--s8-tl-white) !important;
 }
 
