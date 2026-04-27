@@ -298,6 +298,7 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
     setLastStickyColor(color)
     if (toolInfoRef) toolInfoRef.current.stickyColor = color
     try { editor.setStyleForNextShapes(DefaultColorStyle, STICKY_SWATCHES[color]?.tl || 'yellow') } catch { /* no-op */ }
+    try { editor.setStyleForNextShapes(DefaultSizeStyle, 's') } catch { /* no-op */ }
     editor.setCurrentTool('note')
     closeAll()
   }

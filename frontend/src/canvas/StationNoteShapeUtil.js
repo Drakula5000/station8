@@ -1,32 +1,36 @@
 import {
   NoteShapeUtil,
   FONT_FAMILIES,
-  LABEL_FONT_SIZES,
   TEXT_PROPS,
   isEqual,
   renderHtmlFromRichTextForMeasurement,
   renderPlaintextFromRichText,
 } from 'tldraw'
 
-// Mirror of tldraw internals (NoteShapeUtil's noteHelpers + default-shape-constants).
-// Both are `@internal` so we can't import them — but they're load-bearing
-// constants tldraw itself relies on, and changing them upstream would break
-// every existing note in any tldraw app, so they're effectively stable.
+// Mirror of tldraw internals. Both are `@internal` but stable — tldraw
+// can't change them without breaking every existing note in any consumer's
+// persisted snapshot.
 const NOTE_SIZE = 200
 const LABEL_PADDING = 16
 const FUZZ = 1
-const MIN_FONT_SIZE = 8
+
+// Station-specific font sizes — much smaller than tldraw's defaults
+// (s:18, m:22, l:26, xl:32), which feel oversized on a 200px note. Our
+// sizes let a note hold a useful amount of text at the default 's' without
+// auto-shrinking kicking in. The auto-shrink floor is s (8px); notes that
+// overflow even at s stay at s and clip rather than grow.
+const STATION_LABEL_FONT_SIZES = { s: 8, m: 12, l: 16, xl: 22 }
 
 // Custom NoteShapeUtil: a sticky note never grows. When its text would
 // overflow, we shrink the font instead — matching the "post-it" intuition
-// the user described (boxed paper square, you write smaller when you run out
-// of room, you don't tear the paper bigger).
+// (you write smaller when you run out of room, you don't tear the paper bigger).
 //
-// Stock tldraw behavior: `getNoteSizeAdjustments` measures the rendered
-// label and bumps `growY` so the container expands vertically; font only
-// shrinks for width-fit. We override both lifecycle hooks to clamp
-// `growY = 0` and binary-search a fontSizeAdjustment that fits BOTH
-// dimensions.
+// Stock tldraw: `getNoteSizeAdjustments` bumps `growY` so the container
+// expands vertically; font only shrinks for width-fit. We clamp `growY = 0`
+// and binary-step fontSizeAdjustment down until both dimensions fit.
+//
+// We always return a positive fontSizeAdjustment (never 0) so tldraw uses
+// our STATION_LABEL_FONT_SIZES instead of its own larger defaults.
 export class StationNoteShapeUtil extends NoteShapeUtil {
   onBeforeCreate(next) {
     return getStationNoteSizeAdjustments(this.editor, next)
@@ -75,16 +79,17 @@ function getStationNoteSizeAdjustments(editor, shape) {
 
 function computeFitFontSize(editor, shape) {
   const { richText, font, size } = shape.props
-  if (isRichTextEmpty(editor, richText)) return 0
+  const baseFontSize = STATION_LABEL_FONT_SIZES[size] ?? 8
 
-  const baseFontSize = LABEL_FONT_SIZES[size]
+  // Empty note: return our base size so tldraw renders the placeholder
+  // at our size (not its own larger default which kicks in when
+  // fontSizeAdjustment === 0).
+  if (isRichTextEmpty(editor, richText)) return baseFontSize
+
   const maxWidth = NOTE_SIZE - LABEL_PADDING * 2 - FUZZ
   const maxHeight = NOTE_SIZE - LABEL_PADDING * 2
 
-  // Walk down from the base size until both width AND height fit. tldraw's
-  // own width-fit loop can't shrink past 14 (it falls back to overflow-wrap
-  // break-word), but we need to keep going below that to satisfy the
-  // height constraint as well.
+  // Walk down from our base until both width AND height fit.
   let fontSize = baseFontSize
   for (let i = 0; i < 60; i++) {
     const html = renderHtmlFromRichTextForMeasurement(editor, richText)
@@ -95,14 +100,12 @@ function computeFitFontSize(editor, shape) {
       maxWidth,
     })
     if (measure.h <= maxHeight && measure.w <= maxWidth + FUZZ) {
-      // Fits in both axes. fontSize = baseFontSize means "no adjustment"
-      // (tldraw treats fontSizeAdjustment === 0 as the default size).
-      return fontSize === baseFontSize ? 0 : fontSize
+      return fontSize
     }
     fontSize -= 1
-    if (fontSize < MIN_FONT_SIZE) {
-      return MIN_FONT_SIZE
+    if (fontSize < STATION_LABEL_FONT_SIZES.s) {
+      return STATION_LABEL_FONT_SIZES.s
     }
   }
-  return Math.max(MIN_FONT_SIZE, fontSize)
+  return Math.max(STATION_LABEL_FONT_SIZES.s, fontSize)
 }
