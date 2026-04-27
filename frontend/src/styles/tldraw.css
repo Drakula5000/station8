@@ -91,25 +91,36 @@
    black-on-black. Force the contrasting color per swatch via the inline
    `color` style on `.tl-text-content__wrapper`.
 
-   Identical in both modes — the swatch palette itself is theme-agnostic
-   (see "Note backgrounds" block above). The disabled-mode legacy cases
-   (black-in-dark, white-in-light, where bg is overridden to text-dim)
-   keep the `var(--s8-tl-white)` rule for black and `var(--s8-tl-text-on-light)`
-   for white, both of which still pass against the medium dim shade. */
+   Per-swatch contrast pick (identical in both modes — the swatch palette
+   IS the design system and is theme-agnostic):
+     - LIGHT swatches → dark text (--s8-tl-text-on-light, #1d1d1d):
+       lavender (#C8B0F5), pink (#F0A8C0), blue (#90BCE8), teal (#88D4B0),
+       orange (#F0B880), white (#FFF), plus tldraw's `yellow` / `green`
+       legacy aliases (which the note CSS maps to lavender / teal bgs).
+     - DARK swatches → light text (--s8-tl-white, #FFF):
+       violet/purple (#9F7AEC), red/pink-strong (#E85858), grey (#8898b0),
+       black (#000). These are saturated/dark enough that black text
+       fails contrast — picking purple in the inspector previously kept
+       the text black on a 9F7AEC bg, which read as a low-contrast smudge.
+
+   The disabled-mode legacy cases (black-in-dark, white-in-light, where bg
+   is overridden to text-dim) keep their assigned text color: white text
+   for black, dark text for white — both still pass against the medium
+   text-dim shade. */
 .tldraw-wrap [data-tl-color='light-violet'] .tl-note__container .tl-text-content__wrapper,
 .tldraw-wrap [data-tl-color='yellow'] .tl-note__container .tl-text-content__wrapper,
-.tldraw-wrap [data-tl-color='violet'] .tl-note__container .tl-text-content__wrapper,
 .tldraw-wrap [data-tl-color='light-red'] .tl-note__container .tl-text-content__wrapper,
-.tldraw-wrap [data-tl-color='red'] .tl-note__container .tl-text-content__wrapper,
 .tldraw-wrap [data-tl-color='light-blue'] .tl-note__container .tl-text-content__wrapper,
 .tldraw-wrap [data-tl-color='blue'] .tl-note__container .tl-text-content__wrapper,
 .tldraw-wrap [data-tl-color='light-green'] .tl-note__container .tl-text-content__wrapper,
 .tldraw-wrap [data-tl-color='green'] .tl-note__container .tl-text-content__wrapper,
 .tldraw-wrap [data-tl-color='orange'] .tl-note__container .tl-text-content__wrapper,
-.tldraw-wrap [data-tl-color='grey'] .tl-note__container .tl-text-content__wrapper,
 .tldraw-wrap [data-tl-color='white'] .tl-note__container .tl-text-content__wrapper {
   color: var(--s8-tl-text-on-light) !important;
 }
+.tldraw-wrap [data-tl-color='violet'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='red'] .tl-note__container .tl-text-content__wrapper,
+.tldraw-wrap [data-tl-color='grey'] .tl-note__container .tl-text-content__wrapper,
 .tldraw-wrap [data-tl-color='black'] .tl-note__container .tl-text-content__wrapper {
   color: var(--s8-tl-white) !important;
 }

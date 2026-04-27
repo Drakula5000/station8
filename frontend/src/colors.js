@@ -23,7 +23,6 @@ const STICKY_KEY_TO_ID = {
   blue:   'blue',
   green:  'teal',
   orange: 'orange',
-  purple: 'purple',
 }
 
 const swatchById = Object.fromEntries(AURORA_SWATCHES.map((s) => [s.id, s]))

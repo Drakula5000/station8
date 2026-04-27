@@ -11,7 +11,7 @@ import {
   ArrowShapeArrowheadStartStyle,
   ArrowShapeArrowheadEndStyle,
 } from 'tldraw'
-import { FjDraftIcon, FjDataIcon, FjAnalysisIcon, FjInsightIcon } from '../icons'
+import { FjDraftIcon, FjDataIcon, FjAnalysisIcon, FjInsightIcon, CloseIcon } from '../icons'
 import { AURORA_SWATCHES as COLOR_SWATCHES } from '../colors'
 import {
   SHAPES_WITH_STROKE_STYLE,
@@ -588,6 +588,7 @@ export const ShapeInspector = track(function ShapeInspector() {
       // next microtask so the button click registers first.
       onPointerUp={() => { queueMicrotask(() => editor.focus()) }}
     >
+      <div className="insp-content">
       {(showColor || showImageStyling) && (
         <div className="insp-row">
           <div className="insp-label">Color</div>
@@ -922,7 +923,15 @@ export const ShapeInspector = track(function ShapeInspector() {
           </div>
         </div>
       )}
-
+      </div>
+      <button
+        className="insp-close"
+        onClick={() => editor.selectNone()}
+        title="Dismiss inspector (deselects shape)"
+        type="button"
+      >
+        <CloseIcon />
+      </button>
     </div>
   )
 })
