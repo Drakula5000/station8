@@ -2,19 +2,19 @@ Package: station8
 Title: Push knitted RMarkdown reports to a Station 8 hub
 Version: 0.1.0
 Authors@R: person("Station 8", "Contributors", email = "station8@users.noreply.github.com", role = c("aut", "cre"))
-Description: Registers a knitr document hook that, after every knit, prompts
-    the user (via a native macOS dialog) to push the rendered HTML to a
-    Station 8 research hub. Identity is a sha256 of the .Rmd absolute path,
-    so re-knits update the same report.
+Description: Registers a hook that, after every HTML knit, prompts the user
+    to push the rendered HTML to a Station 8 research hub. macOS shows a
+    native dialog; Windows uses PowerShell; Linux uses zenity or console.
+    Identity is a sha256 of the .Rmd absolute path so re-knits update the
+    same report.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Imports:
     knitr,
     httr2,
     digest,
-    getPass,
     jsonlite,
     curl,
     tools
-SystemRequirements: macOS (osascript)
+SystemRequirements: macOS osascript, or Windows PowerShell, or Linux zenity (optional)
 RoxygenNote: 7.3.1

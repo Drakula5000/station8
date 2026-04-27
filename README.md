@@ -293,7 +293,7 @@ Replace `/path/to/your/station8` with the actual path to your forked repo on dis
 If you get a dependency error, install missing packages first:
 
 ```r
-install.packages(c("knitr", "httr2", "digest", "getPass", "jsonlite", "curl"))
+install.packages(c("knitr", "httr2", "digest", "jsonlite", "curl"))
 ```
 
 Then re-run the `install.packages` command above.
