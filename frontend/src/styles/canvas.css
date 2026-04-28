@@ -1036,6 +1036,22 @@ html[data-mode="light"] .shape-inspector .insp-body-swatches:not([data-color-con
   display: inline-flex; align-items: center; justify-content: center;
 }
 .shape-inspector .insp-btn:hover { background: var(--s8-hover); border-color: var(--s8-sidebar-border); }
+
+.shape-inspector .insp-footer {
+  margin-top: 1.25rem;
+  padding: 0.75rem 0.25rem 0.125rem;
+  border-top: 0.0625rem solid var(--s8-sidebar-border);
+  text-align: center;
+  font-size: 0.625rem;
+  color: var(--s8-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+  opacity: 0.6;
+  pointer-events: none;
+  user-select: none;
+}
+
 .shape-inspector .insp-number {
   width: 4.125rem;
   height: 2rem;

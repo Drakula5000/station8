@@ -951,6 +951,11 @@ export const ShapeInspector = track(function ShapeInspector() {
         </div>
       )}
       </div>
+
+      <div className="insp-footer">
+        Press I to toggle visibility
+      </div>
+
       <button
         className="insp-close"
         onClick={() => setDismissedKey(selectionKey)}

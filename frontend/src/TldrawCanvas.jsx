@@ -621,9 +621,14 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     ))
   }
 
-  const handleWheelCapture = useCallback(() => {
+  const handleWheelCapture = useCallback((e) => {
     const editor = editorRef.current
-    if (editor && !editor.getInstanceState().isFocused) {
+    if (!editor) return
+    // Same focus-stealing guard as handlePointerDownCapture: don't yank focus
+    // away from a rich-text editor when the user scrolls inside it.
+    const target = e?.target
+    const insideEditor = target?.closest?.('.tl-text-input, .ProseMirror, [contenteditable="true"]')
+    if (!insideEditor && !editor.getInstanceState().isFocused) {
       editor.focus()
     }
     requestAnimationFrame(() => {
@@ -633,9 +638,17 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     })
   }, [updateGhost])
 
-  const handlePointerDownCapture = useCallback(() => {
+  const handlePointerDownCapture = useCallback((e) => {
     const editor = editorRef.current
-    if (editor && !editor.getInstanceState().isFocused) {
+    if (!editor) return
+    // Don't steal focus when the pointerdown lands inside a rich-text editor.
+    // editor.focus() switches document.activeElement to the tldraw container,
+    // and tldraw's EditingShape.onPointerMove transitions to "translating" if
+    // activeElement isn't a contenteditable/input — so the user's drag gets
+    // interpreted as moving the shape instead of selecting text.
+    const target = e?.target
+    if (target?.closest?.('.tl-text-input, .ProseMirror, [contenteditable="true"]')) return
+    if (!editor.getInstanceState().isFocused) {
       editor.focus()
     }
   }, [])
