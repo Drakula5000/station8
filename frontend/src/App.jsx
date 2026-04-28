@@ -1070,11 +1070,12 @@ export default function App() {
     if (!tag) return { bg: 'var(--hover)', fg: 'var(--text-mid)', border: 'var(--sidebar-border)' }
     let h = 0
     for (let i = 0; i < tag.length; i++) h = (h * 31 + tag.charCodeAt(i)) >>> 0
-    const hue = h % 360
+    // Analogous hue range: 180 (teal) to 240 (blue-purple)
+    const hue = 180 + (h % 60)
     if (colorMode === 'dark') {
-      return { bg: `hsl(${hue}, 50%, 18%)`, fg: `hsl(${hue}, 80%, 72%)`, border: `hsl(${hue}, 55%, 38%)` }
+      return { bg: `hsl(${hue}, 30%, 15%)`, fg: `hsl(${hue}, 60%, 75%)`, border: `hsl(${hue}, 40%, 30%)` }
     }
-    return { bg: `hsl(${hue}, 70%, 90%)`, fg: `hsl(${hue}, 50%, 28%)`, border: `hsl(${hue}, 55%, 60%)` }
+    return { bg: `hsl(${hue}, 50%, 90%)`, fg: `hsl(${hue}, 40%, 30%)`, border: `hsl(${hue}, 40%, 60%)` }
   }
 
   const saveTags = async (tagsStr) => {
