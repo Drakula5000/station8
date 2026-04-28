@@ -26,7 +26,7 @@ The search results also take you directly to the search hits, zooming your camer
 
 You can create or import Google Docs + Sheets and R knits directly into the same workspace, so people can search your entire research database in one spot.
 
-Station 8 is a free (or almost-free depending on your usage) way to show off your research and how you think. You could put a link in your résumé or recruiter outreach so they can see your research and passion on a relevant topic. The economy and labor market are tough right now, and I want you to shine without sacrificing meals.
+Station 8 is a free (or almost-free depending on your usage) way to show off your research and how you think.
 
 <div align="center">
 <a href="https://drakula5000.github.io/station8"><img src="./.github/assets/demo-link.svg" alt="→ TRY THE LIVE DEMO" width="260" /></a>
@@ -40,7 +40,7 @@ Station 8 is a free (or almost-free depending on your usage) way to show off you
 
 ![A free, searchable research database. Online.](./.github/assets/h-database.svg)
 
-What I needed, and most independent researchers do too: a workspace that lives online for free, holds everything in one place (canvas, docs, sheets), and lets me find anything in it, including text inside images. Nothing else covers all four.
+What I needed, and most independent researchers do, too: a workspace that lives online for free, holds everything in one place (canvas, docs, sheets), and lets me find anything in it, including text inside images. Nothing else covers all four.
 
 | tool | free online hosting | infinite canvas | canvas + docs + sheets | searches inside images | navigates to result |
 |:---|:---:|:---:|:---:|:---:|:---:|
