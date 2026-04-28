@@ -2098,15 +2098,15 @@ export default function App() {
                 />
               )}
               {!activeId && ownerMode && (
-                <div className="empty-main">
-                  <div>
-                    <div className="big">Nothing open</div>
-                    <div className="small">Create folders, boards, docs, and sheets to organize your research.</div>
-                    <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-                      <button className="cta" onClick={openNewFolderModal} type="button">New folder</button>
-                      <button className="cta" onClick={openNewBoardModal} type="button">New board</button>
-                      <button className="cta" onClick={openNewGDocModal} type="button">New doc</button>
-                      <button className="cta" onClick={openNewGSheetModal} type="button">New sheet</button>
+                <div className="database-empty-main">
+                  <div className="database-hero" style={{ paddingTop: 0 }}>
+                    <h1 className="database-hero-title">Nothing open</h1>
+                    <p className="database-hero-sub">Create folders, boards, docs, and sheets to organize your research.</p>
+                    <div className="database-hero-tries" style={{ marginTop: '1rem' }}>
+                      <button className="database-hero-try" onClick={openNewFolderModal} type="button">New folder</button>
+                      <button className="database-hero-try" onClick={openNewBoardModal} type="button">New board</button>
+                      <button className="database-hero-try" onClick={openNewGDocModal} type="button">New doc</button>
+                      <button className="database-hero-try" onClick={openNewGSheetModal} type="button">New sheet</button>
                     </div>
                   </div>
                 </div>
