@@ -1699,7 +1699,7 @@ html[data-mode="dark"] .tool-style-swatch[data-highlight-icon="true"] {
   box-shadow: 0 0 0 0.1875rem var(--s8-accent-dim);
 }
 
-/* ── Work area (canvas / sheet) ── */
+/* ─── Work area (canvas / sheet) ── */
 .work-area {
   flex: 1;
   display: flex;
@@ -1707,6 +1707,15 @@ html[data-mode="dark"] .tool-style-swatch[data-highlight-icon="true"] {
   position: relative;
   overflow: hidden;
 }
+
+.database-empty-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
 
 /* Corner atmospheric glow */
 .work-area::after {
@@ -1718,14 +1727,4 @@ html[data-mode="dark"] .tool-style-swatch[data-highlight-icon="true"] {
   pointer-events: none;
 }
 
-.empty-main {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  color: var(--s8-text-mid);
-}
-.empty-main .big { font-size: 1.125rem; font-weight: 600; margin-bottom: 0.25rem; text-align: center; }
-.empty-main .small { font-size: 0.8125rem; color: var(--s8-text-mid); text-align: center; }
-.empty-main .cta {
-  background: var(--s8-accent); color: var(--s8-on-accent); border: none;
-  border-radius: 0.5rem; padding: 0.5625rem 1rem; font-size: 0.8125rem; cursor: pointer;
-}
-.empty-main .cta:hover { background: var(--s8-accent); opacity: 0.85; }
+
