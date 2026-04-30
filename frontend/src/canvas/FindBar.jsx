@@ -40,6 +40,12 @@ export const FindBar = track(function FindBar({ query, onDismiss, boardId, findB
   const zoomToMatch = useCallback((editor, shapeId) => {
     const bounds = editor.getShapePageBounds(shapeId)
     if (!bounds || !(bounds.width > 0)) return
+    // Re-measure viewport before zoomToBounds — instance_state.screenBounds
+    // from loadStoreSnapshot is stale relative to today's DOM if the window
+    // or sidebar was resized since load. Without this, matches centre off
+    // to the right and content appears clipped. Mirrors doFit in TldrawCanvas.
+    const container = editor.getContainer()
+    if (container) editor.updateViewportScreenBounds(container)
     editor.zoomToBounds(bounds, { padding: 160, animation: { duration: 350 } })
     editor.selectNone()
   }, [])

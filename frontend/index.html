@@ -4,6 +4,28 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Apply theme synchronously before first paint to prevent FOUC
+      // (white flash for dark-mode users on every load). Mirrors the React
+      // effect in App.jsx that sets data-mode from localStorage; this just
+      // gets the initial paint right. Default 'dark' matches theme.css's
+      // `html:not([data-mode])` rule.
+      (function () {
+        try {
+          var m = localStorage.getItem('s8.colorMode') || 'dark';
+          document.documentElement.setAttribute('data-mode', m);
+        } catch (e) {
+          document.documentElement.setAttribute('data-mode', 'dark');
+        }
+      })();
+    </script>
+    <style>
+      /* Bootstrap body bg/color so first paint matches the theme. Inline so
+         it lands before Vite-imported theme.css. Hexes must match
+         --s8-bg / --s8-text in theme.css exactly to avoid a second flash. */
+      html[data-mode="dark"]  body { background: #080c18; color: #dce8f8; }
+      html[data-mode="light"] body { background: #f4f8fb; color: #08172a; }
+    </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&family=Space+Mono:wght@400;700&family=Gaegu:wght@400;700&display=swap" rel="stylesheet">
