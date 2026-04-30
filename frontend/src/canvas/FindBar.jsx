@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { track, useEditor } from 'tldraw'
+import { useCanvasCamera } from './useCanvasCamera'
 
 // Walk a tldraw richText document and join all leaf `text` nodes. Used to
 // extract searchable plain text from notes and text shapes.
@@ -28,6 +29,7 @@ function extractShapeText(shape) {
 
 export const FindBar = track(function FindBar({ query, onDismiss, boardId, findBoards = [], onNavigateBoard, findShapeIds = [] }) {
   const editor = useEditor()
+  const camera = useCanvasCamera(editor)
   const [matches, setMatches] = useState([])
   const [matchIndex, setMatchIndex] = useState(0)
   const retryRef = useRef(null)
@@ -37,18 +39,11 @@ export const FindBar = track(function FindBar({ query, onDismiss, boardId, findB
   const hasPrevBoard = boardIndex > 0
   const hasNextBoard = boardIndex < totalBoards - 1
 
-  const zoomToMatch = useCallback((editor, shapeId) => {
-    const bounds = editor.getShapePageBounds(shapeId)
-    if (!bounds || !(bounds.width > 0)) return
-    // Re-measure viewport before zoomToBounds — instance_state.screenBounds
-    // from loadStoreSnapshot is stale relative to today's DOM if the window
-    // or sidebar was resized since load. Without this, matches centre off
-    // to the right and content appears clipped. Mirrors doFit in TldrawCanvas.
-    const container = editor.getContainer()
-    if (container) editor.updateViewportScreenBounds(container)
-    editor.zoomToBounds(bounds, { padding: 160, animation: { duration: 350 } })
-    editor.selectNone()
-  }, [])
+  const zoomToMatch = useCallback((shapeId) => {
+    if (camera.zoomToShapeBounds(shapeId, { padding: 160, animation: { duration: 350 } })) {
+      editor.selectNone()
+    }
+  }, [camera, editor])
 
   const buildMatches = useCallback((editor, q, preferredIds) => {
     const pageShapes = editor.getCurrentPageShapes()
@@ -92,7 +87,7 @@ export const FindBar = track(function FindBar({ query, onDismiss, boardId, findB
 
   useEffect(() => {
     if (!editor || matches.length === 0) return
-    zoomToMatch(editor, matches[matchIndex].shapeId)
+    zoomToMatch(matches[matchIndex].shapeId)
   }, [editor, matches, matchIndex, zoomToMatch])
 
   const currentShapeId = matches[matchIndex]?.shapeId || null
