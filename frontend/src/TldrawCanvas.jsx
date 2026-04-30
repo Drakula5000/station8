@@ -15,6 +15,7 @@ import { RichTextToolbar } from './canvas/RichTextToolbar'
 import { RICH_TEXT_EXTENSIONS } from './canvas/richTextExtensions'
 import { getSignedUploadUrl, setSignedUploadUrls } from './canvas/signedUploadUrls'
 import { isEditableTarget, resolveImageShapeUrl } from './canvas/shared'
+import { useCanvasCamera } from './canvas/useCanvasCamera'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -122,101 +123,6 @@ const TLDRAW_UI_OVERRIDES = {
   },
 }
 
-function getVisibleContentBounds(editor) {
-  // Compute the page-space bounds of everything a user can see:
-  //   - every frame's own rectangle (frames visually clip their children,
-  //     so the frame bounds already account for anything inside)
-  //   - every shape that is NOT inside a frame (floating on the page)
-  // Shapes inside a frame are intentionally skipped — their stored w/h can
-  // exceed the frame (e.g. text with a huge props.w) and would pull the fit
-  // box far past the last visible content.
-  const shapes = editor.getCurrentPageShapes()
-  if (shapes.length === 0) return null
-
-  const isInsideFrame = (shape) => {
-    let cur = shape
-    while (cur) {
-      const parent = editor.getShapeParent(cur)
-      if (!parent) return false
-      if (parent.type === 'frame') return true
-      cur = parent
-    }
-    return false
-  }
-
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  for (const s of shapes) {
-    if (s.type !== 'frame' && isInsideFrame(s)) continue
-    const b = editor.getShapePageBounds(s.id)
-    if (!b) continue
-    if (b.minX < minX) minX = b.minX
-    if (b.minY < minY) minY = b.minY
-    if (b.maxX > maxX) maxX = b.maxX
-    if (b.maxY > maxY) maxY = b.maxY
-  }
-  if (!isFinite(minX)) return null
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
-}
-
-function fitBoardAfterOpen(editor, onComplete) {
-  // Poll until the visible-content bounds stabilise, then zoom to them.
-  // Excludes the overflow of shapes nested inside frames (wide text etc.)
-  // since frames clip those visually — including them would push the fit
-  // box past the last visible content and leave the viewport off-center.
-  // `onComplete` fires when the fit finishes (or when no bounds ever resolve);
-  // callers use it to reveal the canvas after the camera lands, hiding the
-  // brief flash of saved-zoom content from the snapshot.
-  let attempts = 0
-  let done = false
-  const MAX_ATTEMPTS = 40
-  const INTERVAL_MS = 100
-  let lastSignature = null
-
-  const finish = () => {
-    if (done) return
-    done = true
-    onComplete?.()
-  }
-
-  const doFit = (bounds) => {
-    // loadStoreSnapshot replaces instance_state, which includes screenBounds.
-    // Tldraw's centering math in zoomToBounds reads that stored screenBounds
-    // instead of re-measuring the DOM, so without this re-measure the fit
-    // centres against whatever window size the board was last saved at.
-    // When today's viewport is wider/taller than that, content renders
-    // shifted toward the top-left.
-    const container = editor.getContainer()
-    if (container) editor.updateViewportScreenBounds(container)
-    editor.zoomToBounds(bounds, { immediate: true, inset: 64 })
-    finish()
-  }
-
-  const tryFit = () => {
-    const bounds = getVisibleContentBounds(editor) ?? editor.getCurrentPageBounds()
-    if (bounds && bounds.w > 0 && bounds.h > 0) {
-      const signature = `${bounds.x}|${bounds.y}|${bounds.w}|${bounds.h}`
-      if (signature === lastSignature) {
-        doFit(bounds)
-        return
-      }
-      lastSignature = signature
-    }
-    attempts++
-    if (attempts < MAX_ATTEMPTS) {
-      window.setTimeout(tryFit, INTERVAL_MS)
-    } else if (lastSignature) {
-      const fallback = getVisibleContentBounds(editor) ?? editor.getCurrentPageBounds()
-      if (fallback) doFit(fallback)
-      else finish()
-    } else {
-      // Empty board / no shapes — nothing to fit, just reveal as-is.
-      finish()
-    }
-  }
-
-  window.setTimeout(tryFit, 150)
-}
-
 function getNotePreviewSizePx(editor) {
   return NOTE_PREVIEW_SIZE * editor.getResizeScaleFactor() * editor.getZoomLevel()
 }
@@ -267,13 +173,15 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   const [lightbox, setLightbox] = useState(null) // { src, alt } | null
   const [hoverAffordance, setHoverAffordance] = useState({ cursor: '', tooltip: '' })
   const [activeTool, setActiveTool] = useState('select')
-  // Hide the canvas until the post-load fit-to-bounds completes; the snapshot
-  // restores whatever zoom the board was saved at, so without this gate users
-  // see a brief flash of oversized content before the camera lands.
-  const [boardFitting, setBoardFitting] = useState(true)
 
   const editorRef = useRef(null)
   const openLightboxRef = useRef(null)
+
+  // Owns the "always re-measure before zoom" rule. `camera.isFitting` gates
+  // the wrapper opacity so the snapshot's saved-zoom flash is hidden until
+  // the fit lands. Hook resolves the editor lazily — handleMount will set
+  // editorRef.current before camera.fitToContent() fires.
+  const camera = useCanvasCamera(editorRef)
 
   const openLightbox = useCallback((info) => {
     if (!info?.src) return
@@ -449,7 +357,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
           editor.selectNone()
           editor.setHoveredShape(null)
         }
-        fitBoardAfterOpen(editor, () => setBoardFitting(false))
+        camera.fitToContent()
       })
 
     const defaultFilesHandler = editor.externalContentHandlers.files
@@ -566,7 +474,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       editor.registerExternalContentHandler('files', defaultFilesHandler)
       editor.off('event', handleEditorEvent)
     }
-  }, [doSave])
+  }, [doSave, camera])
 
   const updateReadonlyHoverAffordance = useCallback((event) => {
     if (!readOnlyRef.current) return
@@ -673,7 +581,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       ref={wrapRef}
       title={hoverAffordance.tooltip || undefined}
       style={{
-        opacity: boardFitting ? 0 : 1,
+        opacity: camera.isFitting ? 0 : 1,
         transition: 'opacity 200ms ease-out',
         cursor: hoverAffordance.cursor || undefined,
       }}
