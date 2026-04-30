@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Tldraw, FrameShapeUtil } from 'tldraw'
+import { Tldraw } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { ShapeInspector } from './components/ShapeInspector'
 import { ImageLightbox } from './components/ImageLightbox'
@@ -7,6 +7,7 @@ import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
 import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'
 import { StationTextShapeUtil } from './canvas/StationTextShapeUtil'
+import { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'
 import { FrameCornerStyles, GeoCornerStyles, ImageShapeStyles, ListStyles } from './canvas/ShapeStyles'
 import { BrokenImageRetry } from './canvas/BrokenImageRetry'
 import { FindBar } from './canvas/FindBar'
@@ -88,7 +89,7 @@ const FRAME_DROPPED_IMAGE_INSET = 32
 // StationTextShapeUtil sizes text shapes with our smaller font table; the
 // rendered font-size is overridden via CSS to match — see StationTextShapeUtil.js.
 const STATION_SHAPE_UTILS = [
-  FrameShapeUtil.configure({ showColors: true }),
+  StationFrameShapeUtil.configure({ showColors: true }),
   StationNoteShapeUtil,
   StationTextShapeUtil,
 ]
