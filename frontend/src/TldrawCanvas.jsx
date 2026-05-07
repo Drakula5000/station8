@@ -99,26 +99,81 @@ const FIGMA_REORDER_SHORTCUTS = {
   sendToBack: 'cmd+alt+[,ctrl+shift+[',
 }
 
+// Force a stable, shareable look for every export. tldraw's built-in export
+// actions pass `editor.toImage` only `format` and `name` and leave `darkMode`
+// + `background` to the editor's current state — which means a dark-mode user
+// gets a near-invisible PNG (dark-theme 'black' = #f2f2f2 light gray) and any
+// board whose snapshot saved `instance_state.exportBackground: false` gets a
+// transparent PNG that previews as white. Both cases produce washed-out,
+// unreadable exports. We override all four export actions and both copy-as
+// actions to force `background: true` (no transparent surprises) and
+// `darkMode: false` (light bg + dark text — Aurora swatches are theme-agnostic
+// so the shape colors look the same; only the canvas bg flips). Bypasses
+// `helpers.exportAs`/`helpers.copyAs` because those drop the opts.
+function exportTimestamp() {
+  const now = new Date()
+  const y = String(now.getFullYear()).slice(2)
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  const ss = String(now.getSeconds()).padStart(2, '0')
+  return `${y}-${m}-${d} ${hh}.${mm}.${ss}`
+}
+
+function exportName(editor, ids, format) {
+  if (ids.length === 1) {
+    const first = editor.getShape(ids[0])
+    if (first && editor.isShapeOfType(first, 'frame')) {
+      return `${first.props.name || 'frame'}.${format}`
+    }
+  }
+  return `shapes at ${exportTimestamp()}.${format}`
+}
+
+const STATION_EXPORT_OPTS = { background: true, darkMode: false }
+
+async function downloadExport(editor, ids, format) {
+  if (ids.length === 0) return
+  const { blob } = await editor.toImage(ids, { format, ...STATION_EXPORT_OPTS })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = exportName(editor, ids, format)
+  link.click()
+  URL.revokeObjectURL(link.href)
+}
+
+async function copyExport(editor, ids, format) {
+  if (ids.length === 0) return
+  const { blob } = await editor.toImage(ids, { format, ...STATION_EXPORT_OPTS })
+  if (format === 'svg') {
+    await navigator.clipboard.writeText(await blob.text())
+  } else {
+    // Safari needs the ClipboardItem constructed synchronously with a Promise
+    // value; we already have the blob so wrapping it is fine.
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
+  }
+}
+
 const TLDRAW_UI_OVERRIDES = {
-  actions(_editor, actions) {
+  actions(editor, actions) {
+    const selectedOrAll = () => {
+      const sel = editor.getSelectedShapeIds()
+      return sel.length > 0 ? sel : Array.from(editor.getCurrentPageShapeIds())
+    }
+    const allOnPage = () => Array.from(editor.getCurrentPageShapeIds())
     return {
       ...actions,
-      'bring-forward': {
-        ...actions['bring-forward'],
-        kbd: FIGMA_REORDER_SHORTCUTS.bringForward,
-      },
-      'bring-to-front': {
-        ...actions['bring-to-front'],
-        kbd: FIGMA_REORDER_SHORTCUTS.bringToFront,
-      },
-      'send-backward': {
-        ...actions['send-backward'],
-        kbd: FIGMA_REORDER_SHORTCUTS.sendBackward,
-      },
-      'send-to-back': {
-        ...actions['send-to-back'],
-        kbd: FIGMA_REORDER_SHORTCUTS.sendToBack,
-      },
+      'bring-forward': { ...actions['bring-forward'], kbd: FIGMA_REORDER_SHORTCUTS.bringForward },
+      'bring-to-front': { ...actions['bring-to-front'], kbd: FIGMA_REORDER_SHORTCUTS.bringToFront },
+      'send-backward': { ...actions['send-backward'], kbd: FIGMA_REORDER_SHORTCUTS.sendBackward },
+      'send-to-back': { ...actions['send-to-back'], kbd: FIGMA_REORDER_SHORTCUTS.sendToBack },
+      'export-as-svg': { ...actions['export-as-svg'], onSelect: () => downloadExport(editor, selectedOrAll(), 'svg') },
+      'export-as-png': { ...actions['export-as-png'], onSelect: () => downloadExport(editor, selectedOrAll(), 'png') },
+      'export-all-as-svg': { ...actions['export-all-as-svg'], onSelect: () => downloadExport(editor, allOnPage(), 'svg') },
+      'export-all-as-png': { ...actions['export-all-as-png'], onSelect: () => downloadExport(editor, allOnPage(), 'png') },
+      'copy-as-svg': { ...actions['copy-as-svg'], onSelect: () => copyExport(editor, selectedOrAll(), 'svg') },
+      'copy-as-png': { ...actions['copy-as-png'], onSelect: () => copyExport(editor, selectedOrAll(), 'png') },
     }
   },
 }
@@ -352,7 +407,12 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
         // silently resets isReadonly to whatever the snapshot was saved
         // with (usually false). Without this, visitors can select + delete
         // shapes locally even though saves are blocked.
-        editor.updateInstanceState({ isReadonly: ro })
+        // Same reason for exportBackground: a board saved with that flag
+        // false would otherwise produce a transparent PNG that previews as
+        // washed-out white-on-white. The action overrides also force this
+        // explicitly per export, but resetting here keeps any stray code
+        // path that calls editor.toImage directly safe too.
+        editor.updateInstanceState({ isReadonly: ro, exportBackground: true })
         if (ro) {
           editor.selectNone()
           editor.setHoveredShape(null)
