@@ -1,8 +1,10 @@
+import { createElement, Fragment } from 'react'
 import {
   NoteShapeUtil,
   FONT_FAMILIES,
   LABEL_FONT_SIZES,
   TEXT_PROPS,
+  RichTextSVG,
   isEqual,
   renderHtmlFromRichTextForMeasurement,
   renderPlaintextFromRichText,
@@ -41,6 +43,42 @@ export class StationNoteShapeUtil extends NoteShapeUtil {
       return undefined
     }
     return getStationNoteSizeAdjustments(this.editor, next)
+  }
+
+  // Magic / auto-color export. The on-canvas DOM honours mode-aware CSS
+  // in tldraw.css, but exports go through editor.toImage which renders
+  // shapes via toSvg using tldraw's static color theme — for props.color
+  // 'black' that's #FCE19C (yellow!) in light and #2c2c2c (dark grey) in
+  // dark, neither of which matches what the user sees on canvas. Replace
+  // with our flipped pair: black bg + white text in light, white bg +
+  // black text in dark. NOTE_SIZE is fixed (StationNoteShapeUtil clamps
+  // growY=0), so we don't need getBoundsForSVG.
+  toSvg(shape, ctx) {
+    if (!shape.meta?.autoColor) return super.toSvg(shape, ctx)
+    const noteFill = ctx.isDarkMode ? '#FFFFFF' : '#000000'
+    const labelColor = ctx.isDarkMode ? '#000000' : '#FFFFFF'
+    const bounds = { x: 0, y: 0, w: NOTE_SIZE, h: NOTE_SIZE }
+    return createElement(
+      Fragment,
+      null,
+      createElement('rect', {
+        rx: 1,
+        width: NOTE_SIZE,
+        height: NOTE_SIZE,
+        fill: noteFill,
+      }),
+      createElement(RichTextSVG, {
+        fontSize: shape.props.fontSizeAdjustment || LABEL_FONT_SIZES[shape.props.size],
+        font: shape.props.font,
+        align: shape.props.align,
+        verticalAlign: shape.props.verticalAlign,
+        richText: shape.props.richText,
+        labelColor,
+        bounds,
+        padding: LABEL_PADDING,
+        showTextOutline: false,
+      })
+    )
   }
 }
 
