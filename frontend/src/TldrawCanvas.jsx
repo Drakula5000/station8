@@ -99,17 +99,14 @@ const FIGMA_REORDER_SHORTCUTS = {
   sendToBack: 'cmd+alt+[,ctrl+shift+[',
 }
 
-// Force a stable, shareable look for every export. tldraw's built-in export
-// actions pass `editor.toImage` only `format` and `name` and leave `darkMode`
-// + `background` to the editor's current state — which means a dark-mode user
-// gets a near-invisible PNG (dark-theme 'black' = #f2f2f2 light gray) and any
-// board whose snapshot saved `instance_state.exportBackground: false` gets a
-// transparent PNG that previews as white. Both cases produce washed-out,
-// unreadable exports. We override all four export actions and both copy-as
-// actions to force `background: true` (no transparent surprises) and
-// `darkMode: false` (light bg + dark text — Aurora swatches are theme-agnostic
-// so the shape colors look the same; only the canvas bg flips). Bypasses
-// `helpers.exportAs`/`helpers.copyAs` because those drop the opts.
+// Override all export / copy-as actions so we can pass darkMode + background
+// opts that tldraw's built-in helpers drop. We read both values live from the
+// editor at export time: darkMode mirrors the current UI theme, and background
+// respects the toggle the user set in the export dialog. The only default we
+// force is exportBackground:true on board load (see handleMount) so stale
+// snapshots don't silently produce transparent PNGs — the user can still flip
+// it off in the UI and this code will honour that choice. Bypasses
+// `helpers.exportAs`/`helpers.copyAs` because those functions drop opts.
 function exportTimestamp() {
   const now = new Date()
   const y = String(now.getFullYear()).slice(2)
@@ -131,11 +128,16 @@ function exportName(editor, ids, format) {
   return `shapes at ${exportTimestamp()}.${format}`
 }
 
-const STATION_EXPORT_OPTS = { background: true, darkMode: false }
+function getExportOpts(editor) {
+  return {
+    background: editor.getInstanceState().exportBackground,
+    darkMode: editor.user.getIsDarkMode(),
+  }
+}
 
 async function downloadExport(editor, ids, format) {
   if (ids.length === 0) return
-  const { blob } = await editor.toImage(ids, { format, ...STATION_EXPORT_OPTS })
+  const { blob } = await editor.toImage(ids, { format, ...getExportOpts(editor) })
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
   link.download = exportName(editor, ids, format)
@@ -145,7 +147,7 @@ async function downloadExport(editor, ids, format) {
 
 async function copyExport(editor, ids, format) {
   if (ids.length === 0) return
-  const { blob } = await editor.toImage(ids, { format, ...STATION_EXPORT_OPTS })
+  const { blob } = await editor.toImage(ids, { format, ...getExportOpts(editor) })
   if (format === 'svg') {
     await navigator.clipboard.writeText(await blob.text())
   } else {
