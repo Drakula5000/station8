@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# Opt into Node 24 for all JS-based actions ahead of GitHub's June 2026
+# default switch (Node 20 deprecated). Removable once every action we use
+# ships a Node-24-native version.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   frontend:
     name: Frontend build + lint
