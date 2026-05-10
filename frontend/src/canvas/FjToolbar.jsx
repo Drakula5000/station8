@@ -260,7 +260,7 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
       shape: {
         afterCreate: (shape) => {
           if (!pendingAutoColorRef.current) return
-          if (shape.type !== 'draw' && shape.type !== 'highlight' && shape.type !== 'text') return
+          if (shape.type !== 'draw' && shape.type !== 'highlight' && shape.type !== 'text' && shape.type !== 'note') return
           editor.updateShape({
             id: shape.id,
             type: shape.type,
@@ -304,10 +304,26 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
   }
 
   const placeNote = (color) => {
+    // Picking an explicit color exits magic-sticky mode.
+    pendingAutoColorRef.current = false
     setLastStickyColor(color)
     if (toolInfoRef) toolInfoRef.current.stickyColor = color
     try { editor.setStyleForNextShapes(DefaultColorStyle, STICKY_SWATCHES[color]?.tl || 'yellow') } catch { /* no-op */ }
     editor.setCurrentTool('note')
+    closeAll()
+  }
+
+  // "Magic" sticky — same pattern as the magic pen. Stores tldraw color
+  // 'black' as the carrier and arms pendingAutoColorRef so the sideEffects
+  // handler stamps meta.autoColor=true on the next note created. Our CSS
+  // in tldraw.css then renders auto-color notes as black-in-light /
+  // white-in-dark, matching the magic pen's mode-aware behaviour.
+  const placeNoteAuto = () => {
+    setLastStickyColor('auto')
+    if (toolInfoRef) toolInfoRef.current.stickyColor = 'auto'
+    try { editor.setStyleForNextShapes(DefaultColorStyle, 'black') } catch { /* no-op */ }
+    editor.setCurrentTool('note')
+    pendingAutoColorRef.current = true
     closeAll()
   }
 
@@ -381,6 +397,13 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
           <div className="section-picker" onClick={e => e.stopPropagation()}>
             <div className="section-picker-title">Sticky color</div>
             <div className="section-picker-grid">
+              <button
+                className="section-swatch"
+                onClick={placeNoteAuto}
+                title="Auto (black on light canvas, white on dark)"
+                type="button"
+                data-swatch-id="auto"
+              />
               {Object.entries(STICKY_SWATCHES).map(([key, c]) => (
                 <button
                   key={key}
