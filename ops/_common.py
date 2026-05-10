@@ -30,8 +30,13 @@ def supabase_client():
     key = os.getenv("SUPABASE_KEY")
     if not url or not key:
         sys.exit(f"Missing SUPABASE_URL / SUPABASE_KEY. Fill {ENV_FILE} or export them in the shell.")
-    from supabase import create_client
-    return create_client(url, key)
+    import httpx
+    from supabase import create_client, ClientOptions
+    # 30-second timeout: Supabase normally replies in under 2s.
+    # Without this the script hangs indefinitely on a slow/dropped connection.
+    timeout = httpx.Timeout(30.0)
+    options = ClientOptions(postgrest_client_timeout=timeout, storage_client_timeout=timeout)
+    return create_client(url, key, options=options)
 
 
 def list_all_json_rows(client, columns="id, data"):
@@ -44,7 +49,9 @@ def list_all_json_rows(client, columns="id, data"):
         if not batch.data:
             break
         rows.extend(batch.data)
+        print(f"  fetched {len(rows)} rows...", end="\r", flush=True)
         if len(batch.data) < page_size:
             break
         offset += page_size
+    print()
     return rows
