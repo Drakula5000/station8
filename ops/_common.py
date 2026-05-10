@@ -30,13 +30,21 @@ def supabase_client():
     key = os.getenv("SUPABASE_KEY")
     if not url or not key:
         sys.exit(f"Missing SUPABASE_URL / SUPABASE_KEY. Fill {ENV_FILE} or export them in the shell.")
-    import httpx
-    from supabase import create_client, ClientOptions
+    from supabase import create_client
     # 30-second timeout: Supabase normally replies in under 2s.
     # Without this the script hangs indefinitely on a slow/dropped connection.
-    timeout = httpx.Timeout(30.0)
-    options = ClientOptions(postgrest_client_timeout=timeout, storage_client_timeout=timeout)
-    return create_client(url, key, options=options)
+    # ClientOptions only exists in supabase>=2.4. The GitHub Actions cron pins
+    # supabase==2.3.0 (tied to httpx==0.24.1 — see backup.yml comment), so
+    # gracefully fall back to the un-timed client there. Local dev has a
+    # newer supabase and gets the timeout.
+    try:
+        import httpx
+        from supabase import ClientOptions
+        timeout = httpx.Timeout(30.0)
+        options = ClientOptions(postgrest_client_timeout=timeout, storage_client_timeout=timeout)
+        return create_client(url, key, options=options)
+    except ImportError:
+        return create_client(url, key)
 
 
 def list_all_json_rows(client, columns="id, data"):
