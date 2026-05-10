@@ -124,12 +124,13 @@ const SHAPES_WITH_STROKE_TOGGLE = new Set(['geo'])
 // through the strict 'stroke' context where black-in-dark / white-in-light
 // are dimmed + struck through (see canvas.css).
 const SHAPES_WITH_PERMISSIVE_COLOR = new Set(['text', 'draw', 'highlight'])
-// Auto / Magic swatch is only meaningful for shapes whose color renders
-// via tldraw's `solid` palette (which natively auto-inverts black across
-// modes). Highlights use `highlightSrgb` instead and would render any
-// color name as a fluorescent variant — black-highlight = yellow, so
-// "auto" can't actually flip with mode. Restrict the swatch to text/draw.
-const SHAPES_WITH_AUTO_COLOR = new Set(['text', 'draw'])
+// Auto / Magic swatch — text/draw use tldraw's native solid-palette
+// auto-invert (black flips to white in dark mode). Notes use a custom
+// CSS rule in tldraw.css that flips the note bg + text per data-mode.
+// Highlights use `highlightSrgb` instead and would render any color name
+// as a fluorescent variant (black-highlight = yellow), so "auto" can't
+// actually flip with mode there.
+const SHAPES_WITH_AUTO_COLOR = new Set(['text', 'draw', 'note'])
 
 function allShapesMatch(shapes, set) {
   return shapes.length > 0 && shapes.every((s) => set.has(s.type))
