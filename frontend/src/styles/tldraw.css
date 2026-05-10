@@ -74,11 +74,31 @@
 .tldraw-wrap [data-tl-color='grey'] .tl-note__container {
   background-color: var(--s8-tl-grey) !important;
 }
-.tldraw-wrap [data-tl-color='black'] .tl-note__container {
+.tldraw-wrap [data-tl-color='black']:not([data-auto-color='true']) .tl-note__container {
   background-color: var(--s8-tl-black) !important;
 }
-.tldraw-wrap [data-tl-color='white'] .tl-note__container {
+.tldraw-wrap [data-tl-color='white']:not([data-auto-color='true']) .tl-note__container {
   background-color: var(--s8-tl-white) !important;
+}
+
+/* "Magic" sticky note — same auto-color flag as the magic pen, but for
+   notes we render our own mode-aware flip instead of falling through to
+   tldraw's native noteFill (which is yellow #FCE19C in light and dark
+   gray #2c2c2c in dark — not the inversion the user wants). The shape
+   stores props.color='black'; ShapeColorSync stamps data-auto-color='true'
+   from meta.autoColor=true. Result: black note + white text in light
+   mode, white note + black text in dark mode. */
+.tldraw-wrap [data-tl-color='black'][data-auto-color='true'] .tl-note__container {
+  background-color: var(--s8-tl-black) !important;
+}
+.tldraw-wrap [data-tl-color='black'][data-auto-color='true'] .tl-note__container .tl-text-content__wrapper {
+  color: var(--s8-tl-white) !important;
+}
+html[data-mode="dark"] .tldraw-wrap [data-tl-color='black'][data-auto-color='true'] .tl-note__container {
+  background-color: var(--s8-tl-white) !important;
+}
+html[data-mode="dark"] .tldraw-wrap [data-tl-color='black'][data-auto-color='true'] .tl-note__container .tl-text-content__wrapper {
+  color: var(--s8-tl-text-on-light) !important;
 }
 
 /* Note text — Aurora notes contrast against the swatch bg, not the
