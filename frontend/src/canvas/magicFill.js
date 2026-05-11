@@ -8,9 +8,22 @@
 
 export const MAGIC_FILL = '__auto__'
 
+// The Fill row stores swatch values as CSS `var(--s8-tl-*)` references so the
+// on-canvas <style> cascade can swap them per mode. SVG `fill` attributes
+// don't resolve var() — the literal string is treated as invalid colour and
+// the path falls back to black. Resolve to the live computed value before
+// stamping into the exported SVG.
+function resolveCssVar(value) {
+  if (typeof value !== 'string' || !value.startsWith('var(')) return value
+  const m = value.match(/var\(\s*(--[^,)\s]+)/)
+  if (!m) return value
+  const resolved = getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim()
+  return resolved || value
+}
+
 export function resolveFillColor(fillColor, isDark) {
   if (fillColor === MAGIC_FILL) return isDark ? '#FFFFFF' : '#000000'
-  return fillColor
+  return resolveCssVar(fillColor)
 }
 
 // True when a shape carries a custom fill we own (the on-canvas CSS or the
