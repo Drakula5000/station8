@@ -162,7 +162,7 @@ export function patchSvgExports(svgString, editor, ids, isDark) {
     if (!shape) continue
 
     if (shape.type === 'note') {
-      patchNote(g, shape, isDark)
+      patchNote(g, shape)
     } else if (shape.type === 'geo') {
       patchGeo(g, shape, isDark)
     }
@@ -170,7 +170,7 @@ export function patchSvgExports(svgString, editor, ids, isDark) {
   return new XMLSerializer().serializeToString(doc)
 }
 
-function patchNote(g, shape, isDark) {
+function patchNote(g, shape) {
   // Magic notes (meta.autoColor) are already handled by StationNoteShapeUtil.toSvg —
   // it renders pure black/white directly via the toSvg override. Skip here.
   if (shape.meta?.autoColor) return
