@@ -1790,6 +1790,17 @@ def google_oauth_callback():
     if not access_token:
         return redirect(f'{_frontend_origin()}/?google=error&reason=no_access_token')
 
+    # Granular consent: even when the auth URL asks for the full `auth/drive`
+    # scope, Google's consent UI lets the user uncheck the "create/edit/delete
+    # files" checkbox and still hit Allow. The resulting token can list and
+    # read but POST /drive/v3/files returns 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT,
+    # which surfaces in the UI as a silent empty-state on every new doc/sheet.
+    # Reject here so the user sees an actionable error instead of a partial
+    # success that breaks on the next create.
+    granted = set((token_payload.get('scope') or '').split())
+    if 'https://www.googleapis.com/auth/drive' not in granted:
+        return redirect(f'{_frontend_origin()}/?google=error&reason=insufficient_scope')
+
     email = None
     try:
         req = _urllib_request.Request(
