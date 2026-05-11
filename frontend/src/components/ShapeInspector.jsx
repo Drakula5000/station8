@@ -19,6 +19,7 @@ import {
   STROKE_STYLE_OPTIONS,
   RECT_CLASS_GEOS,
 } from '../canvas/styleOptions'
+import { MAGIC_FILL } from '../canvas/magicFill'
 
 const DEFAULT_FILL_OPACITY = 0.4
 
@@ -489,6 +490,24 @@ export const ShapeInspector = track(function ShapeInspector() {
       }))
     )
   })
+  // Magic / Auto fill: stores the MAGIC_FILL sentinel in meta.fillColor.
+  // ShapeColorSync resolves the sentinel to black/white per canvas mode
+  // for on-canvas rendering, and StationGeoShapeUtil.toSvg resolves it
+  // (via the same helper) at export time.
+  const applyFillColorAuto = () => editor.run(() => {
+    editor.setStyleForSelectedShapes(DefaultFillStyle, 'solid')
+    editor.updateShapes(
+      shapes.map((s) => ({
+        id: s.id,
+        type: s.type,
+        meta: {
+          ...s.meta,
+          fillColor: MAGIC_FILL,
+          fillOpacity: Number(s.meta?.fillOpacity ?? DEFAULT_FILL_OPACITY),
+        },
+      }))
+    )
+  })
   const applyFillOpacity = (opacity) => editor.run(() => {
     if (opacity > 0) {
       editor.setStyleForSelectedShapes(DefaultFillStyle, 'solid')
@@ -680,6 +699,14 @@ export const ShapeInspector = track(function ShapeInspector() {
         <div className="insp-row">
           <div className="insp-label">Fill</div>
           <div className="insp-body insp-body-swatches" data-color-context="fill">
+            <button
+              key="auto"
+              className={`insp-swatch ${activeFillColor === MAGIC_FILL ? 'active' : ''}`}
+              onClick={applyFillColorAuto}
+              title="Auto (black on light canvas, white on dark)"
+              type="button"
+              data-swatch-id="auto"
+            />
             {COLOR_SWATCHES.map((c) => (
               <button
                 key={c.id}
