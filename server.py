@@ -2289,6 +2289,103 @@ def _create_drive_file(kind, name, parent_id=None, timeout=15):
     return file_id, _DRIVE_EDIT_URL[kind].format(id=file_id)
 
 
+def _create_drive_file_verbose(kind, name, parent_id=None, timeout=15):
+    """Same wire call as `_create_drive_file` but returns the full failure
+    detail (HTTP status + Google error body) instead of swallowing it. Used
+    by `/api/google/diagnostics` so the actual reason a create is failing
+    surfaces to the owner."""
+    out = {
+        'ok': False, 'file_id': None, 'embed_url': None,
+        'status': None, 'error_body': None, 'exception': None,
+        'parent_id': parent_id, 'kind': kind, 'name': name,
+    }
+    access_token = _get_google_access_token()
+    if not access_token:
+        out['exception'] = 'no_access_token'
+        return out
+    if kind not in _DRIVE_MIME:
+        out['exception'] = f'bad_kind: {kind}'
+        return out
+    body_dict = {'name': name, 'mimeType': _DRIVE_MIME[kind]}
+    if parent_id:
+        body_dict['parents'] = [parent_id]
+    body = json.dumps(body_dict).encode('utf-8')
+    try:
+        req = _urllib_request.Request(
+            'https://www.googleapis.com/drive/v3/files',
+            data=body, method='POST',
+            headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'},
+        )
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            out['status'] = resp.status
+            payload = json.loads(resp.read().decode('utf-8'))
+        file_id = payload.get('id')
+        if file_id:
+            out['ok'] = True
+            out['file_id'] = file_id
+            out['embed_url'] = _DRIVE_EDIT_URL[kind].format(id=file_id)
+    except _urllib_error.HTTPError as exc:
+        out['status'] = exc.code
+        try:
+            out['error_body'] = exc.read().decode('utf-8', errors='replace')[:2000]
+        except Exception:
+            out['error_body'] = '<unreadable>'
+        out['exception'] = f'HTTPError: {exc}'
+    except (_urllib_error.URLError, OSError, ValueError) as exc:
+        out['exception'] = f'{type(exc).__name__}: {exc}'
+    return out
+
+
+@app.route('/api/google/diagnostics', methods=['GET'])
+@_studio_auth_required
+def google_diagnostics():
+    """Owner-only deep probe of the Google integration. Captures the saved
+    token-record shape (keys only, no secrets), confirms a fresh access
+    token is obtainable, then attempts a real Drive file create against the
+    saved `drive_config.root_folder_id` and trashes the probe file on success.
+    Exists because `_create_drive_file` swallows HTTPError silently — without
+    this endpoint, a broken `/api/gsheets` create is indistinguishable from
+    a working one that just returned `embed_url: null`."""
+    record = _load_google_token_record()
+    drive_config = record.get('drive_config') or {}
+    out = {
+        'connected_flag': bool(record.get('connected')),
+        'has_access_token': bool(record.get('access_token')),
+        'has_refresh_token': bool(record.get('refresh_token')),
+        'token_expires_at': record.get('token_expires_at'),
+        'connected_at': record.get('connected_at'),
+        'email': record.get('email'),
+        'drive_config': {
+            'root_folder_id': drive_config.get('root_folder_id'),
+            'root_folder_name': drive_config.get('root_folder_name'),
+            'mirror_folders': bool(drive_config.get('mirror_folders')),
+            'folder_map_size': len(drive_config.get('folder_map') or {}),
+        },
+    }
+    access_token = _get_google_access_token()
+    out['access_token_obtainable'] = bool(access_token)
+    if not access_token:
+        out['verdict'] = 'no access token — saved refresh token is missing or rejected. Disconnect and re-link.'
+        return jsonify(out)
+
+    parent_id = drive_config.get('root_folder_id')
+    probe = _create_drive_file_verbose('gsheet', '_station8_diagnostics_probe', parent_id=parent_id)
+    out['probe'] = probe
+
+    if probe.get('file_id'):
+        out['probe_cleaned_up'] = _delete_drive_file(probe['file_id'])
+
+    if probe.get('ok'):
+        out['verdict'] = 'create succeeded — the create path works. If real /api/gsheets is still empty, the bug is in the call site (folder mirroring, share-public, or the save_fn).'
+    else:
+        out['verdict'] = (
+            f"create failed (status={probe.get('status')}, "
+            f"exception={probe.get('exception')}). "
+            f"Google said: {probe.get('error_body')}"
+        )
+    return jsonify(out)
+
+
 def _create_gdrive_doc(load_fn, save_fn, request_data, kind):
     name = (request_data.get('name') or 'Untitled').strip() or 'Untitled'
     folders = _get_workspace().get('folders', [])
