@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { track, useEditor } from 'tldraw'
+import { resolveFillColor } from './magicFill'
 
 // Mirrors tldraw's reactive shape color/size onto data-attributes on the
 // rendered shape DOM, so CSS in tldraw.css can theme shapes via Aurora tokens
@@ -8,6 +9,18 @@ import { track, useEditor } from 'tldraw'
 export const ShapeColorSync = track(function ShapeColorSync() {
   const editor = useEditor()
   const shapes = editor.getCurrentPageShapes()
+
+  // Force a re-run when the canvas mode flips so magic fills resolve to the
+  // right hex (black on light, white on dark). tldraw's `track` only reacts
+  // to editor state, not the data-mode attribute on <html>.
+  const [, setModeTick] = useState(0)
+  useEffect(() => {
+    const obs = new MutationObserver(() => setModeTick(t => t + 1))
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-mode'] })
+    return () => obs.disconnect()
+  }, [])
+  const isDark = document.documentElement.getAttribute('data-mode') === 'dark'
+
   useEffect(() => {
     shapes.forEach(shape => {
       const el = document.querySelector(`[data-shape-id="${shape.id}"]`)
@@ -27,8 +40,9 @@ export const ShapeColorSync = track(function ShapeColorSync() {
         el.removeAttribute('data-s8-size')
       }
 
-      const fillColor = shape.type === 'geo' && typeof shape.meta?.fillColor === 'string' ? shape.meta.fillColor : null
+      const rawFillColor = shape.type === 'geo' && typeof shape.meta?.fillColor === 'string' ? shape.meta.fillColor : null
       const fillOpacity = shape.type === 'geo' && typeof shape.meta?.fillOpacity === 'number' ? shape.meta.fillOpacity : 0
+      const fillColor = rawFillColor ? resolveFillColor(rawFillColor, isDark) : null
 
       if (fillColor && fillOpacity > 0) {
         el.setAttribute('data-geo-fill-custom', 'true')
