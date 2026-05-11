@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Tldraw, FrameShapeUtil } from 'tldraw'
+import { Tldraw, FrameShapeUtil, getSvgAsImage } from 'tldraw'
+import { patchSvgFills, hasCustomFill } from './canvas/magicFill'
 import 'tldraw/tldraw.css'
 import { ShapeInspector } from './components/ShapeInspector'
 import { ImageLightbox } from './components/ImageLightbox'
@@ -7,7 +8,6 @@ import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
 import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'
 import { StationTextShapeUtil } from './canvas/StationTextShapeUtil'
-import { StationGeoShapeUtil } from './canvas/StationGeoShapeUtil'
 import { FrameCornerStyles, GeoCornerStyles, ImageShapeStyles, ListStyles } from './canvas/ShapeStyles'
 import { BrokenImageRetry } from './canvas/BrokenImageRetry'
 import { FindBar } from './canvas/FindBar'
@@ -92,7 +92,6 @@ const STATION_SHAPE_UTILS = [
   FrameShapeUtil.configure({ showColors: true }),
   StationNoteShapeUtil,
   StationTextShapeUtil,
-  StationGeoShapeUtil,
 ]
 const FIGMA_REORDER_SHORTCUTS = {
   bringForward: 'cmd+],ctrl+]',
@@ -137,9 +136,30 @@ function getExportOpts(editor) {
   }
 }
 
+// Fast path: no shape in the export carries a custom fill, so tldraw's
+// native toImage gives the right result. Slow path: at least one shape has
+// meta.fillColor (magic or explicit) — get the SVG string, patch the fill
+// + text colours, then run it through tldraw's own SVG-to-PNG converter
+// (getSvgAsImage) so we don't reinvent foreignObject font handling.
+async function getExportBlob(editor, ids, format) {
+  const opts = { format, ...getExportOpts(editor) }
+  const needsPatch = ids.some(id => hasCustomFill(editor.getShape(id)))
+  if (!needsPatch) {
+    const { blob } = await editor.toImage(ids, opts)
+    return blob
+  }
+  const { svg, width, height } = await editor.getSvgString(ids, opts)
+  const patched = patchSvgFills(svg, editor, ids, opts.darkMode)
+  if (format === 'svg') {
+    return new Blob([patched], { type: 'image/svg+xml' })
+  }
+  return await getSvgAsImage(patched, { type: format, width, height, pixelRatio: 2 })
+}
+
 async function downloadExport(editor, ids, format) {
   if (ids.length === 0) return
-  const { blob } = await editor.toImage(ids, { format, ...getExportOpts(editor) })
+  const blob = await getExportBlob(editor, ids, format)
+  if (!blob) return
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
   link.download = exportName(editor, ids, format)
@@ -149,7 +169,8 @@ async function downloadExport(editor, ids, format) {
 
 async function copyExport(editor, ids, format) {
   if (ids.length === 0) return
-  const { blob } = await editor.toImage(ids, { format, ...getExportOpts(editor) })
+  const blob = await getExportBlob(editor, ids, format)
+  if (!blob) return
   if (format === 'svg') {
     await navigator.clipboard.writeText(await blob.text())
   } else {
