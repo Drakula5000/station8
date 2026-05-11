@@ -593,3 +593,25 @@
   padding: 0.0625rem 0.3125rem; border-radius: 0.25rem; margin-left: auto;
 }
 
+
+/* OAuth-error banner: top-of-app strip when the Google OAuth callback
+   redirects back with ?google=error&reason=... — without it, OAuth failures
+   were console-only and the user just saw silent empty-state cards. */
+.oauth-error-banner {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 9999;
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.625rem 1rem;
+  background: var(--s8-danger);
+  color: #fff;
+  font-size: 0.8125rem; line-height: 1.4;
+  box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.25);
+}
+.oauth-error-banner__text { flex: 1; }
+.oauth-error-banner__close {
+  background: transparent; border: 0; color: #fff;
+  font-size: 1.25rem; line-height: 1; cursor: pointer;
+  padding: 0 0.25rem;
+}
+.oauth-error-banner__close:hover { opacity: 0.75; }

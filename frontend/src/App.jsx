@@ -315,6 +315,7 @@ export default function App() {
   const [newFolderName, setNewFolderName] = useState('')
   const [newFolderParentId, setNewFolderParentId] = useState(ROOT_FOLDER)
   const [googleAuth, setGoogleAuth] = useState({ loading: true, connected: false, email: null })
+  const [googleOauthError, setGoogleOauthError] = useState(null)
   const [driveShareState, setDriveShareState] = useState({ busy: false, message: null })
   const driveShareMessageTimer = useRef(null)
   const [driveConfig, setDriveConfig] = useState({ root_folder_id: null, root_folder_name: 'My Drive', mirror_folders: false })
@@ -731,6 +732,7 @@ export default function App() {
     } else if (flag === 'error') {
       const reason = params.get('reason') || 'unknown'
       console.warn('Google OAuth failed:', reason)
+      setGoogleOauthError(reason)
     }
     params.delete('google')
     params.delete('reason')
@@ -1652,6 +1654,21 @@ export default function App() {
 
   return (
     <div className={`app${sidebarCollapsed ? ' sidebar-collapsed' : ''}${readOnly ? ' app-viewer' : ''}`}>
+      {googleOauthError && (
+        <div className="oauth-error-banner" role="alert">
+          <span className="oauth-error-banner__text">
+            {googleOauthError === 'insufficient_scope'
+              ? "Google didn't grant full Drive access. Re-link Google and make sure the 'See, edit, create, and delete all of your Google Drive files' checkbox stays ticked on the consent screen."
+              : `Google OAuth failed (${googleOauthError}). Try linking again.`}
+          </span>
+          <button
+            className="oauth-error-banner__close"
+            onClick={() => setGoogleOauthError(null)}
+            type="button"
+            aria-label="Dismiss"
+          >×</button>
+        </div>
+      )}
       {/* Shared SVG <defs> for theme paint-servers — one copy, referenced by
           CSS `stroke: url(#…)` overrides per theme. Kept off-screen. */}
       <svg
