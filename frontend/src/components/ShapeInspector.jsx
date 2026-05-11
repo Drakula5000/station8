@@ -492,8 +492,8 @@ export const ShapeInspector = track(function ShapeInspector() {
   })
   // Magic / Auto fill: stores the MAGIC_FILL sentinel in meta.fillColor.
   // ShapeColorSync resolves the sentinel to black/white per canvas mode
-  // for on-canvas rendering, and StationGeoShapeUtil.toSvg resolves it
-  // (via the same helper) at export time.
+  // for on-canvas rendering, and patchSvgExports in magicFill.js applies
+  // the same flip (plus contrast text colour) at export time.
   const applyFillColorAuto = () => editor.run(() => {
     editor.setStyleForSelectedShapes(DefaultFillStyle, 'solid')
     editor.updateShapes(

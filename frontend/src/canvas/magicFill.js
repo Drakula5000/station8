@@ -203,5 +203,3 @@ function patchGeo(g, shape, isDark) {
   // here; if it becomes a problem we'd extend with per-colour text mapping.
 }
 
-// Back-compat: keep the old export name pointing at the comprehensive impl.
-export const patchSvgFills = patchSvgExports
