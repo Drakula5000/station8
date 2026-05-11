@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Tldraw, FrameShapeUtil, getSvgAsImage } from 'tldraw'
-import { patchSvgFills, hasCustomFill } from './canvas/magicFill'
+import { patchSvgExports, hasCustomFill } from './canvas/magicFill'
 import 'tldraw/tldraw.css'
 import { ShapeInspector } from './components/ShapeInspector'
 import { ImageLightbox } from './components/ImageLightbox'
@@ -149,7 +149,7 @@ async function getExportBlob(editor, ids, format) {
     return blob
   }
   const { svg, width, height } = await editor.getSvgString(ids, opts)
-  const patched = patchSvgFills(svg, editor, ids, opts.darkMode)
+  const patched = patchSvgExports(svg, editor, ids, opts.darkMode)
   if (format === 'svg') {
     return new Blob([patched], { type: 'image/svg+xml' })
   }
