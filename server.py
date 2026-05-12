@@ -486,6 +486,69 @@ def _extract_drive_file_id(url, kind):
     return match.group(1) if match else None
 
 
+def _fetch_gsheet_text_all_tabs(file_id, access_token, timeout=25):
+    """Fetch every tab of a Google Sheet via the Sheets API and concatenate
+    into one CSV blob. Returns text on success, None on failure.
+
+    Why this exists: Drive's `export?mimeType=text/csv` only returns the FIRST
+    tab. Multi-tab sheets — which are common (raw-data + cleaned-data + summary
+    layouts) — would silently lose tabs 2..N from the search index. The Sheets
+    API exposes per-tab values, so we iterate them all."""
+    import csv as _csv
+    import io as _io
+    meta_url = (
+        f'https://sheets.googleapis.com/v4/spreadsheets/{file_id}'
+        f'?fields=sheets.properties.title'
+    )
+    try:
+        req = _urllib_request.Request(meta_url, headers={
+            'Authorization': f'Bearer {access_token}',
+        })
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            meta = json.loads(resp.read().decode('utf-8'))
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError):
+        return None
+
+    titles = [
+        (s.get('properties') or {}).get('title')
+        for s in (meta.get('sheets') or [])
+    ]
+    titles = [t for t in titles if t]
+    if not titles:
+        return None
+
+    out_io = _io.StringIO()
+    writer = _csv.writer(out_io)
+    fetched_any = False
+    for title in titles:
+        range_q = _urllib_parse.quote(title, safe='')
+        values_url = (
+            f'https://sheets.googleapis.com/v4/spreadsheets/{file_id}'
+            f'/values/{range_q}'
+        )
+        try:
+            req = _urllib_request.Request(values_url, headers={
+                'Authorization': f'Bearer {access_token}',
+            })
+            with _urllib_request.urlopen(req, timeout=timeout) as resp:
+                payload = json.loads(resp.read().decode('utf-8'))
+        except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError):
+            continue
+        rows = payload.get('values') or []
+        if not rows:
+            continue
+        fetched_any = True
+        # Tab title as its own row so the name lands in the search index too.
+        writer.writerow([title])
+        for row in rows:
+            writer.writerow([str(c) for c in row])
+
+    if not fetched_any:
+        return None
+    text = out_io.getvalue().strip()
+    return text or None
+
+
 def _fetch_gdrive_text(file_id, kind, timeout=15):
     """Fetch plaintext content of a Drive file. If the owner has connected
     their Google account, uses the Drive API with their access token (works
@@ -497,6 +560,15 @@ def _fetch_gdrive_text(file_id, kind, timeout=15):
 
     access_token = _get_google_access_token()
     if access_token:
+        # Sheets: prefer the Sheets API so every tab is indexed. Drive's
+        # CSV export silently returns only tab 1.
+        if kind == 'gsheet':
+            text = _fetch_gsheet_text_all_tabs(
+                file_id, access_token, timeout=max(timeout, 25),
+            )
+            if text:
+                return text
+            # Fall through to the Drive CSV export below as a tab-1 snapshot.
         mime = 'text/plain' if kind == 'gdoc' else 'text/csv' if kind == 'gsheet' else None
         if not mime:
             return None
