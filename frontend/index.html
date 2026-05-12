@@ -28,6 +28,14 @@
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Canvas font slots (tldraw_draw/sans/serif/mono in canvas.css). Preloaded so
+         they're in flight at HTML-parse time — without this, tldraw measures shape
+         text with fallback metrics on mount and the box ends up the wrong size when
+         the real font swaps in. URLs must match canvas.css @font-face src exactly. -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="https://fonts.gstatic.com/s/gaegu/v23/TuGfUVB6Up9NU5ZMq9kRystl.woff2">
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7W0Q5nw.woff2">
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="https://fonts.gstatic.com/s/crimsonpro/v28/q5uUsoa5M_tv7IihmnkabC5XiXCAlXGks1WZzm1MP5s-dtC4yJtE.woff2">
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="https://fonts.gstatic.com/s/spacemono/v17/i7dPIFZifjKcF5UAWdDRYEF8RXi4EwQ.woff2">
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&family=Space+Mono:wght@400;700&family=Gaegu:wght@400;700&display=swap" rel="stylesheet">
     <title>Station 8</title>
   </head>
