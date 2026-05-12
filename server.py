@@ -1286,7 +1286,7 @@ def patch_report(report_id):
         blob['name'] = body['name']
         blob['updated_at'] = record['updated_at']
         _save_report(report_id, blob)
-    return jsonify({'ok': True, 'report': record})
+    return jsonify(record)
 
 
 @app.route('/api/folders', methods=['POST'])
