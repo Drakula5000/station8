@@ -257,6 +257,20 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
   const editorRef = useRef(null)
   const openLightboxRef = useRef(null)
 
+  // Wait for the four tldraw_* font slots (declared in canvas.css) to load
+  // before mounting <Tldraw>. tldraw measures shape text on mount; if fonts
+  // swap in afterward the glyphs widen/narrow and boxes end up the wrong size.
+  const [fontsReady, setFontsReady] = useState(false)
+  useEffect(() => {
+    if (!document.fonts?.load) { setFontsReady(true); return }
+    let cancelled = false
+    const families = ['tldraw_draw', 'tldraw_sans', 'tldraw_serif', 'tldraw_mono']
+    Promise.all(families.map(f => document.fonts.load(`16px "${f}"`)))
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setFontsReady(true) })
+    return () => { cancelled = true }
+  }, [])
+
   // Owns the "always re-measure before zoom" rule. `camera.isFitting` gates
   // the wrapper opacity so the snapshot's saved-zoom flash is hidden until
   // the fit lands. Hook resolves the editor lazily — handleMount will set
@@ -675,24 +689,26 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
       onPointerDownCapture={handlePointerDownCapture}
       onWheelCapture={handleWheelCapture}
     >
-      <Tldraw
-        components={readOnly ? READONLY_TLDRAW_COMPONENTS : TLDRAW_COMPONENTS}
-        onMount={handleMount}
-        assets={assetStore}
-        options={tldrawOptions}
-        overrides={TLDRAW_UI_OVERRIDES}
-        shapeUtils={STATION_SHAPE_UTILS}
-      >
-        {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} onOpenLightbox={openLightbox} onToolChange={setActiveTool} />}
-        {!readOnly && <ShapeInspector />}
-        <FrameCornerStyles />
-        <GeoCornerStyles />
-        <ImageShapeStyles />
-        <BrokenImageRetry />
-        <ListStyles />
-        <ShapeColorSync />
-        {findQuery && <FindBar query={findQuery} onDismiss={onFindDismiss} boardId={boardId} findBoards={findBoards} onNavigateBoard={onNavigateBoard} findShapeIds={findShapeIds} />}
-      </Tldraw>
+      {fontsReady && (
+        <Tldraw
+          components={readOnly ? READONLY_TLDRAW_COMPONENTS : TLDRAW_COMPONENTS}
+          onMount={handleMount}
+          assets={assetStore}
+          options={tldrawOptions}
+          overrides={TLDRAW_UI_OVERRIDES}
+          shapeUtils={STATION_SHAPE_UTILS}
+        >
+          {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} onOpenLightbox={openLightbox} onToolChange={setActiveTool} />}
+          {!readOnly && <ShapeInspector />}
+          <FrameCornerStyles />
+          <GeoCornerStyles />
+          <ImageShapeStyles />
+          <BrokenImageRetry />
+          <ListStyles />
+          <ShapeColorSync />
+          {findQuery && <FindBar query={findQuery} onDismiss={onFindDismiss} boardId={boardId} findBoards={findBoards} onNavigateBoard={onNavigateBoard} findShapeIds={findShapeIds} />}
+        </Tldraw>
+      )}
       {ghost && (
         <div
           className="sticky-ghost"
