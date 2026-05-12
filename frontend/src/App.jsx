@@ -601,6 +601,26 @@ export default function App() {
     refresh()
   }, [refresh])
 
+  // Refetch sidebar data when the user returns to this tab — covers external
+  // mutations the frontend can't observe (R knit pushes, edits made in another
+  // tab/window, etc). Visibilitychange fires for tab switches; focus fires when
+  // returning from another app. A ref guards against overlapping refetches.
+  const refreshInFlight = useRef(false)
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      if (refreshInFlight.current) return
+      refreshInFlight.current = true
+      Promise.resolve(refresh()).finally(() => { refreshInFlight.current = false })
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
+  }, [refresh])
+
   const refreshGoogleAuth = useCallback(async () => {
     const data = await fetchJson(`${API}/api/google/status`, {}, null)
     setGoogleAuth({
