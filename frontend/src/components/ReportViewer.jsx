@@ -41,7 +41,9 @@ export default function ReportViewer({ reportId, viewerMode = 'owner' }) {
       <iframe
         ref={iframeRef}
         className="report-embed-frame"
-        sandbox="allow-same-origin"
+        // Reports may contain htmlwidgets (e.g. ggiraph) that require JS, but
+        // they do not need same-origin access to the parent app.
+        sandbox="allow-scripts"
         srcDoc={html}
         title="Report"
       />
