@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const API = import.meta.env.VITE_API_URL || ''
 
 export default function ReportViewer({ reportId, viewerMode = 'owner' }) {
   const [html, setHtml] = useState(null)
   const [error, setError] = useState(null)
-  const iframeRef = useRef(null)
 
   useEffect(() => {
     let cancelled = false
@@ -39,7 +38,6 @@ export default function ReportViewer({ reportId, viewerMode = 'owner' }) {
   return (
     <div className="report-embed-wrap">
       <iframe
-        ref={iframeRef}
         className="report-embed-frame"
         // Reports may contain htmlwidgets (e.g. ggiraph) that require JS, but
         // they do not need same-origin access to the parent app.
