@@ -22,6 +22,7 @@ yarn-error.log*
 frontend/dist/
 
 # Data & uploads (user content, not in repo)
+data/access_profiles.json
 data/
 uploads/
 *.log

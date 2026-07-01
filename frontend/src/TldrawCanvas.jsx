@@ -237,11 +237,10 @@ function getDroppedImageTargetSize(editor, shape) {
   return resized || { w: width, h: height }
 }
 
-export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug, onSaveState, colorMode, findQuery, onFindDismiss, findBoards, onNavigateBoard, findShapeIds }) {
+export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveState, colorMode, findQuery, onFindDismiss, findBoards, onNavigateBoard, findShapeIds }) {
   const boardIdRef = useRef(boardId)
   const readOnlyRef = useRef(readOnly)
   const viewerModeRef = useRef(viewerMode)
-  const shareSlugRef = useRef(shareSlug)
   const onSaveStateRef = useRef(onSaveState)
   const saveTimerRef = useRef(null)
   const loadingRef = useRef(false)
@@ -289,9 +288,8 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     boardIdRef.current = boardId
     readOnlyRef.current = readOnly
     viewerModeRef.current = viewerMode
-    shareSlugRef.current = shareSlug
     onSaveStateRef.current = onSaveState
-  }, [boardId, readOnly, viewerMode, shareSlug, onSaveState])
+  }, [boardId, readOnly, viewerMode, onSaveState])
 
   const doSave = useCallback(async () => {
     const editor = editorRef.current
@@ -411,14 +409,11 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
     const bid = boardIdRef.current
     const ro = readOnlyRef.current
     const mode = viewerModeRef.current
-    const slug = shareSlugRef.current
 
     editor.updateInstanceState({ isReadonly: ro })
 
     loadingRef.current = true
-    const url = ro && mode === 'share' && slug
-      ? `${API}/api/share/${slug}/board/${bid}`
-      : ro && mode === 'visitor'
+    const url = ro && mode === 'visitor'
       ? `${API}/api/visitor/boards/${bid}`
       : `${API}/api/boards/${bid}`
 

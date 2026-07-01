@@ -84,6 +84,10 @@ function sortDocs(items) {
   })
 }
 
+function accessDocKey(doc) {
+  return `${doc.type}:${doc.id}`
+}
+
 function collectFolderTree(folderId, folders) {
   const folderIds = new Set([folderId])
   let changed = true
@@ -144,24 +148,21 @@ function parseRoute() {
   const url = new URL(window.location.href)
   const path = url.pathname.replace(/\/+$/, '') || '/'
   const docMatch = path.match(/^\/(board|gdoc|gsheet)\/([^/]+)$/)
-  const shareToken = url.searchParams.get('share') || null
 
   // Known routes: /, /board/<id>, /gdoc/<id>, /gsheet/<id>
   // Everything else redirects to /
   if (path !== '/' && !docMatch) {
     window.history.replaceState({}, '', '/')
-    return { shareToken, doc: null }
+    return { doc: null }
   }
 
   return {
-    shareToken,
     doc: docMatch ? { type: docMatch[1], id: docMatch[2] } : null,
   }
 }
 
-function buildUrl(doc = null, shareToken = null) {
-  const pathname = doc?.type && doc?.id ? `/${doc.type}/${doc.id}` : '/'
-  return shareToken ? `${pathname}?share=${encodeURIComponent(shareToken)}` : pathname
+function buildUrl(doc = null) {
+  return doc?.type && doc?.id ? `/${doc.type}/${doc.id}` : '/'
 }
 
 function docTypeLabel(type) {
@@ -283,13 +284,14 @@ export default function App() {
     loading: true,
     authenticated: false,
     access: null,
+    visitorProfileId: null,
+    visitorProfileName: null,
     configured: true,
     setupAllowed: false,
     requiresSetup: false,
   })
   const [loginPassword, setLoginPassword] = useState('')
   const [ownerPassword, setOwnerPassword] = useState('')
-  const [visitorPassword, setVisitorPassword] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -326,9 +328,14 @@ export default function App() {
   const [tagInput, setTagInput] = useState('')
   const [tagInputOpen, setTagInputOpen] = useState(false)
   const [workspace, setWorkspace] = useState(null)
-  const [shareOpen, setShareOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [copiedDocLink, setCopiedDocLink] = useState(false)
+  const [accessOpen, setAccessOpen] = useState(false)
+  const [accessProfiles, setAccessProfiles] = useState([])
+  const [selectedAccessId, setSelectedAccessId] = useState(null)
+  const [newAccessName, setNewAccessName] = useState('')
+  const [newAccessPassword, setNewAccessPassword] = useState('')
+  const [accessPasswordDraft, setAccessPasswordDraft] = useState('')
+  const [accessBusy, setAccessBusy] = useState(false)
+  const [accessError, setAccessError] = useState('')
   const [ownerPromptOpen, setOwnerPromptOpen] = useState(false)
   const [ownerPromptDismissed, setOwnerPromptDismissed] = useState(false)
   const [ownerInput, setOwnerInput] = useState('')
@@ -369,13 +376,13 @@ export default function App() {
   const [backendStatus, setBackendStatus] = useState('checking') // 'checking' | 'ready'
   const backendReadyRef = useRef(false)
 
-  const viewerMode = route.shareToken ? 'share' : auth.access
+  const viewerMode = auth.access
   const ownerMode = viewerMode === 'owner'
-  const readOnly = viewerMode === 'visitor' || viewerMode === 'share' || ownerDatabaseMode
+  const readOnly = viewerMode === 'visitor' || ownerDatabaseMode
   const showSidebar = ownerMode && !ownerDatabaseMode
 
   useEffect(() => {
-    const needsBackendWake = viewerMode === 'visitor' || viewerMode === 'share'
+    const needsBackendWake = viewerMode === 'visitor'
     if (!needsBackendWake) {
       setBackendStatus('ready')
       backendReadyRef.current = true
@@ -428,6 +435,17 @@ export default function App() {
   const deleteImpact = deleteTarget?.type === 'folder'
     ? summarizeFolderDelete(deleteTarget, folders, docsByKind)
     : null
+  const accessDocs = useMemo(() => sortDocs(
+    DOC_KINDS.flatMap(kind => (docsByKind[kind] || []).map(item => ({ ...item, type: kind })))
+  ), [docsByKind])
+  const selectedAccessProfile = useMemo(
+    () => accessProfiles.find(profile => profile.id === selectedAccessId) || accessProfiles[0] || null,
+    [accessProfiles, selectedAccessId]
+  )
+  const selectedAccessDocKeys = useMemo(
+    () => new Set((selectedAccessProfile?.docs || []).map(accessDocKey)),
+    [selectedAccessProfile]
+  )
 
   useEffect(() => {
     activeIdRef.current = activeId
@@ -459,6 +477,17 @@ export default function App() {
     if (!ownerMode && ownerDatabaseMode) setOwnerDatabaseMode(false)
   }, [ownerDatabaseMode, ownerMode])
 
+  useEffect(() => {
+    if (!accessOpen) return
+    if (!accessProfiles.length) {
+      setSelectedAccessId(null)
+      return
+    }
+    if (!selectedAccessId || !accessProfiles.some(profile => profile.id === selectedAccessId)) {
+      setSelectedAccessId(accessProfiles[0].id)
+    }
+  }, [accessOpen, accessProfiles, selectedAccessId])
+
   const updateAuthStatus = useCallback(async () => {
     setAuth(current => ({ ...current, loading: true }))
     let data = null
@@ -478,6 +507,8 @@ export default function App() {
       backendOffline,
       authenticated: Boolean(data?.authenticated),
       access: data?.access || null,
+      visitorProfileId: data?.visitor_profile_id || null,
+      visitorProfileName: data?.visitor_profile_name || null,
       configured: data?.configured !== false,
       setupAllowed: Boolean(data?.setup_allowed),
       requiresSetup: Boolean(data?.requires_setup),
@@ -489,13 +520,13 @@ export default function App() {
   }, [updateAuthStatus])
 
   const navigate = useCallback((doc = null, { replace = false } = {}) => {
-    const nextUrl = buildUrl(doc, route.shareToken)
+    const nextUrl = buildUrl(doc)
     const currentUrl = `${window.location.pathname}${window.location.search}`
     if (currentUrl !== nextUrl) {
       window.history[replace ? 'replaceState' : 'pushState']({}, '', nextUrl)
     }
-    setRoute({ shareToken: route.shareToken, doc })
-  }, [route.shareToken])
+    setRoute({ doc })
+  }, [])
 
   const expandFolderPath = useCallback((folderId, folderList) => {
     if (!folderId) return
@@ -538,7 +569,7 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     if (auth.loading) return
-    if (!auth.authenticated && !route.shareToken) return
+    if (!auth.authenticated) return
     if (!viewerMode) return
 
     const currentActiveId = activeIdRef.current
@@ -570,19 +601,6 @@ export default function App() {
       }
     }
 
-    if (viewerMode === 'share') {
-      const data = await fetchJson(`${API}/api/share/${route.shareToken}`, {}, null)
-      if (!data) return
-      const nextDocsByKind = {
-        board: data.boards || [],
-        gdoc: data.gdocs || [],
-        gsheet: data.gsheets || [],
-        report: data.reports || [],
-      }
-      applyResult(nextDocsByKind, data.workspace?.folders || [], data.workspace || null)
-      return
-    }
-
     const prefix = viewerMode === 'visitor' ? 'visitor/' : ''
     const [bs, gd, gs, rp, ws] = await Promise.all([
       fetchJson(`${API}/api/${prefix}boards`, {}, []),
@@ -600,7 +618,7 @@ export default function App() {
     }
     if (ownerMode && ws && !ws.owner && !ownerPromptDismissed) setOwnerPromptOpen(true)
     applyResult(nextDocsByKind, ws?.folders || [], ws)
-  }, [auth.authenticated, auth.loading, expandFolderPath, ownerDatabaseMode, ownerMode, ownerPromptDismissed, route.doc, route.shareToken, viewerMode])
+  }, [auth.authenticated, auth.loading, expandFolderPath, ownerDatabaseMode, ownerMode, ownerPromptDismissed, route.doc, viewerMode])
 
   useEffect(() => {
     refresh()
@@ -768,8 +786,8 @@ export default function App() {
 
   const showDatabaseHome = readOnly && !activeId
   const scanSurfaceKey = showDatabaseHome
-    ? `${viewerMode || 'anon'}:dashboard:${route.shareToken || 'direct'}`
-    : `${viewerMode || 'anon'}:${activeId?.type || 'workspace'}:${activeId?.id || 'home'}:${route.shareToken || 'direct'}`
+    ? `${viewerMode || 'anon'}:dashboard`
+    : `${viewerMode || 'anon'}:${activeId?.type || 'workspace'}:${activeId?.id || 'home'}`
   const mainClassName = `canvas-wrap${showDatabaseHome ? '' : ' s8-grid'}`
 
   useEffect(() => {
@@ -821,9 +839,7 @@ export default function App() {
     }
     if (!viewerMode) return
     if (backendStatus !== 'ready') return
-    const url = viewerMode === 'share'
-      ? `${API}/api/share/${route.shareToken}/search`
-      : viewerMode === 'visitor'
+    const url = viewerMode === 'visitor'
       ? `${API}/api/visitor/search`
       : `${API}/api/search`
 
@@ -837,7 +853,7 @@ export default function App() {
       }
     }, 200)
     return () => clearTimeout(t)
-  }, [backendStatus, query, route.shareToken, viewerMode, searchScope])
+  }, [backendStatus, query, viewerMode, searchScope])
 
   const openOwnerDatabaseView = useCallback(() => {
     setOwnerDatabaseMode(true)
@@ -964,6 +980,141 @@ export default function App() {
   useEffect(() => () => {
     if (driveShareMessageTimer.current) clearTimeout(driveShareMessageTimer.current)
   }, [])
+
+  const loadAccessProfiles = useCallback(async () => {
+    setAccessError('')
+    const data = await fetchJson(`${API}/api/access-profiles`, {}, null)
+    if (!Array.isArray(data)) {
+      setAccessError('Could not load visitor access.')
+      return
+    }
+    setAccessProfiles(data)
+    if (data[0] && !data.some(profile => profile.id === selectedAccessId)) {
+      setSelectedAccessId(data[0].id)
+    }
+  }, [selectedAccessId])
+
+  const openAccessProfiles = useCallback(() => {
+    setAccessOpen(true)
+    setAccessPasswordDraft('')
+    loadAccessProfiles()
+  }, [loadAccessProfiles])
+
+  const patchAccessProfile = useCallback((profileId, updater) => {
+    setAccessProfiles(current => current.map(profile => {
+      if (profile.id !== profileId) return profile
+      const patch = typeof updater === 'function' ? updater(profile) : updater
+      return { ...profile, ...patch }
+    }))
+  }, [])
+
+  const createAccessProfile = useCallback(async () => {
+    const name = newAccessName.trim() || 'Visitor access'
+    const password = newAccessPassword.trim()
+    if (password.length < 6 || accessBusy) return
+    setAccessBusy(true)
+    setAccessError('')
+    try {
+      const res = await fetch(`${API}/api/access-profiles`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ name, password }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setAccessError(data.error || 'Could not create visitor access.')
+        return
+      }
+      setAccessProfiles(current => [data, ...current])
+      setSelectedAccessId(data.id)
+      setNewAccessName('')
+      setNewAccessPassword('')
+      setAccessPasswordDraft('')
+    } finally {
+      setAccessBusy(false)
+    }
+  }, [accessBusy, newAccessName, newAccessPassword])
+
+  const saveSelectedAccessProfile = useCallback(async () => {
+    if (!selectedAccessProfile || accessBusy) return
+    const nextPassword = accessPasswordDraft.trim()
+    if (nextPassword && nextPassword.length < 6) {
+      setAccessError('New visitor password must be at least 6 characters.')
+      return
+    }
+    setAccessBusy(true)
+    setAccessError('')
+    try {
+      const payload = {
+        name: selectedAccessProfile.name,
+        active: selectedAccessProfile.active !== false,
+        workspace: Boolean(selectedAccessProfile.workspace),
+        folders: selectedAccessProfile.folders || [],
+        docs: selectedAccessProfile.docs || [],
+        ...(nextPassword ? { password: nextPassword } : {}),
+      }
+      const res = await fetch(`${API}/api/access-profiles/${selectedAccessProfile.id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: JSON_HEADERS,
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setAccessError(data.error || 'Could not save visitor access.')
+        return
+      }
+      setAccessProfiles(current => current.map(profile => profile.id === data.id ? data : profile))
+      setSelectedAccessId(data.id)
+      setAccessPasswordDraft('')
+    } finally {
+      setAccessBusy(false)
+    }
+  }, [accessBusy, accessPasswordDraft, selectedAccessProfile])
+
+  const deleteSelectedAccessProfile = useCallback(async () => {
+    if (!selectedAccessProfile || accessBusy) return
+    setAccessBusy(true)
+    setAccessError('')
+    try {
+      const res = await fetch(`${API}/api/access-profiles/${selectedAccessProfile.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setAccessError(data.error || 'Could not delete visitor access.')
+        return
+      }
+      setAccessProfiles(current => current.filter(profile => profile.id !== selectedAccessProfile.id))
+      setSelectedAccessId(null)
+      setAccessPasswordDraft('')
+    } finally {
+      setAccessBusy(false)
+    }
+  }, [accessBusy, selectedAccessProfile])
+
+  const toggleAccessFolder = useCallback((folderId) => {
+    if (!selectedAccessProfile) return
+    patchAccessProfile(selectedAccessProfile.id, (profile) => {
+      const current = new Set(profile.folders || [])
+      if (current.has(folderId)) current.delete(folderId)
+      else current.add(folderId)
+      return { folders: [...current], workspace: false }
+    })
+  }, [patchAccessProfile, selectedAccessProfile])
+
+  const toggleAccessDoc = useCallback((doc) => {
+    if (!selectedAccessProfile) return
+    patchAccessProfile(selectedAccessProfile.id, (profile) => {
+      const key = accessDocKey(doc)
+      const current = new Map((profile.docs || []).map(item => [accessDocKey(item), item]))
+      if (current.has(key)) current.delete(key)
+      else current.set(key, { type: doc.type, id: doc.id })
+      return { docs: [...current.values()], workspace: false }
+    })
+  }, [patchAccessProfile, selectedAccessProfile])
 
   const createFolder = async () => {
     const name = newFolderName.trim()
@@ -1624,7 +1775,7 @@ export default function App() {
       if (!res.ok) {
         if ((res.status === 409 && data.requires_setup) || data.setup_allowed === false || data.configured === false) {
           setAuthError(data.setup_allowed === false
-            ? 'Station 8 access is not configured on the server. The owner needs to set OWNER_PASSWORD and VISITOR_PASSWORD on the backend.'
+            ? 'Station 8 access is not configured on the server. The owner needs to set OWNER_PASSWORD on the backend.'
             : (data.error || 'Access passwords have not been set up yet'))
           return
         }
@@ -1636,10 +1787,10 @@ export default function App() {
     } finally {
       setAuthBusy(false)
     }
-  }, [loginPassword, route.doc, route.shareToken, updateAuthStatus])
+  }, [loginPassword, updateAuthStatus])
 
   const submitSetup = useCallback(async () => {
-    if (ownerPassword.length < 6 || visitorPassword.length < 6) return
+    if (ownerPassword.length < 6) return
     setAuthBusy(true)
     setAuthError('')
     try {
@@ -1649,7 +1800,6 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           owner_password: ownerPassword,
-          visitor_password: visitorPassword,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -1658,12 +1808,11 @@ export default function App() {
         return
       }
       setOwnerPassword('')
-      setVisitorPassword('')
       await updateAuthStatus()
     } finally {
       setAuthBusy(false)
     }
-  }, [ownerPassword, updateAuthStatus, visitorPassword])
+  }, [ownerPassword, updateAuthStatus])
 
   if (auth.loading) {
     return <AccessGate loading />
@@ -1680,11 +1829,9 @@ export default function App() {
         authError={authError}
         loginPassword={loginPassword}
         ownerPassword={ownerPassword}
-        visitorPassword={visitorPassword}
         route={route}
         onLoginPasswordChange={setLoginPassword}
         onOwnerPasswordChange={setOwnerPassword}
-        onVisitorPasswordChange={setVisitorPassword}
         onSubmitLogin={submitLogin}
         onSubmitSetup={submitSetup}
       />
@@ -1811,6 +1958,9 @@ export default function App() {
           </button>
           <button className="search-btn" onClick={openOwnerDatabaseView} type="button">
             <span className="search-btn-label"><FolderOpenIcon /> Database view</span>
+          </button>
+          <button className="search-btn" onClick={openAccessProfiles} type="button">
+            <span className="search-btn-label"><UnlockIcon /> Visitor access</span>
           </button>
 
           {/* Sticky footer */}
@@ -2040,18 +2190,8 @@ export default function App() {
                       </div>
                     </div>
                     <div className="title-menu-sep" />
-                    <button className="title-menu-item" onClick={() => { setShareOpen(true); setTitleMenuOpen(false) }} type="button">
-                      Share workspace
-                    </button>
-                    <button
-                      className="title-menu-item"
-                      onClick={() => {
-                        navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}`)
-                        setTitleMenuOpen(false)
-                      }}
-                      type="button"
-                    >
-                      Copy {docTypeLabel(activeDocType).toLowerCase()} link
+                    <button className="title-menu-item" onClick={() => { openAccessProfiles(); setTitleMenuOpen(false) }} type="button">
+                      Visitor access
                     </button>
                     {activeDoc && activeDocType && (
                       <>
@@ -2133,7 +2273,6 @@ export default function App() {
                     boardId={activeId.id}
                     readOnly={readOnly}
                     viewerMode={viewerMode}
-                    shareSlug={route.shareToken}
                     onSaveState={setSaveState}
                     colorMode={colorMode}
                     findQuery={findQuery}
@@ -2252,68 +2391,36 @@ export default function App() {
         </Modal>
       )}
 
-      {shareOpen && workspace && (
-        <Modal onClose={() => setShareOpen(false)} title="Share your research">
-          <div className="share-body">
-            <div className="modal-copy">
-              These links use the visitor password gate. Visitors land in the database view by default, and deep links can open a specific board or sheet directly.
-            </div>
-            <div className="share-url-row">
-              <input
-                readOnly
-                className="share-url"
-                value={`${window.location.origin}/`}
-                onFocus={(e) => e.target.select()}
-              />
-              <button
-                className="btn-primary"
-                onClick={() => {
-                  navigator.clipboard.writeText(`${window.location.origin}/`).then(() => {
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 1500)
-                  })
-                }}
-                type="button"
-              >
-                {copied ? 'Copied' : 'Copy home'}
-              </button>
-            </div>
-            {activeDoc && activeDocType && (
-              <div className="share-url-row">
-                <input
-                  readOnly
-                  className="share-url"
-                  value={`${window.location.origin}/${activeDocType}/${activeDoc.id}`}
-                  onFocus={(e) => e.target.select()}
-                />
-                <button
-                  className="btn-primary"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}/${activeDocType}/${activeDoc.id}`).then(() => {
-                      setCopiedDocLink(true)
-                      setTimeout(() => setCopiedDocLink(false), 1500)
-                    })
-                  }}
-                  type="button"
-                >
-                  {copiedDocLink ? 'Copied' : `Copy ${activeDocType}`}
-                </button>
-              </div>
-            )}
-            <div className="share-owner-row">
-              <label className="modal-field-label">Your display name:</label>
-              <input
-                className="share-owner-input"
-                value={workspace.owner || ''}
-                onChange={(e) => setWorkspace(w => ({ ...w, owner: e.target.value }))}
-                onBlur={async (e) => {
-                  const updated = await fetchJsonPatch(`${API}/api/workspace`, { owner: e.target.value })
-                  if (updated) setWorkspace(updated)
-                }}
-              />
-            </div>
-          </div>
-        </Modal>
+      {accessOpen && workspace && (
+        <AccessProfilesModal
+          profiles={accessProfiles}
+          selectedProfile={selectedAccessProfile}
+          selectedDocKeys={selectedAccessDocKeys}
+          selectedProfileId={selectedAccessId}
+          folders={folders}
+          folderById={folderById}
+          docs={accessDocs}
+          newName={newAccessName}
+          newPassword={newAccessPassword}
+          passwordDraft={accessPasswordDraft}
+          busy={accessBusy}
+          error={accessError}
+          onClose={() => setAccessOpen(false)}
+          onSelectProfile={(profileId) => {
+            setSelectedAccessId(profileId)
+            setAccessPasswordDraft('')
+            setAccessError('')
+          }}
+          onNewName={setNewAccessName}
+          onNewPassword={setNewAccessPassword}
+          onPasswordDraft={setAccessPasswordDraft}
+          onCreate={createAccessProfile}
+          onSave={saveSelectedAccessProfile}
+          onDelete={deleteSelectedAccessProfile}
+          onPatchProfile={patchAccessProfile}
+          onToggleFolder={toggleAccessFolder}
+          onToggleDoc={toggleAccessDoc}
+        />
       )}
 
       {ownerPromptOpen && (
@@ -2648,11 +2755,9 @@ function AccessGate({
   authError = '',
   loginPassword = '',
   ownerPassword = '',
-  visitorPassword = '',
   route,
   onLoginPasswordChange,
   onOwnerPasswordChange,
-  onVisitorPasswordChange,
   onSubmitLogin,
   onSubmitSetup,
 }) {
@@ -2703,10 +2808,10 @@ function AccessGate({
         <h1 className="auth-title">{allowSetup ? 'Set up access' : configMissing ? 'Access offline' : 'Enter the workspace'}</h1>
         <p className="auth-copy">
           {allowSetup
-            ? 'Create the owner and visitor passwords. After setup, the same password field routes people into owner or visitor mode automatically.'
+            ? 'Create the owner password. Visitor access passwords are managed from the owner view after setup.'
             : configMissing
-            ? 'Station 8 access is not configured on the server. The owner needs to set OWNER_PASSWORD and VISITOR_PASSWORD on the backend.'
-            : `${directLabel} is protected. Enter either the owner password or the visitor password to continue.`}
+            ? 'Station 8 access is not configured on the server. The owner needs to set OWNER_PASSWORD on the backend.'
+            : `${directLabel} is protected. Enter either the owner password or a visitor access password to continue.`}
         </p>
 
         {allowSetup ? (
@@ -2720,16 +2825,7 @@ function AccessGate({
                 placeholder="At least 6 characters"
               />
             </label>
-            <label className="auth-label">
-              <span>Visitor password</span>
-              <input
-                type="password"
-                value={visitorPassword}
-                onChange={(e) => onVisitorPasswordChange(e.target.value)}
-                placeholder="At least 6 characters"
-              />
-            </label>
-            <button className="auth-submit" onClick={onSubmitSetup} disabled={authBusy || ownerPassword.length < 6 || visitorPassword.length < 6} type="button">
+            <button className="auth-submit" onClick={onSubmitSetup} disabled={authBusy || ownerPassword.length < 6} type="button">
               {authBusy ? 'Setting up…' : 'Save passwords'}
             </button>
           </div>
@@ -2742,7 +2838,7 @@ function AccessGate({
                 value={loginPassword}
                 onChange={(e) => onLoginPasswordChange(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') onSubmitLogin() }}
-                placeholder="Owner or visitor password"
+                placeholder="Owner or visitor access password"
               />
             </label>
             <button className="auth-submit" onClick={onSubmitLogin} disabled={authBusy || !loginPassword.trim()} type="button">
@@ -2754,6 +2850,196 @@ function AccessGate({
         {authError && <div className="auth-error">{authError}</div>}
       </div>
     </div>
+  )
+}
+
+function AccessProfilesModal({
+  profiles,
+  selectedProfile,
+  selectedDocKeys,
+  selectedProfileId,
+  folders,
+  folderById,
+  docs,
+  newName,
+  newPassword,
+  passwordDraft,
+  busy,
+  error,
+  onClose,
+  onSelectProfile,
+  onNewName,
+  onNewPassword,
+  onPasswordDraft,
+  onCreate,
+  onSave,
+  onDelete,
+  onPatchProfile,
+  onToggleFolder,
+  onToggleDoc,
+}) {
+  const folderOptions = buildFolderOptions(folders)
+  const selectedFolders = new Set(selectedProfile?.folders || [])
+  const fullWorkspace = Boolean(selectedProfile?.workspace)
+  const selectedFolderTree = new Set()
+  for (const folderId of selectedFolders) {
+    for (const id of collectFolderTree(folderId, folders)) selectedFolderTree.add(id)
+  }
+  const explicitDocKeys = new Set((selectedProfile?.docs || []).map(accessDocKey))
+  const docCount = fullWorkspace
+    ? docs.length
+    : docs.filter(doc => explicitDocKeys.has(accessDocKey(doc)) || selectedFolderTree.has(doc.folder_id)).length
+
+  return (
+    <Modal onClose={onClose} title="Visitor access" wide>
+      <div className="access-modal-body">
+        <p className="modal-copy">
+          Create a visitor password, then choose the folders and individual items that password can see. Visitors enter the password from the normal Station 8 screen.
+        </p>
+
+        <div className="access-create-row">
+          <input
+            value={newName}
+            onChange={e => onNewName(e.target.value)}
+            placeholder="Person or group name"
+          />
+          <input
+            type="password"
+            value={newPassword}
+            onChange={e => onNewPassword(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') onCreate() }}
+            placeholder="New visitor password"
+          />
+          <button className="btn-primary" onClick={onCreate} disabled={busy || newPassword.trim().length < 6} type="button">
+            Create
+          </button>
+        </div>
+
+        {error && <div className="access-error">{error}</div>}
+
+        {profiles.length === 0 ? (
+          <div className="access-empty">No visitor passwords yet.</div>
+        ) : (
+          <div className="access-layout">
+            <div className="access-profile-list">
+              {profiles.map(profile => {
+                const active = profile.id === selectedProfileId
+                return (
+                  <button
+                    key={profile.id}
+                    className={`access-profile-btn${active ? ' selected' : ''}`}
+                    onClick={() => onSelectProfile(profile.id)}
+                    type="button"
+                  >
+                    <span className="access-profile-name">{profile.name}</span>
+                    <span className="access-profile-meta">
+                      {profile.active === false ? 'Disabled' : `${profile.visible_doc_count || 0} items`}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            {selectedProfile && (
+              <div className="access-editor">
+                <div className="access-editor-grid">
+                  <label className="modal-field">
+                    <span className="modal-field-label">Name</span>
+                    <input
+                      value={selectedProfile.name || ''}
+                      onChange={e => onPatchProfile(selectedProfile.id, { name: e.target.value })}
+                      placeholder="Person or group name"
+                    />
+                  </label>
+                  <label className="modal-field">
+                    <span className="modal-field-label">Change password</span>
+                    <input
+                      type="password"
+                      value={passwordDraft}
+                      onChange={e => onPasswordDraft(e.target.value)}
+                      placeholder={selectedProfile.has_password ? 'Leave blank to keep current' : 'At least 6 characters'}
+                    />
+                  </label>
+                </div>
+
+                <div className="access-toggle-row">
+                  <label className="access-toggle">
+                    <input
+                      type="checkbox"
+                      checked={selectedProfile.active !== false}
+                      onChange={e => onPatchProfile(selectedProfile.id, { active: e.target.checked })}
+                    />
+                    <span>Enabled</span>
+                  </label>
+                  <label className="access-toggle">
+                    <input
+                      type="checkbox"
+                      checked={fullWorkspace}
+                      onChange={e => onPatchProfile(selectedProfile.id, { workspace: e.target.checked })}
+                    />
+                    <span>Full workspace</span>
+                  </label>
+                  <span className="access-count">{fullWorkspace ? 'Everything visible' : `${docCount} selected`}</span>
+                </div>
+
+                <div className={`access-selection${fullWorkspace ? ' disabled' : ''}`}>
+                  <div className="access-section">
+                    <div className="access-section-title">Folders</div>
+                    <div className="access-check-list">
+                      {folderOptions.length === 0 ? (
+                        <div className="access-empty small">No folders yet.</div>
+                      ) : folderOptions.map(option => (
+                        <label key={option.value} className="access-check">
+                          <input
+                            type="checkbox"
+                            checked={selectedFolders.has(option.value)}
+                            onChange={() => onToggleFolder(option.value)}
+                            disabled={fullWorkspace}
+                          />
+                          <span>{option.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="access-section">
+                    <div className="access-section-title">Individual items</div>
+                    <div className="access-check-list">
+                      {docs.length === 0 ? (
+                        <div className="access-empty small">No items yet.</div>
+                      ) : docs.map(doc => {
+                        const folderPath = buildFolderPath(doc.folder_id, folderById)
+                        return (
+                          <label key={accessDocKey(doc)} className="access-check access-check-doc">
+                            <input
+                              type="checkbox"
+                              checked={selectedDocKeys.has(accessDocKey(doc))}
+                              onChange={() => onToggleDoc(doc)}
+                              disabled={fullWorkspace}
+                            />
+                            <span className="access-doc-label">
+                              <span className="access-doc-title">{DOC_KIND_LABEL[doc.type]} · {doc.name}</span>
+                              {folderPath && <span className="access-doc-path">{folderPath}</span>}
+                            </span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="modal-footer access-footer">
+                  <button className="btn-ghost btn-danger-text" onClick={onDelete} disabled={busy} type="button">Delete</button>
+                  <button className="btn-primary" onClick={onSave} disabled={busy || (!!passwordDraft.trim() && passwordDraft.trim().length < 6)} type="button">
+                    {busy ? 'Saving…' : 'Save access'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </Modal>
   )
 }
 

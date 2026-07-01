@@ -49,7 +49,7 @@ GOOGLE_AUTH_FILE = os.path.join(DATA_DIR, 'google_auth.json')
 GDRIVE_CONTENTS_FILE = os.path.join(DATA_DIR, 'gdrive_contents.json')
 OCR_FILE = os.path.join(DATA_DIR, 'ocr.json')
 WORKSPACE_FILE = os.path.join(DATA_DIR, 'workspace.json')
-SHARES_FILE = os.path.join(DATA_DIR, 'shares.json')
+ACCESS_PROFILES_FILE = os.path.join(DATA_DIR, 'access_profiles.json')
 AUTH_FILE = os.path.join(DATA_DIR, 'auth.json')
 REPORTS_FILE = os.path.join(DATA_DIR, 'reports.json')
 R_TOKENS_FILE = os.path.join(DATA_DIR, 'r_tokens.json')
@@ -265,8 +265,12 @@ def _visitor_password_configured():
     return bool(_env_visitor_password() or _stored_visitor_password_hash())
 
 
+def _legacy_visitor_password_enabled():
+    return _env_flag('S8_ENABLE_LEGACY_VISITOR_PASSWORD', default=not PRODUCTION)
+
+
 def _requires_access_setup():
-    return not _owner_password_configured() or not _visitor_password_configured()
+    return not _owner_password_configured()
 
 
 def _auth_configured():
@@ -292,6 +296,8 @@ def _verify_studio_password(password):
 def _verify_visitor_password(password):
     if not PRODUCTION and password == ACCESS_VISITOR:
         return True
+    if not _legacy_visitor_password_enabled():
+        return False
     env_password = _env_visitor_password()
     if env_password is not None:
         return password == env_password
@@ -299,6 +305,43 @@ def _verify_visitor_password(password):
     if not stored_hash:
         return False
     return check_password_hash(stored_hash, password)
+
+
+def _access_profile_pepper():
+    return (os.getenv('S8_ACCESS_PROFILE_PEPPER') or os.getenv('ACCESS_PROFILE_PEPPER') or '').strip()
+
+
+def _access_profile_password_storage_ready():
+    return bool(_access_profile_pepper()) or not PRODUCTION
+
+
+def _access_profile_password_material(password):
+    pepper = _access_profile_pepper()
+    if not pepper:
+        return password
+    return f'{pepper}\0{password}'
+
+
+def _hash_access_profile_password(password):
+    if not _access_profile_password_storage_ready():
+        raise RuntimeError('missing_access_profile_pepper')
+    return generate_password_hash(_access_profile_password_material(password)), bool(_access_profile_pepper())
+
+
+def _check_access_profile_password(profile, password):
+    stored_hash = profile.get('password_hash') or ''
+    if not stored_hash:
+        return False
+    if profile.get('password_peppered'):
+        if not _access_profile_pepper():
+            return False
+        candidate = _access_profile_password_material(password)
+    else:
+        candidate = password
+    try:
+        return check_password_hash(stored_hash, candidate)
+    except (TypeError, ValueError):
+        return False
 
 
 def _normalize_folder_id(folder_id, folders):
@@ -448,6 +491,284 @@ def _load_report(report_id):
 
 def _save_report(report_id, data):
     _save(_report_file(report_id), data)
+
+
+ACCESS_PROFILE_DOC_KINDS = {'board', 'sheet', 'gdoc', 'gsheet', 'report'}
+
+
+def _profile_doc_loaders():
+    return {
+        'board': _load_boards,
+        'sheet': _load_sheets,
+        'gdoc': _load_gdocs,
+        'gsheet': _load_gsheets,
+        'report': _load_reports,
+    }
+
+
+def _normalize_access_doc(item):
+    if not isinstance(item, dict):
+        return None
+    kind = (item.get('type') or item.get('kind') or '').strip()
+    doc_id = str(item.get('id') or '').strip()
+    if kind not in ACCESS_PROFILE_DOC_KINDS or not doc_id:
+        return None
+    return {'type': kind, 'id': doc_id}
+
+
+def _normalize_access_profile(profile):
+    source = dict(profile or {})
+    now = datetime.now().isoformat()
+    profile_id = str(source.get('id') or '').strip() or str(uuid.uuid4())[:8]
+    folders = []
+    seen_folders = set()
+    for folder_id in source.get('folders') or []:
+        folder_id = str(folder_id or '').strip()
+        if not folder_id or folder_id in seen_folders:
+            continue
+        seen_folders.add(folder_id)
+        folders.append(folder_id)
+
+    docs = []
+    seen_docs = set()
+    raw_docs = source.get('docs')
+    if raw_docs is None:
+        raw_docs = source.get('documents')
+    for raw_doc in raw_docs or []:
+        doc = _normalize_access_doc(raw_doc)
+        if not doc:
+            continue
+        key = (doc['type'], doc['id'])
+        if key in seen_docs:
+            continue
+        seen_docs.add(key)
+        docs.append(doc)
+
+    return {
+        'id': profile_id,
+        'name': (source.get('name') or 'Visitor access').strip() or 'Visitor access',
+        'password_hash': source.get('password_hash') or '',
+        'password_peppered': bool(source.get('password_peppered')),
+        'active': source.get('active') is not False,
+        'workspace': bool(source.get('workspace')),
+        'folders': folders,
+        'docs': docs,
+        'created_at': source.get('created_at') or now,
+        'updated_at': source.get('updated_at') or source.get('created_at') or now,
+    }
+
+
+def _load_access_profiles():
+    raw = _load(ACCESS_PROFILES_FILE, [])
+    if not isinstance(raw, list):
+        raw = []
+    profiles = [_normalize_access_profile(profile) for profile in raw if isinstance(profile, dict)]
+    if profiles != raw:
+        _save_access_profiles(profiles)
+    return profiles
+
+
+def _save_access_profiles(profiles):
+    _save(ACCESS_PROFILES_FILE, [_normalize_access_profile(profile) for profile in profiles])
+
+
+def _find_access_profile(profile_id):
+    profile_id = str(profile_id or '').strip()
+    if not profile_id:
+        return None
+    return next((p for p in _load_access_profiles() if p.get('id') == profile_id), None)
+
+
+def _access_profile_for_password(password):
+    if not password:
+        return None
+    for profile in _load_access_profiles():
+        if not profile.get('active') or not profile.get('password_hash'):
+            continue
+        if _check_access_profile_password(profile, password):
+            return profile
+    return None
+
+
+def _current_access_profile():
+    if not _is_visitor_authed():
+        return None
+    profile_id = session.get('visitor_profile_id')
+    if not profile_id:
+        return None
+    profile = _find_access_profile(profile_id)
+    if not profile or not profile.get('active'):
+        return None
+    return profile
+
+
+def _ancestor_folder_ids(folder_id, folders):
+    folder_map = {f.get('id'): f for f in folders}
+    folder_ids = []
+    cursor = folder_id
+    visited = set()
+    while cursor and cursor not in visited:
+        visited.add(cursor)
+        folder = folder_map.get(cursor)
+        if not folder:
+            break
+        folder_ids.append(cursor)
+        cursor = folder.get('parent_id')
+    return folder_ids
+
+
+def _profile_scope(profile, *, workspace=None, docs_by_kind=None):
+    ws = workspace if workspace is not None else _get_workspace()
+    folders = ws.get('folders', [])
+    folder_map = {f.get('id'): f for f in folders}
+    loaders = _profile_doc_loaders()
+    docs_by_kind = docs_by_kind or {kind: loader() for kind, loader in loaders.items()}
+    allowed_docs = {kind: set() for kind in loaders}
+    visible_folder_ids = set()
+
+    if profile.get('workspace'):
+        visible_folder_ids = set(folder_map)
+        for kind, docs in docs_by_kind.items():
+            allowed_docs[kind] = {doc.get('id') for doc in docs if doc.get('id')}
+        return {'folders': visible_folder_ids, 'docs': allowed_docs}
+
+    content_folder_ids = set()
+    for folder_id in profile.get('folders') or []:
+        if folder_id not in folder_map:
+            continue
+        content_folder_ids.update(_folder_with_descendants(folder_id, folders))
+        visible_folder_ids.update(_ancestor_folder_ids(folder_id, folders))
+
+    visible_folder_ids.update(content_folder_ids)
+
+    for kind, docs in docs_by_kind.items():
+        for doc in docs:
+            doc_id = doc.get('id')
+            if not doc_id:
+                continue
+            if doc.get('folder_id') in content_folder_ids:
+                allowed_docs[kind].add(doc_id)
+                visible_folder_ids.update(_ancestor_folder_ids(doc.get('folder_id'), folders))
+
+    explicit_docs = profile.get('docs') or []
+    for access_doc in explicit_docs:
+        kind = access_doc.get('type')
+        doc_id = access_doc.get('id')
+        if kind not in allowed_docs or not doc_id:
+            continue
+        doc = next((item for item in docs_by_kind.get(kind, []) if item.get('id') == doc_id), None)
+        if not doc:
+            continue
+        allowed_docs[kind].add(doc_id)
+        visible_folder_ids.update(_ancestor_folder_ids(doc.get('folder_id'), folders))
+
+    return {'folders': visible_folder_ids, 'docs': allowed_docs}
+
+
+def _profile_visible_folders(profile, *, workspace=None, docs_by_kind=None):
+    ws = workspace if workspace is not None else _get_workspace()
+    folders = ws.get('folders', [])
+    scope = _profile_scope(profile, workspace=ws, docs_by_kind=docs_by_kind)
+    visible = []
+    for folder in folders:
+        if folder.get('id') not in scope['folders']:
+            continue
+        item = dict(folder)
+        if item.get('parent_id') not in scope['folders']:
+            item['parent_id'] = None
+        visible.append(item)
+    return visible
+
+
+def _profile_visible_docs(profile, kind, docs, *, workspace=None, docs_by_kind=None):
+    if kind not in ACCESS_PROFILE_DOC_KINDS:
+        return []
+    scope = _profile_scope(profile, workspace=workspace, docs_by_kind=docs_by_kind)
+    allowed = scope['docs'].get(kind, set())
+    return [doc for doc in docs if doc.get('id') in allowed]
+
+
+def _visitor_visible_docs(kind, docs, *, workspace=None, docs_by_kind=None):
+    profile = _current_access_profile()
+    if profile:
+        return _profile_visible_docs(profile, kind, docs, workspace=workspace, docs_by_kind=docs_by_kind)
+    folders = (workspace or _get_workspace()).get('folders', [])
+    return [doc for doc in docs if _doc_is_visitor_visible(doc, folders)]
+
+
+def _visitor_visible_folders(workspace=None, docs_by_kind=None):
+    ws = workspace if workspace is not None else _get_workspace()
+    profile = _current_access_profile()
+    if profile:
+        return _profile_visible_folders(profile, workspace=ws, docs_by_kind=docs_by_kind)
+    folders = ws.get('folders', [])
+    return [f for f in folders if _folder_is_visitor_visible(f, folders)]
+
+
+def _sanitize_access_profile_payload(data, existing=None):
+    profile = _normalize_access_profile(existing or {})
+    folders = _get_workspace().get('folders', [])
+    folder_ids = {folder.get('id') for folder in folders}
+    docs_by_kind = {kind: loader() for kind, loader in _profile_doc_loaders().items()}
+    now = datetime.now().isoformat()
+
+    if 'name' in data:
+        profile['name'] = (data.get('name') or '').strip() or profile.get('name') or 'Visitor access'
+    if 'active' in data:
+        profile['active'] = data.get('active') is not False
+    if 'workspace' in data:
+        profile['workspace'] = bool(data.get('workspace'))
+    if 'folders' in data:
+        next_folders = []
+        seen = set()
+        for folder_id in data.get('folders') or []:
+            folder_id = str(folder_id or '').strip()
+            if folder_id and folder_id in folder_ids and folder_id not in seen:
+                seen.add(folder_id)
+                next_folders.append(folder_id)
+        profile['folders'] = next_folders
+    if 'docs' in data:
+        next_docs = []
+        seen = set()
+        valid_docs = {
+            kind: {doc.get('id') for doc in docs if doc.get('id')}
+            for kind, docs in docs_by_kind.items()
+        }
+        for raw_doc in data.get('docs') or []:
+            doc = _normalize_access_doc(raw_doc)
+            if not doc or doc['id'] not in valid_docs.get(doc['type'], set()):
+                continue
+            key = (doc['type'], doc['id'])
+            if key in seen:
+                continue
+            seen.add(key)
+            next_docs.append(doc)
+        profile['docs'] = next_docs
+    password = data.get('password')
+    if isinstance(password, str) and password:
+        profile['password_hash'], profile['password_peppered'] = _hash_access_profile_password(password)
+
+    profile['updated_at'] = now
+    return _normalize_access_profile(profile)
+
+
+def _serialize_access_profile(profile):
+    normalized = _normalize_access_profile(profile)
+    docs_by_kind = {kind: loader() for kind, loader in _profile_doc_loaders().items()}
+    scope = _profile_scope(normalized, docs_by_kind=docs_by_kind)
+    return {
+        'id': normalized['id'],
+        'name': normalized['name'],
+        'active': normalized['active'],
+        'workspace': normalized['workspace'],
+        'folders': normalized['folders'],
+        'docs': normalized['docs'],
+        'has_password': bool(normalized.get('password_hash')),
+        'created_at': normalized['created_at'],
+        'updated_at': normalized['updated_at'],
+        'visible_folder_count': len(scope['folders']),
+        'visible_doc_count': sum(len(ids) for ids in scope['docs'].values()),
+    }
 
 
 def _load_r_tokens():
@@ -637,12 +958,13 @@ def _sync_one_gdrive_doc(item, kind, contents):
     return True
 
 
-def _list_docs_sorted(docs, *, visitor=False):
+def _list_docs_sorted(docs, *, visitor=False, kind=None):
     """Common list-endpoint shape: visitor filter (when applicable) + sort by
     created_at desc. Keeps owner and visitor listings from drifting."""
     if visitor:
-        folders = _get_workspace().get('folders', [])
-        docs = [d for d in docs if _doc_is_visitor_visible(d, folders)]
+        docs = _visitor_visible_docs(kind, docs) if kind else [
+            d for d in docs if _doc_is_visitor_visible(d, _get_workspace().get('folders', []))
+        ]
     docs.sort(key=lambda item: item.get('created_at', ''), reverse=True)
     return docs
 
@@ -690,7 +1012,7 @@ def _doc_is_visitor_visible(doc, folders):
 _io_executor = ThreadPoolExecutor(max_workers=12, thread_name_prefix='io')
 
 
-def _visitor_doc_load(doc_id, *, load_index, doc_file_fn, default_payload):
+def _visitor_doc_load(doc_id, *, kind, load_index, doc_file_fn, default_payload):
     """Visitor doc fetch: parallel reads of workspace + doc index + payload,
     then a visitor-visibility check. Returns (payload, error) where exactly
     one of the two is None. Caller jsonifies the payload or returns the error.
@@ -699,9 +1021,11 @@ def _visitor_doc_load(doc_id, *, load_index, doc_file_fn, default_payload):
     docs_future = _io_executor.submit(load_index)
     payload_future = _io_executor.submit(_load, doc_file_fn(doc_id), default_payload)
 
-    folders = workspace_future.result().get('folders', [])
-    doc = next((d for d in docs_future.result() if d['id'] == doc_id), None)
-    if not doc or not _doc_is_visitor_visible(doc, folders):
+    workspace = workspace_future.result()
+    docs = docs_future.result()
+    visible_docs = _visitor_visible_docs(kind, docs, workspace=workspace, docs_by_kind={kind: docs})
+    doc = next((d for d in visible_docs if d['id'] == doc_id), None)
+    if not doc:
         return None, (jsonify({'error': 'Not found'}), 404)
     return payload_future.result(), None
 
@@ -779,37 +1103,6 @@ def _sanitize_parent_id(parent_id, folders, folder_id=None):
     return parent_id
 
 
-def _normalize_share(item):
-    share = dict(item or {})
-    share['id'] = str(share.get('id') or str(uuid.uuid4())[:8])
-    share['scope_type'] = share.get('scope_type') or 'workspace'
-    share['scope_id'] = share.get('scope_id')
-    share['token'] = str(share.get('token') or secrets.token_urlsafe(18))
-    share['revoked'] = bool(share.get('revoked'))
-    share['created_at'] = share.get('created_at') or datetime.now().isoformat()
-    share['label'] = (share.get('label') or '').strip()
-    return share
-
-
-def _load_shares():
-    shares = _load(SHARES_FILE, [])
-    normalized = [_normalize_share(share) for share in shares if isinstance(share, dict)]
-    if normalized != shares:
-        _save(SHARES_FILE, normalized)
-    return normalized
-
-
-def _save_shares(shares):
-    _save(SHARES_FILE, [_normalize_share(share) for share in shares])
-
-
-def _find_share_by_token(token):
-    for share in _load_shares():
-        if share.get('token') == token:
-            return share
-    return None
-
-
 def _is_studio_authed():
     return bool(session.get('studio_authed'))
 
@@ -826,6 +1119,20 @@ def _current_access_level():
     return None
 
 
+def _profile_visitor_session_is_valid():
+    if not _is_visitor_authed():
+        return False
+    if not session.get('visitor_profile_id'):
+        return True
+    return _current_access_profile() is not None
+
+
+def _clear_visitor_session():
+    session.pop('visitor_authed', None)
+    session.pop('visitor_profile_id', None)
+    session.modified = True
+
+
 def _studio_auth_required(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
@@ -838,110 +1145,15 @@ def _studio_auth_required(fn):
 def _viewer_auth_required(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
-        if not (_is_studio_authed() or _is_visitor_authed()):
+        if _is_studio_authed():
+            return fn(*args, **kwargs)
+        if not _profile_visitor_session_is_valid():
+            if _is_visitor_authed():
+                _clear_visitor_session()
+                return jsonify({'error': 'Visitor access expired'}), 401
             return jsonify({'error': 'Password required'}), 401
         return fn(*args, **kwargs)
     return wrapped
-
-
-def _active_share_or_401(token):
-    share = _find_share_by_token(token)
-    if not share or share.get('revoked'):
-        return None, (jsonify({'error': 'Share not found'}), 404)
-    if not (_is_visitor_authed() or _is_studio_authed()):
-        return None, (jsonify({'error': 'Visitor password required', 'requires_password': True}), 401)
-    return share, None
-
-
-def _scope_label(share, boards=None, sheets=None, folders=None):
-    boards = boards if boards is not None else _load_boards()
-    sheets = sheets if sheets is not None else _load_sheets()
-    folders = folders if folders is not None else _get_workspace().get('folders', [])
-    scope_type = share.get('scope_type')
-    scope_id = share.get('scope_id')
-    if scope_type == 'board':
-        board = next((item for item in boards if item.get('id') == scope_id), None)
-        return board.get('name') if board else 'Board'
-    if scope_type == 'sheet':
-        sheet = next((item for item in sheets if item.get('id') == scope_id), None)
-        return sheet.get('name') if sheet else 'Sheet'
-    if scope_type == 'folder':
-        folder = next((item for item in folders if item.get('id') == scope_id), None)
-        return folder.get('name') if folder else 'Folder'
-    return _get_workspace().get('name', 'Workspace')
-
-
-def _scoped_share_payload(share):
-    ws = _get_workspace()
-    folders = ws.get('folders', [])
-    boards = _load_boards()
-    sheets = _load_sheets()
-    scope_type = share.get('scope_type')
-    scope_id = share.get('scope_id')
-
-    scoped_folders = []
-    scoped_boards = []
-    scoped_sheets = []
-
-    if scope_type == 'workspace':
-        scoped_folders = [dict(folder) for folder in folders]
-        scoped_boards = [dict(board) for board in boards]
-        scoped_sheets = [dict(sheet) for sheet in sheets]
-    elif scope_type == 'folder':
-        folder_ids = _folder_with_descendants(scope_id, folders) if any(folder.get('id') == scope_id for folder in folders) else set()
-        scoped_folders = []
-        for folder in folders:
-            if folder.get('id') not in folder_ids:
-                continue
-            parent_id = folder.get('parent_id')
-            scoped_folders.append({
-                **folder,
-                'parent_id': parent_id if parent_id in folder_ids else None,
-            })
-        scoped_boards = [dict(board) for board in boards if board.get('folder_id') in folder_ids]
-        scoped_sheets = [dict(sheet) for sheet in sheets if sheet.get('folder_id') in folder_ids]
-    elif scope_type == 'board':
-        board = next((item for item in boards if item.get('id') == scope_id), None)
-        if board:
-            scoped_boards = [{**board, 'folder_id': None}]
-    elif scope_type == 'sheet':
-        sheet = next((item for item in sheets if item.get('id') == scope_id), None)
-        if sheet:
-            scoped_sheets = [{**sheet, 'folder_id': None}]
-
-    return {
-        'share': {
-            'id': share.get('id'),
-            'label': share.get('label'),
-            'scope_type': scope_type,
-            'scope_id': scope_id,
-            'title': share.get('label') or _scope_label(share, boards=boards, sheets=sheets, folders=folders),
-        },
-        'workspace': {
-            'name': ws.get('name'),
-            'owner': ws.get('owner'),
-            'folders': scoped_folders,
-        },
-        'boards': scoped_boards,
-        'sheets': scoped_sheets,
-    }
-
-
-def _share_allowed_doc_ids(share):
-    payload = _scoped_share_payload(share)
-    board_ids = {board.get('id') for board in payload['boards']}
-    sheet_ids = {sheet.get('id') for sheet in payload['sheets']}
-    return board_ids, sheet_ids
-
-
-def _share_allows_board(share, board_id):
-    board_ids, _ = _share_allowed_doc_ids(share)
-    return board_id in board_ids
-
-
-def _share_allows_sheet(share, sheet_id):
-    _, sheet_ids = _share_allowed_doc_ids(share)
-    return sheet_id in sheet_ids
 
 
 def _snapshot_upload_filenames(snapshot):
@@ -1020,45 +1232,19 @@ def _delete_report_files(report_ids):
             os.remove(fp)
 
 
-def _validate_share_scope(scope_type, scope_id):
-    ws = _get_workspace()
-    boards = _load_boards()
-    sheets = _load_sheets()
-    folders = ws.get('folders', [])
-
-    if scope_type == 'workspace':
-        return True
-    if scope_type == 'board':
-        return any(board.get('id') == scope_id for board in boards)
-    if scope_type == 'sheet':
-        return any(sheet.get('id') == scope_id for sheet in sheets)
-    if scope_type == 'folder':
-        return any(folder.get('id') == scope_id for folder in folders)
-    return False
-
-
-def _serialize_share_for_list(share):
-    payload = _scoped_share_payload(share)
-    return {
-        'id': share.get('id'),
-        'label': share.get('label'),
-        'scope_type': share.get('scope_type'),
-        'scope_id': share.get('scope_id'),
-        'token': share.get('token'),
-        'revoked': bool(share.get('revoked')),
-        'created_at': share.get('created_at'),
-        'title': payload['share']['title'],
-        'url': f'/share/{share.get("token")}',
-    }
-
-
 @app.route('/api/auth/status', methods=['GET'])
 def auth_status():
+    visitor_profile = _current_access_profile()
+    if _is_visitor_authed() and session.get('visitor_profile_id') and not visitor_profile:
+        _clear_visitor_session()
+    access = _current_access_level()
     return jsonify({
-        'authenticated': bool(_current_access_level()),
-        'access': _current_access_level(),
+        'authenticated': bool(access),
+        'access': access,
         'owner_authenticated': _is_studio_authed(),
         'visitor_authenticated': _is_visitor_authed(),
+        'visitor_profile_id': visitor_profile.get('id') if visitor_profile else None,
+        'visitor_profile_name': visitor_profile.get('name') if visitor_profile else None,
         'configured': _auth_configured(),
         'setup_allowed': ALLOW_BROWSER_AUTH_SETUP,
         'requires_setup': _requires_access_setup() and ALLOW_BROWSER_AUTH_SETUP,
@@ -1069,7 +1255,7 @@ def auth_status():
 def auth_setup():
     if not ALLOW_BROWSER_AUTH_SETUP:
         return jsonify({
-            'error': 'Browser-based password setup is disabled in production. Configure STUDIO_PASSWORD and VISITOR_PASSWORD on the server.',
+            'error': 'Browser-based password setup is disabled in production. Configure OWNER_PASSWORD on the server.',
             'setup_allowed': False,
         }), 403
     if not _requires_access_setup():
@@ -1082,7 +1268,9 @@ def auth_setup():
         if len(owner_password) < 6:
             return jsonify({'error': 'Workspace password must be at least 6 characters'}), 400
         auth['studio_password_hash'] = generate_password_hash(owner_password)
-    if not _visitor_password_configured():
+    if visitor_password and not _legacy_visitor_password_enabled():
+        return jsonify({'error': 'Universal visitor passwords are disabled. Create visitor access profiles from the owner view.'}), 400
+    if visitor_password:
         if len(visitor_password) < 6:
             return jsonify({'error': 'Visitor password must be at least 6 characters'}), 400
         auth['visitor_password_hash'] = generate_password_hash(visitor_password)
@@ -1090,6 +1278,7 @@ def auth_setup():
     _save_auth_config(auth)
     session['studio_authed'] = True
     session.pop('visitor_authed', None)
+    session.pop('visitor_profile_id', None)
     session.modified = True
     return jsonify({'authenticated': True, 'requires_setup': False, 'access': ACCESS_OWNER})
 
@@ -1110,11 +1299,27 @@ def auth_login():
     if _verify_studio_password(password):
         session['studio_authed'] = True
         session.pop('visitor_authed', None)
+        session.pop('visitor_profile_id', None)
         session.modified = True
         return jsonify({'authenticated': True, 'access': ACCESS_OWNER})
+
+    visitor_profile = _access_profile_for_password(password)
+    if visitor_profile:
+        session['visitor_authed'] = True
+        session['visitor_profile_id'] = visitor_profile['id']
+        session.pop('studio_authed', None)
+        session.modified = True
+        return jsonify({
+            'authenticated': True,
+            'access': ACCESS_VISITOR,
+            'visitor_profile_id': visitor_profile['id'],
+            'visitor_profile_name': visitor_profile['name'],
+        })
+
     if not _verify_visitor_password(password):
         return jsonify({'error': 'Wrong password'}), 401
     session['visitor_authed'] = True
+    session.pop('visitor_profile_id', None)
     session.pop('studio_authed', None)
     session.modified = True
     return jsonify({'authenticated': True, 'access': ACCESS_VISITOR})
@@ -1123,7 +1328,7 @@ def auth_login():
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
     session.pop('studio_authed', None)
-    session.pop('visitor_authed', None)
+    _clear_visitor_session()
     session.modified = True
     return '', 204
 
@@ -1388,10 +1593,14 @@ def get_workspace():
 @_viewer_auth_required
 def get_visitor_workspace():
     ws = _get_workspace()
-    folders = ws.get('folders', [])
-    visible = [f for f in folders if _folder_is_visitor_visible(f, folders)]
     ws = dict(ws)
-    ws['folders'] = visible
+    ws['folders'] = _visitor_visible_folders(ws)
+    profile = _current_access_profile()
+    if profile:
+        ws['visitor_profile'] = {
+            'id': profile.get('id'),
+            'name': profile.get('name'),
+        }
     return jsonify(ws)
 
 
@@ -1408,87 +1617,105 @@ def patch_workspace():
     return jsonify(ws)
 
 
+@app.route('/api/access-profiles', methods=['GET'])
+@_studio_auth_required
+def list_access_profiles():
+    profiles = [_serialize_access_profile(profile) for profile in _load_access_profiles()]
+    profiles.sort(key=lambda profile: profile.get('created_at', ''), reverse=True)
+    return jsonify(profiles)
+
+
+@app.route('/api/access-profiles', methods=['POST'])
+@_studio_auth_required
+def create_access_profile():
+    data = request.json or {}
+    password = data.get('password') or ''
+    if len(password) < 6:
+        return jsonify({'error': 'Visitor password must be at least 6 characters'}), 400
+    if not _access_profile_password_storage_ready():
+        return jsonify({'error': 'Set S8_ACCESS_PROFILE_PEPPER in Render before creating visitor access passwords.'}), 503
+    now = datetime.now().isoformat()
+    profile = {
+        'id': str(uuid.uuid4())[:8],
+        'name': (data.get('name') or 'Visitor access').strip() or 'Visitor access',
+        'password_hash': '',
+        'password_peppered': False,
+        'active': True,
+        'workspace': False,
+        'folders': [],
+        'docs': [],
+        'created_at': now,
+        'updated_at': now,
+    }
+    profile = _sanitize_access_profile_payload(data, existing=profile)
+    profiles = _load_access_profiles()
+    profiles.append(profile)
+    _save_access_profiles(profiles)
+    return jsonify(_serialize_access_profile(profile)), 201
+
+
+@app.route('/api/access-profiles/<profile_id>', methods=['PATCH'])
+@_studio_auth_required
+def patch_access_profile(profile_id):
+    data = request.json or {}
+    profiles = _load_access_profiles()
+    password = data.get('password')
+    if isinstance(password, str) and password and len(password) < 6:
+        return jsonify({'error': 'Visitor password must be at least 6 characters'}), 400
+    if isinstance(password, str) and password and not _access_profile_password_storage_ready():
+        return jsonify({'error': 'Set S8_ACCESS_PROFILE_PEPPER in Render before changing visitor access passwords.'}), 503
+    for idx, profile in enumerate(profiles):
+        if profile.get('id') != profile_id:
+            continue
+        updated = _sanitize_access_profile_payload(data, existing=profile)
+        profiles[idx] = updated
+        _save_access_profiles(profiles)
+        return jsonify(_serialize_access_profile(updated))
+    return jsonify({'error': 'Access profile not found'}), 404
+
+
+@app.route('/api/access-profiles/<profile_id>', methods=['DELETE'])
+@_studio_auth_required
+def delete_access_profile(profile_id):
+    profiles = _load_access_profiles()
+    next_profiles = [profile for profile in profiles if profile.get('id') != profile_id]
+    if len(next_profiles) == len(profiles):
+        return jsonify({'error': 'Access profile not found'}), 404
+    _save_access_profiles(next_profiles)
+    return '', 204
+
+
 @app.route('/api/shares', methods=['GET'])
 @_studio_auth_required
 def list_shares():
-    shares = [_serialize_share_for_list(share) for share in _load_shares()]
-    shares.sort(key=lambda share: share.get('created_at', ''), reverse=True)
-    return jsonify(shares)
+    return jsonify([])
 
 
 @app.route('/api/shares', methods=['POST'])
 @_studio_auth_required
 def create_share():
-    data = request.json or {}
-    scope_type = data.get('scope_type') or ''
-    scope_id = data.get('scope_id')
-    label = (data.get('label') or '').strip()
-
-    if scope_type not in {'board', 'sheet', 'folder', 'workspace'}:
-        return jsonify({'error': 'Invalid share scope'}), 400
-    if scope_type != 'workspace' and not scope_id:
-        return jsonify({'error': 'Missing scope id'}), 400
-    if not _validate_share_scope(scope_type, scope_id):
-        return jsonify({'error': 'Scope not found'}), 404
-
-    share = _normalize_share({
-        'id': str(uuid.uuid4())[:8],
-        'scope_type': scope_type,
-        'scope_id': scope_id,
-        'token': secrets.token_urlsafe(18),
-        'revoked': False,
-        'created_at': datetime.now().isoformat(),
-        'label': label,
-    })
-    shares = _load_shares()
-    shares.append(share)
-    _save_shares(shares)
-    return jsonify(_serialize_share_for_list(share)), 201
+    return jsonify({'error': 'Share links are disabled. Use visitor access passwords instead.'}), 410
 
 
 @app.route('/api/shares/<share_id>', methods=['DELETE'])
 @_studio_auth_required
 def revoke_share(share_id):
-    shares = _load_shares()
-    changed = False
-    for share in shares:
-        if share.get('id') != share_id:
-            continue
-        share['revoked'] = True
-        changed = True
-        break
-    if not changed:
-        return jsonify({'error': 'Share not found'}), 404
-    _save_shares(shares)
-    return '', 204
+    return jsonify({'error': 'Share links are disabled. Use visitor access passwords instead.'}), 410
 
 
 @app.route('/api/share/<token>', methods=['GET'])
 def share_by_token(token):
-    share, error = _active_share_or_401(token)
-    if error:
-        return error
-    return jsonify(_scoped_share_payload(share))
+    return jsonify({'error': 'Share links are disabled. Use visitor access passwords instead.'}), 410
 
 
 @app.route('/api/share/<token>/board/<board_id>', methods=['GET'])
 def share_board(token, board_id):
-    share, error = _active_share_or_401(token)
-    if error:
-        return error
-    if not _share_allows_board(share, board_id):
-        return jsonify({'error': 'Not found'}), 404
-    return jsonify(_board_payload_with_assets(board_id))
+    return jsonify({'error': 'Share links are disabled. Use visitor access passwords instead.'}), 410
 
 
 @app.route('/api/share/<token>/sheet/<sheet_id>', methods=['GET'])
 def share_sheet(token, sheet_id):
-    share, error = _active_share_or_401(token)
-    if error:
-        return error
-    if not _share_allows_sheet(share, sheet_id):
-        return jsonify({'error': 'Not found'}), 404
-    return jsonify(_load(_sheet_file(sheet_id), {'data': []}))
+    return jsonify({'error': 'Share links are disabled. Use visitor access passwords instead.'}), 410
 
 
 # ── Boards ───────────────────────────────────────────────────────────────────
@@ -1502,7 +1729,7 @@ def list_boards():
 @app.route('/api/visitor/boards', methods=['GET'])
 @_viewer_auth_required
 def list_visitor_boards():
-    return jsonify(_list_docs_sorted(_load_boards(), visitor=True))
+    return jsonify(_list_docs_sorted(_load_boards(), visitor=True, kind='board'))
 
 
 @app.route('/api/boards', methods=['POST'])
@@ -1568,7 +1795,7 @@ def get_board(board_id):
 @_viewer_auth_required
 def get_visitor_board(board_id):
     data, error = _visitor_doc_load(
-        board_id, load_index=_load_boards, doc_file_fn=_board_file, default_payload={'snapshot': None}
+        board_id, kind='board', load_index=_load_boards, doc_file_fn=_board_file, default_payload={'snapshot': None}
     )
     if error:
         return error
@@ -1595,7 +1822,7 @@ def list_sheets():
 @app.route('/api/visitor/sheets', methods=['GET'])
 @_viewer_auth_required
 def list_visitor_sheets():
-    return jsonify(_list_docs_sorted(_load_sheets(), visitor=True))
+    return jsonify(_list_docs_sorted(_load_sheets(), visitor=True, kind='sheet'))
 
 
 @app.route('/api/sheets', methods=['POST'])
@@ -1659,7 +1886,7 @@ def get_sheet(sheet_id):
 @_viewer_auth_required
 def get_visitor_sheet(sheet_id):
     data, error = _visitor_doc_load(
-        sheet_id, load_index=_load_sheets, doc_file_fn=_sheet_file, default_payload={'data': []}
+        sheet_id, kind='sheet', load_index=_load_sheets, doc_file_fn=_sheet_file, default_payload={'data': []}
     )
     if error:
         return error
@@ -2537,7 +2764,7 @@ def list_gdocs():
 @app.route('/api/visitor/gdocs', methods=['GET'])
 @_viewer_auth_required
 def list_visitor_gdocs():
-    return jsonify(_list_docs_sorted(_load_gdocs(), visitor=True))
+    return jsonify(_list_docs_sorted(_load_gdocs(), visitor=True, kind='gdoc'))
 
 
 @app.route('/api/gdocs', methods=['POST'])
@@ -2588,9 +2815,8 @@ def get_gdoc(gdoc_id):
 @app.route('/api/visitor/gdocs/<gdoc_id>', methods=['GET'])
 @_viewer_auth_required
 def get_visitor_gdoc(gdoc_id):
-    folders = _get_workspace().get('folders', [])
-    for d in _load_gdocs():
-        if d['id'] == gdoc_id and _doc_is_visitor_visible(d, folders):
+    for d in _visitor_visible_docs('gdoc', _load_gdocs()):
+        if d['id'] == gdoc_id:
             return jsonify(d)
     return jsonify({'error': 'Not found'}), 404
 
@@ -2604,7 +2830,7 @@ def list_gsheets():
 @app.route('/api/visitor/gsheets', methods=['GET'])
 @_viewer_auth_required
 def list_visitor_gsheets():
-    return jsonify(_list_docs_sorted(_load_gsheets(), visitor=True))
+    return jsonify(_list_docs_sorted(_load_gsheets(), visitor=True, kind='gsheet'))
 
 
 @app.route('/api/gsheets', methods=['POST'])
@@ -2655,9 +2881,8 @@ def get_gsheet(gsheet_id):
 @app.route('/api/visitor/gsheets/<gsheet_id>', methods=['GET'])
 @_viewer_auth_required
 def get_visitor_gsheet(gsheet_id):
-    folders = _get_workspace().get('folders', [])
-    for d in _load_gsheets():
-        if d['id'] == gsheet_id and _doc_is_visitor_visible(d, folders):
+    for d in _visitor_visible_docs('gsheet', _load_gsheets()):
+        if d['id'] == gsheet_id:
             return jsonify(d)
     return jsonify({'error': 'Not found'}), 404
 
@@ -2671,7 +2896,7 @@ def list_reports():
 @app.route('/api/visitor/reports', methods=['GET'])
 @_viewer_auth_required
 def list_visitor_reports():
-    return jsonify(_list_docs_sorted(_load_reports(), visitor=True))
+    return jsonify(_list_docs_sorted(_load_reports(), visitor=True, kind='report'))
 
 
 @app.route('/api/visitor/reports/<report_id>', methods=['GET'])
@@ -2679,6 +2904,7 @@ def list_visitor_reports():
 def get_visitor_report(report_id):
     payload, error = _visitor_doc_load(
         report_id,
+        kind='report',
         load_index=_load_reports,
         doc_file_fn=_report_file,
         default_payload={'html': ''},
@@ -3417,22 +3643,25 @@ def search():
 @_viewer_auth_required
 def visitor_search():
     _sync_missing_only()
-    folders = _get_workspace().get('folders', [])
-    boards = [b for b in _load_boards() if _doc_is_visitor_visible(b, folders)]
-    sheets = [s for s in _load_sheets() if _doc_is_visitor_visible(s, folders)]
-    gdocs = [d for d in _load_gdocs() if _doc_is_visitor_visible(d, folders)]
-    gsheets = [d for d in _load_gsheets() if _doc_is_visitor_visible(d, folders)]
-    reports = [r for r in _load_reports() if _doc_is_visitor_visible(r, folders)]
+    workspace = _get_workspace()
+    docs_by_kind = {
+        'board': _load_boards(),
+        'sheet': _load_sheets(),
+        'gdoc': _load_gdocs(),
+        'gsheet': _load_gsheets(),
+        'report': _load_reports(),
+    }
+    boards = _visitor_visible_docs('board', docs_by_kind['board'], workspace=workspace, docs_by_kind=docs_by_kind)
+    sheets = _visitor_visible_docs('sheet', docs_by_kind['sheet'], workspace=workspace, docs_by_kind=docs_by_kind)
+    gdocs = _visitor_visible_docs('gdoc', docs_by_kind['gdoc'], workspace=workspace, docs_by_kind=docs_by_kind)
+    gsheets = _visitor_visible_docs('gsheet', docs_by_kind['gsheet'], workspace=workspace, docs_by_kind=docs_by_kind)
+    reports = _visitor_visible_docs('report', docs_by_kind['report'], workspace=workspace, docs_by_kind=docs_by_kind)
     return jsonify(_search_payload(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets, reports=reports))
 
 
 @app.route('/api/share/<token>/search', methods=['POST'])
 def share_search(token):
-    share, error = _active_share_or_401(token)
-    if error:
-        return error
-    payload = _scoped_share_payload(share)
-    return jsonify(_search_payload(boards=payload['boards'], sheets=payload['sheets']))
+    return jsonify({'error': 'Share links are disabled. Use visitor access passwords instead.'}), 410
 
 
 @app.route('/')

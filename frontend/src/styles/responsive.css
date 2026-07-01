@@ -67,6 +67,19 @@
   .modal-search {
     width: min(34rem, 100%);
   }
+  .access-create-row,
+  .access-layout,
+  .access-editor-grid,
+  .access-selection {
+    grid-template-columns: 1fr;
+  }
+  .access-profile-list {
+    border-right: none;
+    border-bottom: 0.0625rem solid var(--s8-sidebar-border);
+    max-height: 10rem;
+    padding-right: 0;
+    padding-bottom: 0.75rem;
+  }
 
   /* Database home: more compact topbar layout */
   .database-topbar {
@@ -127,6 +140,22 @@
   .modal-search {
     width: 100%;
     max-height: 80vh;
+  }
+  .access-modal-body {
+    max-height: 72vh;
+    overflow-y: auto;
+  }
+  .access-create-row,
+  .access-layout,
+  .access-editor-grid,
+  .access-selection {
+    grid-template-columns: 1fr;
+  }
+  .access-toggle-row {
+    align-items: stretch;
+  }
+  .access-count {
+    margin-left: 0;
   }
   .modal-footer {
     margin-top: 1rem;

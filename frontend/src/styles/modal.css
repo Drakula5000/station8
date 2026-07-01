@@ -76,6 +76,197 @@
 .btn-primary:disabled { background: var(--s8-text-dim); cursor: not-allowed; }
 .btn-danger { background: var(--s8-danger); }
 .btn-danger:hover { background: var(--s8-danger); opacity: 0.88; }
+.btn-danger-text { color: var(--s8-danger); }
+.btn-danger-text:hover { background: var(--s8-danger-dim); color: var(--s8-danger); }
+
+.access-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+.access-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+.access-error {
+  border: 0.0625rem solid var(--s8-danger);
+  background: var(--s8-danger-dim);
+  color: var(--s8-danger);
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.75rem;
+}
+.access-empty {
+  border: 0.0625rem dashed var(--s8-sidebar-border);
+  border-radius: 0.625rem;
+  padding: 1rem;
+  color: var(--s8-text-mid);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+.access-empty.small {
+  padding: 0.625rem;
+  font-size: 0.75rem;
+}
+.access-layout {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 0.875rem;
+  min-height: 24rem;
+}
+.access-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  border-right: 0.0625rem solid var(--s8-sidebar-border);
+  padding-right: 0.75rem;
+  overflow-y: auto;
+}
+.access-profile-btn {
+  border: 0.0625rem solid transparent;
+  background: transparent;
+  border-radius: 0.5rem;
+  color: var(--s8-text);
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0.625rem;
+  text-align: left;
+}
+.access-profile-btn:hover { background: var(--s8-hover); }
+.access-profile-btn.selected {
+  background: var(--s8-accent-dim);
+  border-color: var(--s8-accent-border);
+}
+.access-profile-name {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.access-profile-meta {
+  display: block;
+  color: var(--s8-text-mid);
+  font-size: 0.6875rem;
+  margin-top: 0.1875rem;
+}
+.access-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.access-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+}
+.access-toggle-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+.access-toggle,
+.access-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+  color: var(--s8-text);
+  font-size: 0.8125rem;
+}
+.access-toggle {
+  align-items: center;
+  border: 0.0625rem solid var(--s8-input-border);
+  background: var(--s8-input-bg);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.625rem;
+}
+.access-toggle input,
+.access-check input {
+  width: 0.9375rem;
+  height: 0.9375rem;
+  margin: 0.125rem 0 0;
+  padding: 0;
+  flex-shrink: 0;
+  accent-color: var(--s8-accent);
+}
+.access-toggle input { margin-top: 0; }
+.access-count {
+  color: var(--s8-text-mid);
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+.access-selection {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 0.75rem;
+  min-height: 0;
+}
+.access-selection.disabled {
+  opacity: 0.52;
+}
+.access-section {
+  border: 0.0625rem solid var(--s8-sidebar-border);
+  border-radius: 0.625rem;
+  background: var(--s8-input-bg);
+  min-width: 0;
+  overflow: hidden;
+}
+.access-section-title {
+  border-bottom: 0.0625rem solid var(--s8-sidebar-border);
+  color: var(--s8-text-mid);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.625rem 0.75rem;
+  text-transform: uppercase;
+}
+.access-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.0625rem;
+  max-height: 17rem;
+  overflow-y: auto;
+  padding: 0.375rem;
+}
+.access-check {
+  border-radius: 0.4375rem;
+  cursor: pointer;
+  padding: 0.4375rem 0.5rem;
+}
+.access-check:hover { background: var(--s8-hover); }
+.access-check input:disabled,
+.access-check input:disabled + span {
+  cursor: default;
+}
+.access-check-doc {
+  align-items: flex-start;
+}
+.access-doc-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+.access-doc-title,
+.access-doc-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.access-doc-path {
+  color: var(--s8-text-mid);
+  font-size: 0.6875rem;
+}
+.access-footer {
+  align-items: center;
+  justify-content: space-between;
+}
 
 .delete-dialog-body {
   display: flex;

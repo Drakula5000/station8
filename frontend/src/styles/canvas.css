@@ -701,21 +701,6 @@
   color: var(--s8-text-mid);
 }
 
-.share-body { display: flex; flex-direction: column; gap: 0.875rem; margin-top: 0.5rem; }
-.share-url-row { display: flex; gap: 0.5rem; }
-.share-url {
-  flex: 1; border: 0.0625rem solid var(--s8-input-border); border-radius: 0.375rem;
-  padding: 0.5625rem 0.75rem; font-size: 0.75rem; color: var(--s8-accent);
-  font-family: ui-monospace, Consolas, monospace;
-  outline: none; background: var(--s8-input-bg);
-}
-.share-owner-row { display: flex; flex-direction: column; gap: 0.25rem; }
-.share-owner-input {
-  border: 0.0625rem solid var(--s8-input-border); border-radius: 0.375rem;
-  padding: 0.5rem 0.75rem; font-size: 0.8125rem; outline: none;
-  background: var(--s8-input-bg); color: var(--s8-text);
-}
-
 /* ─── Google Drive embed (gdocs / gsheets) ─── */
 .gdrive-embed-wrap {
   flex: 1;
@@ -1727,5 +1712,4 @@ html[data-mode="dark"] .tool-style-swatch[data-highlight-icon="true"] {
   background: radial-gradient(circle, var(--s8-canvas-glow) 0%, transparent 65%);
   pointer-events: none;
 }
-
 
