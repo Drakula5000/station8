@@ -101,6 +101,15 @@
   padding: 0.625rem 0.75rem;
   font-size: 0.75rem;
 }
+.access-notice {
+  border: 0.0625rem solid var(--s8-accent-border);
+  background: var(--s8-accent-dim);
+  color: var(--s8-accent);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
 .access-empty {
   border: 0.0625rem dashed var(--s8-sidebar-border);
   border-radius: 0.625rem;
@@ -158,23 +167,25 @@
   min-width: 0;
 }
 .access-config {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.875rem;
-  align-items: end;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
   border-top: 0.0625rem solid var(--s8-sidebar-border);
-  padding-top: 0.25rem;
+  padding-top: 0.625rem;
 }
 .access-fields {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(13rem, 0.75fr);
   gap: 0.75rem;
+}
+.access-fields .modal-field-label {
+  white-space: nowrap;
 }
 .access-toggle-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 0.5rem;
 }
 .access-toggle {
@@ -253,7 +264,9 @@
   border-radius: 0.4375rem;
   color: var(--s8-text);
   min-height: 2.375rem;
-  padding: 0.3125rem 0.5rem 0.3125rem calc(0.5rem + var(--access-indent));
+  margin-left: var(--access-indent);
+  padding: 0.3125rem 0.5rem;
+  width: calc(100% - var(--access-indent));
 }
 .access-tree-row:hover {
   background: var(--s8-hover);

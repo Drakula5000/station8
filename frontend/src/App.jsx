@@ -336,6 +336,7 @@ export default function App() {
   const [accessPasswordDraft, setAccessPasswordDraft] = useState('')
   const [accessBusy, setAccessBusy] = useState(false)
   const [accessError, setAccessError] = useState('')
+  const [accessNotice, setAccessNotice] = useState('')
   const [ownerPromptOpen, setOwnerPromptOpen] = useState(false)
   const [ownerPromptDismissed, setOwnerPromptDismissed] = useState(false)
   const [ownerInput, setOwnerInput] = useState('')
@@ -983,6 +984,7 @@ export default function App() {
 
   const loadAccessProfiles = useCallback(async () => {
     setAccessError('')
+    setAccessNotice('')
     const data = await fetchJson(`${API}/api/access-profiles`, {}, null)
     if (!Array.isArray(data)) {
       setAccessError('Could not load visitor access.')
@@ -997,10 +999,12 @@ export default function App() {
   const openAccessProfiles = useCallback(() => {
     setAccessOpen(true)
     setAccessPasswordDraft('')
+    setAccessNotice('')
     loadAccessProfiles()
   }, [loadAccessProfiles])
 
   const patchAccessProfile = useCallback((profileId, updater) => {
+    setAccessNotice('')
     setAccessProfiles(current => current.map(profile => {
       if (profile.id !== profileId) return profile
       const patch = typeof updater === 'function' ? updater(profile) : updater
@@ -1014,6 +1018,7 @@ export default function App() {
     if (password.length < 6 || accessBusy) return
     setAccessBusy(true)
     setAccessError('')
+    setAccessNotice('')
     try {
       const res = await fetch(`${API}/api/access-profiles`, {
         method: 'POST',
@@ -1031,6 +1036,7 @@ export default function App() {
       setNewAccessName('')
       setNewAccessPassword('')
       setAccessPasswordDraft('')
+      setAccessNotice('Visitor access created.')
     } finally {
       setAccessBusy(false)
     }
@@ -1041,10 +1047,12 @@ export default function App() {
     const nextPassword = accessPasswordDraft.trim()
     if (nextPassword && nextPassword.length < 6) {
       setAccessError('New visitor password must be at least 6 characters.')
+      setAccessNotice('')
       return
     }
     setAccessBusy(true)
     setAccessError('')
+    setAccessNotice('')
     try {
       const payload = {
         name: selectedAccessProfile.name,
@@ -1068,6 +1076,7 @@ export default function App() {
       setAccessProfiles(current => current.map(profile => profile.id === data.id ? data : profile))
       setSelectedAccessId(data.id)
       setAccessPasswordDraft('')
+      setAccessNotice('Access saved.')
     } finally {
       setAccessBusy(false)
     }
@@ -1077,6 +1086,7 @@ export default function App() {
     if (!selectedAccessProfile || accessBusy) return
     setAccessBusy(true)
     setAccessError('')
+    setAccessNotice('')
     try {
       const res = await fetch(`${API}/api/access-profiles/${selectedAccessProfile.id}`, {
         method: 'DELETE',
@@ -1090,6 +1100,7 @@ export default function App() {
       setAccessProfiles(current => current.filter(profile => profile.id !== selectedAccessProfile.id))
       setSelectedAccessId(null)
       setAccessPasswordDraft('')
+      setAccessNotice('Visitor access deleted.')
     } finally {
       setAccessBusy(false)
     }
@@ -1097,6 +1108,7 @@ export default function App() {
 
   const toggleAccessFolder = useCallback((folderId) => {
     if (!selectedAccessProfile) return
+    setAccessNotice('')
     patchAccessProfile(selectedAccessProfile.id, (profile) => {
       const current = new Set(profile.folders || [])
       if (current.has(folderId)) current.delete(folderId)
@@ -1107,6 +1119,7 @@ export default function App() {
 
   const toggleAccessDoc = useCallback((doc) => {
     if (!selectedAccessProfile) return
+    setAccessNotice('')
     patchAccessProfile(selectedAccessProfile.id, (profile) => {
       const key = accessDocKey(doc)
       const current = new Map((profile.docs || []).map(item => [accessDocKey(item), item]))
@@ -2405,15 +2418,20 @@ export default function App() {
           passwordDraft={accessPasswordDraft}
           busy={accessBusy}
           error={accessError}
+          notice={accessNotice}
           onClose={() => setAccessOpen(false)}
           onSelectProfile={(profileId) => {
             setSelectedAccessId(profileId)
             setAccessPasswordDraft('')
             setAccessError('')
+            setAccessNotice('')
           }}
           onNewName={setNewAccessName}
           onNewPassword={setNewAccessPassword}
-          onPasswordDraft={setAccessPasswordDraft}
+          onPasswordDraft={(value) => {
+            setAccessPasswordDraft(value)
+            setAccessNotice('')
+          }}
           onCreate={createAccessProfile}
           onSave={saveSelectedAccessProfile}
           onDelete={deleteSelectedAccessProfile}
@@ -2866,6 +2884,7 @@ function AccessProfilesModal({
   passwordDraft,
   busy,
   error,
+  notice,
   onClose,
   onSelectProfile,
   onNewName,
@@ -2976,15 +2995,18 @@ function AccessProfilesModal({
             className={`access-tree-row access-folder-row${isIncluded ? ' is-included' : ''}${selectedTotal && !isSelected ? ' is-partial' : ''}`}
             style={{ '--access-depth': depth }}
           >
-            <button
-              className={`access-expander${isOpen ? ' open' : ''}`}
-              onClick={() => toggleFolderCollapsed(folderId)}
-              disabled={!hasChildren}
-              type="button"
-              title={isOpen ? 'Collapse folder' : 'Expand folder'}
-            >
-              <ChevronRightIcon />
-            </button>
+            {hasChildren ? (
+              <button
+                className={`access-expander${isOpen ? ' open' : ''}`}
+                onClick={() => toggleFolderCollapsed(folderId)}
+                type="button"
+                title={isOpen ? 'Collapse folder' : 'Expand folder'}
+              >
+                <ChevronRightIcon />
+              </button>
+            ) : (
+              <span className="access-expander-placeholder" />
+            )}
             <input
               type="checkbox"
               checked={fullWorkspace || isSelected}
@@ -3078,6 +3100,7 @@ function AccessProfilesModal({
         </div>
 
         {error && <div className="access-error">{error}</div>}
+        {notice && !error && <div className="access-notice" role="status" aria-live="polite">{notice}</div>}
 
         {profiles.length === 0 ? (
           <div className="access-empty">No visitor passwords yet.</div>
@@ -3120,7 +3143,7 @@ function AccessProfilesModal({
                         type="password"
                         value={passwordDraft}
                         onChange={e => onPasswordDraft(e.target.value)}
-                        placeholder={selectedProfile.has_password ? 'Leave blank to keep current' : 'At least 6 characters'}
+                        placeholder={selectedProfile.has_password ? 'Keep current' : 'At least 6 characters'}
                       />
                     </label>
                   </div>
