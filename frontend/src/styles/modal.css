@@ -110,6 +110,81 @@
   font-size: 0.75rem;
   font-weight: 600;
 }
+.access-secret-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 0.0625rem solid var(--s8-accent-border);
+  background: var(--s8-accent-dim);
+  border-radius: 0.625rem;
+  padding: 0.625rem 0.75rem;
+}
+.access-secret-title {
+  color: var(--s8-accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.access-secret-copy,
+.access-secret-status {
+  color: var(--s8-text-mid);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  margin-top: 0.125rem;
+}
+.access-secret-status {
+  color: var(--s8-danger);
+  margin-top: 0;
+}
+.access-secret-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+.modal input.access-secret-value {
+  color: var(--s8-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  padding: 0.5rem 0.625rem;
+}
+.access-copy-btn {
+  border: 0.0625rem solid var(--s8-input-border);
+  background: var(--s8-input-bg);
+  white-space: nowrap;
+}
+.access-password-summary {
+  border: 0.0625rem solid var(--s8-sidebar-border);
+  background: var(--s8-input-bg);
+  border-radius: 0.5rem;
+  padding: 0.5625rem 0.625rem;
+}
+.access-password-summary.active {
+  border-color: var(--s8-accent-border);
+  background: var(--s8-accent-dim);
+}
+.access-password-summary.warning {
+  border-color: var(--s8-danger);
+  background: var(--s8-danger-dim);
+}
+.access-password-summary-title {
+  color: var(--s8-text);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.access-password-summary.active .access-password-summary-title {
+  color: var(--s8-accent);
+}
+.access-password-summary.warning .access-password-summary-title {
+  color: var(--s8-danger);
+}
+.access-password-summary-copy {
+  color: var(--s8-text-mid);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  margin-top: 0.125rem;
+}
 .access-empty {
   border: 0.0625rem dashed var(--s8-sidebar-border);
   border-radius: 0.625rem;

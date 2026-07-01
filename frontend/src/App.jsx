@@ -60,6 +60,33 @@ function buildFolderPath(folderId, folderById) {
   return segments.join(' / ')
 }
 
+async function copyTextToClipboard(text) {
+  if (!text) return false
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // Fall through to the textarea fallback for older or stricter browsers.
+    }
+  }
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.left = '-9999px'
+    textarea.style.top = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return ok
+  } catch {
+    return false
+  }
+}
+
 function buildFolderOptions(folders, parentId = null, depth = 0, seen = new Set()) {
   return folders
     .filter(folder => (folder.parent_id || null) === parentId)
@@ -425,6 +452,7 @@ export default function App() {
   const [newAccessName, setNewAccessName] = useState('')
   const [newAccessPassword, setNewAccessPassword] = useState('')
   const [accessPasswordDraft, setAccessPasswordDraft] = useState('')
+  const [accessSavedSecret, setAccessSavedSecret] = useState(null)
   const [accessBusy, setAccessBusy] = useState(false)
   const [accessError, setAccessError] = useState('')
   const [accessNotice, setAccessNotice] = useState('')
@@ -1086,6 +1114,7 @@ export default function App() {
   const openAccessProfiles = useCallback(() => {
     setAccessOpen(true)
     setAccessPasswordDraft('')
+    setAccessSavedSecret(null)
     setAccessNotice('')
     loadAccessProfiles()
   }, [loadAccessProfiles])
@@ -1123,6 +1152,13 @@ export default function App() {
       setNewAccessName('')
       setNewAccessPassword('')
       setAccessPasswordDraft('')
+      setAccessSavedSecret({
+        profileId: data.id,
+        profileName: data.name || name,
+        password,
+        copied: false,
+        copyFailed: false,
+      })
       setAccessNotice('Visitor access created.')
     } finally {
       setAccessBusy(false)
@@ -1163,7 +1199,18 @@ export default function App() {
       setAccessProfiles(current => current.map(profile => profile.id === data.id ? data : profile))
       setSelectedAccessId(data.id)
       setAccessPasswordDraft('')
-      setAccessNotice('Access saved.')
+      if (nextPassword) {
+        setAccessSavedSecret({
+          profileId: data.id,
+          profileName: data.name || selectedAccessProfile.name,
+          password: nextPassword,
+          copied: false,
+          copyFailed: false,
+        })
+        setAccessNotice('Access saved. Password is available to copy.')
+      } else {
+        setAccessNotice('Access saved.')
+      }
     } finally {
       setAccessBusy(false)
     }
@@ -1187,11 +1234,24 @@ export default function App() {
       setAccessProfiles(current => current.filter(profile => profile.id !== selectedAccessProfile.id))
       setSelectedAccessId(null)
       setAccessPasswordDraft('')
+      setAccessSavedSecret(current => current?.profileId === selectedAccessProfile.id ? null : current)
       setAccessNotice('Visitor access deleted.')
     } finally {
       setAccessBusy(false)
     }
   }, [accessBusy, selectedAccessProfile])
+
+  const copyAccessSavedSecret = useCallback(async (secret) => {
+    if (!secret?.password) return
+    const copied = await copyTextToClipboard(secret.password)
+    setAccessSavedSecret({
+      profileId: secret.profileId,
+      profileName: secret.profileName,
+      password: secret.password,
+      copied,
+      copyFailed: !copied,
+    })
+  }, [])
 
   const toggleAccessFolder = useCallback((folderId) => {
     if (!selectedAccessProfile) return
@@ -2502,24 +2562,34 @@ export default function App() {
           newName={newAccessName}
           newPassword={newAccessPassword}
           passwordDraft={accessPasswordDraft}
+          savedSecret={accessSavedSecret}
           busy={accessBusy}
           error={accessError}
           notice={accessNotice}
-          onClose={() => setAccessOpen(false)}
+          onClose={() => {
+            setAccessOpen(false)
+            setAccessSavedSecret(null)
+          }}
           onSelectProfile={(profileId) => {
             setSelectedAccessId(profileId)
             setAccessPasswordDraft('')
+            setAccessSavedSecret(current => current?.profileId === profileId ? current : null)
             setAccessError('')
             setAccessNotice('')
           }}
           onNewName={setNewAccessName}
-          onNewPassword={setNewAccessPassword}
+          onNewPassword={(value) => {
+            setNewAccessPassword(value)
+            setAccessSavedSecret(null)
+          }}
           onPasswordDraft={(value) => {
             setAccessPasswordDraft(value)
+            setAccessSavedSecret(current => current?.profileId === selectedAccessId ? null : current)
             setAccessNotice('')
           }}
           onCreate={createAccessProfile}
           onSave={saveSelectedAccessProfile}
+          onCopySavedSecret={copyAccessSavedSecret}
           onDelete={deleteSelectedAccessProfile}
           onPatchProfile={patchAccessProfile}
           onToggleFolder={toggleAccessFolder}
@@ -2967,6 +3037,7 @@ function AccessProfilesModal({
   newName,
   newPassword,
   passwordDraft,
+  savedSecret,
   busy,
   error,
   notice,
@@ -2977,6 +3048,7 @@ function AccessProfilesModal({
   onPasswordDraft,
   onCreate,
   onSave,
+  onCopySavedSecret,
   onDelete,
   onPatchProfile,
   onToggleFolder,
@@ -3004,6 +3076,29 @@ function AccessProfilesModal({
     ? docs.length
     : docs.filter(doc => explicitDocKeys.has(accessDocKey(doc)) || selectedFolderTree.has(doc.folder_id)).length
   const query = accessQuery.trim().toLowerCase()
+  const resetPasswordDraft = passwordDraft.trim()
+  const resetPasswordReady = resetPasswordDraft.length >= 6
+  const selectedSavedSecret = savedSecret?.profileId === selectedProfile?.id
+    ? savedSecret
+    : selectedProfile?.password
+      ? {
+          profileId: selectedProfile.id,
+          profileName: selectedProfile.name,
+          password: selectedProfile.password,
+          copied: false,
+          copyFailed: false,
+        }
+      : null
+  const passwordStatusTitle = resetPasswordDraft
+    ? resetPasswordReady ? 'Ready to reset' : 'Password too short'
+    : selectedProfile?.has_password ? 'Reset needed to view' : 'No password set'
+  const passwordStatusCopy = resetPasswordDraft
+    ? resetPasswordReady
+      ? 'Click Save access. A copy box will appear here after the new password is saved.'
+      : 'Visitor passwords need at least 6 characters.'
+    : selectedProfile?.has_password
+      ? 'This password was saved before retrieval existed. Type a new one above and save once.'
+      : 'Type a password above and save. A copy box will appear after it is saved.'
 
   const foldersByParent = useMemo(() => {
     const map = new Map()
@@ -3130,10 +3225,11 @@ function AccessProfilesModal({
           />
           <input
             type="password"
+            autoComplete="new-password"
             value={newPassword}
             onChange={e => onNewPassword(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') onCreate() }}
-            placeholder="New visitor password"
+            placeholder="Password to give them"
           />
           <button className="btn-primary" onClick={onCreate} disabled={busy || newPassword.trim().length < 6} type="button">
             Create
@@ -3182,12 +3278,42 @@ function AccessProfilesModal({
                       <span className="modal-field-label">Change password</span>
                       <input
                         type="password"
+                        autoComplete="new-password"
                         value={passwordDraft}
                         onChange={e => onPasswordDraft(e.target.value)}
                         placeholder={selectedProfile.has_password ? 'Keep current' : 'At least 6 characters'}
                       />
                     </label>
                   </div>
+                  {selectedSavedSecret && !resetPasswordDraft ? (
+                    <div className="access-secret-card">
+                      <div>
+                        <div className="access-secret-title">Password available</div>
+                        <div className="access-secret-copy">
+                          Copy the saved password for {selectedSavedSecret.profileName}.
+                        </div>
+                      </div>
+                      <div className="access-secret-row">
+                        <input
+                          className="access-secret-value"
+                          readOnly
+                          value={selectedSavedSecret.password}
+                          onFocus={e => e.target.select()}
+                        />
+                        <button className="btn-ghost access-copy-btn" onClick={() => onCopySavedSecret(selectedSavedSecret)} type="button">
+                          {selectedSavedSecret.copied ? 'Copied' : 'Copy'}
+                        </button>
+                      </div>
+                      {selectedSavedSecret.copyFailed && (
+                        <div className="access-secret-status">Copy failed. Select the password field and copy it manually.</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className={`access-password-summary${resetPasswordDraft ? ' active' : ''}${resetPasswordDraft && !resetPasswordReady ? ' warning' : ''}`}>
+                      <div className="access-password-summary-title">{passwordStatusTitle}</div>
+                      <div className="access-password-summary-copy">{passwordStatusCopy}</div>
+                    </div>
+                  )}
 
                   <div className="access-toggle-row">
                     <label className="access-toggle">

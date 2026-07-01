@@ -1,5 +1,7 @@
 """Station 8 backend with studio auth and password-protected share links."""
 
+import base64
+import hashlib
 import json
 import os
 import re
@@ -11,6 +13,7 @@ from functools import wraps
 from html.parser import HTMLParser as _StdlibHTMLParser
 
 from flask import Flask, jsonify, request, send_from_directory, session, redirect
+from cryptography.fernet import Fernet, InvalidToken
 from itsdangerous import URLSafeSerializer, BadSignature
 from werkzeug.security import check_password_hash, generate_password_hash
 from supabase import create_client, Client
@@ -328,6 +331,37 @@ def _hash_access_profile_password(password):
     return generate_password_hash(_access_profile_password_material(password)), bool(_access_profile_pepper())
 
 
+def _access_profile_password_cipher():
+    secret = _access_profile_pepper()
+    if not secret and not PRODUCTION:
+        secret = app.secret_key
+    if not secret:
+        return None
+    key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode('utf-8')).digest())
+    return Fernet(key)
+
+
+def _encrypt_access_profile_password(password):
+    cipher = _access_profile_password_cipher()
+    if not cipher:
+        raise RuntimeError('missing_access_profile_pepper')
+    token = cipher.encrypt(password.encode('utf-8')).decode('utf-8')
+    return f'fernet:{token}'
+
+
+def _decrypt_access_profile_password(profile):
+    secret = (profile or {}).get('password_secret') or ''
+    if not secret.startswith('fernet:'):
+        return None
+    cipher = _access_profile_password_cipher()
+    if not cipher:
+        return None
+    try:
+        return cipher.decrypt(secret.removeprefix('fernet:').encode('utf-8')).decode('utf-8')
+    except (InvalidToken, TypeError, UnicodeDecodeError, ValueError):
+        return None
+
+
 def _check_access_profile_password(profile, password):
     stored_hash = profile.get('password_hash') or ''
     if not stored_hash:
@@ -549,6 +583,7 @@ def _normalize_access_profile(profile):
         'name': (source.get('name') or 'Visitor access').strip() or 'Visitor access',
         'password_hash': source.get('password_hash') or '',
         'password_peppered': bool(source.get('password_peppered')),
+        'password_secret': source.get('password_secret') or '',
         'active': source.get('active') is not False,
         'workspace': bool(source.get('workspace')),
         'folders': folders,
@@ -747,6 +782,7 @@ def _sanitize_access_profile_payload(data, existing=None):
     password = data.get('password')
     if isinstance(password, str) and password:
         profile['password_hash'], profile['password_peppered'] = _hash_access_profile_password(password)
+        profile['password_secret'] = _encrypt_access_profile_password(password)
 
     profile['updated_at'] = now
     return _normalize_access_profile(profile)
@@ -756,6 +792,7 @@ def _serialize_access_profile(profile):
     normalized = _normalize_access_profile(profile)
     docs_by_kind = {kind: loader() for kind, loader in _profile_doc_loaders().items()}
     scope = _profile_scope(normalized, docs_by_kind=docs_by_kind)
+    password = _decrypt_access_profile_password(normalized)
     return {
         'id': normalized['id'],
         'name': normalized['name'],
@@ -764,6 +801,8 @@ def _serialize_access_profile(profile):
         'folders': normalized['folders'],
         'docs': normalized['docs'],
         'has_password': bool(normalized.get('password_hash')),
+        'password': password,
+        'password_retrievable': password is not None,
         'created_at': normalized['created_at'],
         'updated_at': normalized['updated_at'],
         'visible_folder_count': len(scope['folders']),

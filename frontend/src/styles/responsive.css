@@ -73,6 +73,7 @@
   .access-create-row,
   .access-config,
   .access-fields,
+  .access-secret-row,
   .access-tree-toolbar {
     grid-template-columns: 1fr;
   }
@@ -144,6 +145,7 @@
   .access-create-row,
   .access-config,
   .access-fields,
+  .access-secret-row,
   .access-tree-toolbar {
     grid-template-columns: 1fr;
   }
