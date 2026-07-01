@@ -435,13 +435,11 @@ def _save_gsheets(gsheets):
 
 
 def _load_reports():
-    folders = _get_workspace().get('folders', [])
-    return [_normalize_doc(report, folders) for report in _load(REPORTS_FILE, [])]
+    return _load(REPORTS_FILE, [])
 
 
 def _save_reports(reports):
-    folders = _get_workspace().get('folders', [])
-    _save(REPORTS_FILE, [_normalize_doc(report, folders) for report in reports])
+    _save(REPORTS_FILE, reports)
 
 
 def _load_report(report_id):
@@ -721,21 +719,32 @@ def _folder_with_descendants(folder_id, folders):
 
 
 def _move_docs_from_folder(folder_ids, target_parent_id):
-    for load_fn, save_fn in (
-        (_load_boards, _save_boards),
-        (_load_sheets, _save_sheets),
-        (_load_gdocs, _save_gdocs),
-        (_load_gsheets, _save_gsheets),
-        (_load_reports, _save_reports),
-    ):
-        docs = load_fn()
-        updated = False
-        for doc in docs:
-            if doc.get('folder_id') in folder_ids:
-                doc['folder_id'] = target_parent_id
-                updated = True
-        if updated:
-            save_fn(docs)
+    boards = _load_boards()
+    updated_boards = False
+    for board in boards:
+        if board.get('folder_id') in folder_ids:
+            board['folder_id'] = target_parent_id
+            updated_boards = True
+    if updated_boards:
+        _save_boards(boards)
+
+    sheets = _load_sheets()
+    updated_sheets = False
+    for sheet in sheets:
+        if sheet.get('folder_id') in folder_ids:
+            sheet['folder_id'] = target_parent_id
+            updated_sheets = True
+    if updated_sheets:
+        _save_sheets(sheets)
+
+    reports = _load_reports()
+    updated_reports = False
+    for report in reports:
+        if report.get('folder_id') in folder_ids:
+            report['folder_id'] = target_parent_id
+            updated_reports = True
+    if updated_reports:
+        _save_reports(reports)
 
 
 def _move_direct_docs_from_folder(folder_id, target_parent_id):
@@ -779,11 +788,6 @@ def _normalize_share(item):
     share['revoked'] = bool(share.get('revoked'))
     share['created_at'] = share.get('created_at') or datetime.now().isoformat()
     share['label'] = (share.get('label') or '').strip()
-    share['password_hash'] = share.get('password_hash') or None
-    try:
-        share['auth_version'] = int(share.get('auth_version') or 1)
-    except (TypeError, ValueError):
-        share['auth_version'] = 1
     return share
 
 
@@ -812,24 +816,6 @@ def _is_studio_authed():
 
 def _is_visitor_authed():
     return bool(session.get('visitor_authed'))
-
-
-def _share_auth_sessions():
-    authed = session.get('share_authed')
-    return authed if isinstance(authed, dict) else {}
-
-
-def _is_share_authed(share):
-    if not share or share.get('revoked'):
-        return False
-    return _share_auth_sessions().get(share.get('id')) == share.get('auth_version')
-
-
-def _mark_share_authed(share):
-    authed = dict(_share_auth_sessions())
-    authed[share.get('id')] = share.get('auth_version')
-    session['share_authed'] = authed
-    session.modified = True
 
 
 def _current_access_level():
@@ -862,57 +848,45 @@ def _active_share_or_401(token):
     share = _find_share_by_token(token)
     if not share or share.get('revoked'):
         return None, (jsonify({'error': 'Share not found'}), 404)
-    if not (_is_visitor_authed() or _is_studio_authed() or _is_share_authed(share)):
-        return None, (jsonify({'error': 'Share password required', 'requires_password': True}), 401)
+    if not (_is_visitor_authed() or _is_studio_authed()):
+        return None, (jsonify({'error': 'Visitor password required', 'requires_password': True}), 401)
     return share, None
 
 
-def _share_doc_sources():
-    return {
-        'board': {'payload_key': 'boards', 'load': _load_boards, 'label': 'Board'},
-        'sheet': {'payload_key': 'sheets', 'load': _load_sheets, 'label': 'Sheet'},
-        'gdoc': {'payload_key': 'gdocs', 'load': _load_gdocs, 'label': 'Doc'},
-        'gsheet': {'payload_key': 'gsheets', 'load': _load_gsheets, 'label': 'Sheet'},
-        'report': {'payload_key': 'reports', 'load': _load_reports, 'label': 'Report'},
-    }
-
-
-def _load_share_doc_indexes():
-    return {kind: spec['load']() for kind, spec in _share_doc_sources().items()}
-
-
-def _scope_label(share, docs_by_kind=None, folders=None, workspace=None):
-    workspace = workspace if workspace is not None else _get_workspace()
-    docs_by_kind = docs_by_kind if docs_by_kind is not None else _load_share_doc_indexes()
-    folders = folders if folders is not None else workspace.get('folders', [])
+def _scope_label(share, boards=None, sheets=None, folders=None):
+    boards = boards if boards is not None else _load_boards()
+    sheets = sheets if sheets is not None else _load_sheets()
+    folders = folders if folders is not None else _get_workspace().get('folders', [])
     scope_type = share.get('scope_type')
     scope_id = share.get('scope_id')
-    doc_sources = _share_doc_sources()
-    if scope_type in doc_sources:
-        doc = next((item for item in docs_by_kind.get(scope_type, []) if item.get('id') == scope_id), None)
-        return doc.get('name') if doc else doc_sources[scope_type]['label']
+    if scope_type == 'board':
+        board = next((item for item in boards if item.get('id') == scope_id), None)
+        return board.get('name') if board else 'Board'
+    if scope_type == 'sheet':
+        sheet = next((item for item in sheets if item.get('id') == scope_id), None)
+        return sheet.get('name') if sheet else 'Sheet'
     if scope_type == 'folder':
         folder = next((item for item in folders if item.get('id') == scope_id), None)
         return folder.get('name') if folder else 'Folder'
-    return workspace.get('name', 'Workspace')
+    return _get_workspace().get('name', 'Workspace')
 
 
 def _scoped_share_payload(share):
     ws = _get_workspace()
     folders = ws.get('folders', [])
-    docs_by_kind = _load_share_doc_indexes()
+    boards = _load_boards()
+    sheets = _load_sheets()
     scope_type = share.get('scope_type')
     scope_id = share.get('scope_id')
 
     scoped_folders = []
-    scoped_docs_by_kind = {kind: [] for kind in _share_doc_sources()}
+    scoped_boards = []
+    scoped_sheets = []
 
     if scope_type == 'workspace':
         scoped_folders = [dict(folder) for folder in folders]
-        scoped_docs_by_kind = {
-            kind: [dict(doc) for doc in docs]
-            for kind, docs in docs_by_kind.items()
-        }
+        scoped_boards = [dict(board) for board in boards]
+        scoped_sheets = [dict(sheet) for sheet in sheets]
     elif scope_type == 'folder':
         folder_ids = _folder_with_descendants(scope_id, folders) if any(folder.get('id') == scope_id for folder in folders) else set()
         scoped_folders = []
@@ -924,52 +898,50 @@ def _scoped_share_payload(share):
                 **folder,
                 'parent_id': parent_id if parent_id in folder_ids else None,
             })
-        scoped_docs_by_kind = {
-            kind: [dict(doc) for doc in docs if doc.get('folder_id') in folder_ids]
-            for kind, docs in docs_by_kind.items()
-        }
-    elif scope_type in _share_doc_sources():
-        doc = next((item for item in docs_by_kind.get(scope_type, []) if item.get('id') == scope_id), None)
-        if doc:
-            scoped_docs_by_kind[scope_type] = [{**doc, 'folder_id': None}]
+        scoped_boards = [dict(board) for board in boards if board.get('folder_id') in folder_ids]
+        scoped_sheets = [dict(sheet) for sheet in sheets if sheet.get('folder_id') in folder_ids]
+    elif scope_type == 'board':
+        board = next((item for item in boards if item.get('id') == scope_id), None)
+        if board:
+            scoped_boards = [{**board, 'folder_id': None}]
+    elif scope_type == 'sheet':
+        sheet = next((item for item in sheets if item.get('id') == scope_id), None)
+        if sheet:
+            scoped_sheets = [{**sheet, 'folder_id': None}]
 
-    payload = {
+    return {
         'share': {
             'id': share.get('id'),
             'label': share.get('label'),
             'scope_type': scope_type,
             'scope_id': scope_id,
-            'title': share.get('label') or _scope_label(share, docs_by_kind=docs_by_kind, folders=folders, workspace=ws),
+            'title': share.get('label') or _scope_label(share, boards=boards, sheets=sheets, folders=folders),
         },
         'workspace': {
             'name': ws.get('name'),
             'owner': ws.get('owner'),
             'folders': scoped_folders,
         },
+        'boards': scoped_boards,
+        'sheets': scoped_sheets,
     }
-    for kind, spec in _share_doc_sources().items():
-        payload[spec['payload_key']] = scoped_docs_by_kind.get(kind, [])
-    return payload
 
 
 def _share_allowed_doc_ids(share):
     payload = _scoped_share_payload(share)
-    return {
-        kind: {doc.get('id') for doc in payload[spec['payload_key']]}
-        for kind, spec in _share_doc_sources().items()
-    }
-
-
-def _share_allows_doc(share, kind, doc_id):
-    return doc_id in _share_allowed_doc_ids(share).get(kind, set())
+    board_ids = {board.get('id') for board in payload['boards']}
+    sheet_ids = {sheet.get('id') for sheet in payload['sheets']}
+    return board_ids, sheet_ids
 
 
 def _share_allows_board(share, board_id):
-    return _share_allows_doc(share, 'board', board_id)
+    board_ids, _ = _share_allowed_doc_ids(share)
+    return board_id in board_ids
 
 
 def _share_allows_sheet(share, sheet_id):
-    return _share_allows_doc(share, 'sheet', sheet_id)
+    _, sheet_ids = _share_allowed_doc_ids(share)
+    return sheet_id in sheet_ids
 
 
 def _snapshot_upload_filenames(snapshot):
@@ -1050,14 +1022,18 @@ def _delete_report_files(report_ids):
 
 def _validate_share_scope(scope_type, scope_id):
     ws = _get_workspace()
+    boards = _load_boards()
+    sheets = _load_sheets()
     folders = ws.get('folders', [])
 
     if scope_type == 'workspace':
         return True
+    if scope_type == 'board':
+        return any(board.get('id') == scope_id for board in boards)
+    if scope_type == 'sheet':
+        return any(sheet.get('id') == scope_id for sheet in sheets)
     if scope_type == 'folder':
         return any(folder.get('id') == scope_id for folder in folders)
-    if scope_type in _share_doc_sources():
-        return any(doc.get('id') == scope_id for doc in _share_doc_sources()[scope_type]['load']())
     return False
 
 
@@ -1070,7 +1046,6 @@ def _serialize_share_for_list(share):
         'scope_id': share.get('scope_id'),
         'token': share.get('token'),
         'revoked': bool(share.get('revoked')),
-        'has_password': bool(share.get('password_hash')),
         'created_at': share.get('created_at'),
         'title': payload['share']['title'],
         'url': f'/share/{share.get("token")}',
@@ -1079,16 +1054,11 @@ def _serialize_share_for_list(share):
 
 @app.route('/api/auth/status', methods=['GET'])
 def auth_status():
-    share_token = (request.args.get('share_token') or '').strip()
-    share = _find_share_by_token(share_token) if share_token else None
-    share_authenticated = bool(share and _is_share_authed(share))
-    access = _current_access_level() or (ACCESS_VISITOR if share_authenticated else None)
     return jsonify({
-        'authenticated': bool(access),
-        'access': access,
+        'authenticated': bool(_current_access_level()),
+        'access': _current_access_level(),
         'owner_authenticated': _is_studio_authed(),
         'visitor_authenticated': _is_visitor_authed(),
-        'share_authenticated': share_authenticated,
         'configured': _auth_configured(),
         'setup_allowed': ALLOW_BROWSER_AUTH_SETUP,
         'requires_setup': _requires_access_setup() and ALLOW_BROWSER_AUTH_SETUP,
@@ -1128,7 +1098,6 @@ def auth_setup():
 def auth_login():
     data = request.json or {}
     password = data.get('password') or ''
-    share_token = (data.get('share_token') or '').strip()
     if _requires_access_setup():
         if ALLOW_BROWSER_AUTH_SETUP:
             return jsonify({'error': 'Access passwords have not been set up yet', 'requires_setup': True, 'setup_allowed': True}), 409
@@ -1143,11 +1112,6 @@ def auth_login():
         session.pop('visitor_authed', None)
         session.modified = True
         return jsonify({'authenticated': True, 'access': ACCESS_OWNER})
-    if share_token:
-        share = _find_share_by_token(share_token)
-        if share and not share.get('revoked') and share.get('password_hash') and check_password_hash(share['password_hash'], password):
-            _mark_share_authed(share)
-            return jsonify({'authenticated': True, 'access': ACCESS_VISITOR, 'share_authenticated': True})
     if not _verify_visitor_password(password):
         return jsonify({'error': 'Wrong password'}), 401
     session['visitor_authed'] = True
@@ -1160,7 +1124,6 @@ def auth_login():
 def auth_logout():
     session.pop('studio_authed', None)
     session.pop('visitor_authed', None)
-    session.pop('share_authed', None)
     session.modified = True
     return '', 204
 
@@ -1390,13 +1353,9 @@ def delete_folder(folder_id):
     folder_ids = _folder_with_descendants(folder_id, folders)
     boards_to_delete = [board for board in _load_boards() if board.get('folder_id') in folder_ids]
     sheets_to_delete = [sheet for sheet in _load_sheets() if sheet.get('folder_id') in folder_ids]
-    gdocs_to_delete = [doc for doc in _load_gdocs() if doc.get('folder_id') in folder_ids]
-    gsheets_to_delete = [sheet for sheet in _load_gsheets() if sheet.get('folder_id') in folder_ids]
     reports_to_delete = [r for r in _load_reports() if r.get('folder_id') in folder_ids]
     board_ids = [board.get('id') for board in boards_to_delete if board.get('id')]
     sheet_ids = [sheet.get('id') for sheet in sheets_to_delete if sheet.get('id')]
-    gdoc_ids = [doc.get('id') for doc in gdocs_to_delete if doc.get('id')]
-    gsheet_ids = [sheet.get('id') for sheet in gsheets_to_delete if sheet.get('id')]
     report_ids = [r.get('id') for r in reports_to_delete if r.get('id')]
     upload_filenames = set()
     for board_id in board_ids:
@@ -1409,14 +1368,6 @@ def delete_folder(folder_id):
     if sheet_ids:
         _save_sheets([sheet for sheet in _load_sheets() if sheet.get('id') not in set(sheet_ids)])
         _delete_sheet_files(sheet_ids)
-    if gdoc_ids:
-        _save_gdocs([doc for doc in _load_gdocs() if doc.get('id') not in set(gdoc_ids)])
-        for gdoc_id in gdoc_ids:
-            _drop_gdrive_content('gdoc', gdoc_id)
-    if gsheet_ids:
-        _save_gsheets([sheet for sheet in _load_gsheets() if sheet.get('id') not in set(gsheet_ids)])
-        for gsheet_id in gsheet_ids:
-            _drop_gdrive_content('gsheet', gsheet_id)
     if report_ids:
         _save_reports([r for r in _load_reports() if r.get('id') not in set(report_ids)])
         _delete_report_files(report_ids)
@@ -1472,16 +1423,13 @@ def create_share():
     scope_type = data.get('scope_type') or ''
     scope_id = data.get('scope_id')
     label = (data.get('label') or '').strip()
-    password = (data.get('password') or '').strip()
 
-    if scope_type not in {*_share_doc_sources().keys(), 'folder', 'workspace'}:
+    if scope_type not in {'board', 'sheet', 'folder', 'workspace'}:
         return jsonify({'error': 'Invalid share scope'}), 400
     if scope_type != 'workspace' and not scope_id:
         return jsonify({'error': 'Missing scope id'}), 400
     if not _validate_share_scope(scope_type, scope_id):
         return jsonify({'error': 'Scope not found'}), 404
-    if password and len(password) < 6:
-        return jsonify({'error': 'Share password must be at least 6 characters'}), 400
 
     share = _normalize_share({
         'id': str(uuid.uuid4())[:8],
@@ -1491,33 +1439,11 @@ def create_share():
         'revoked': False,
         'created_at': datetime.now().isoformat(),
         'label': label,
-        'password_hash': generate_password_hash(password) if password else None,
     })
     shares = _load_shares()
     shares.append(share)
     _save_shares(shares)
     return jsonify(_serialize_share_for_list(share)), 201
-
-
-@app.route('/api/shares/<share_id>', methods=['PATCH'])
-@_studio_auth_required
-def patch_share(share_id):
-    data = request.json or {}
-    shares = _load_shares()
-    for share in shares:
-        if share.get('id') != share_id:
-            continue
-        if 'label' in data:
-            share['label'] = (data.get('label') or '').strip()
-        if 'password' in data:
-            password = (data.get('password') or '').strip()
-            if password and len(password) < 6:
-                return jsonify({'error': 'Share password must be at least 6 characters'}), 400
-            share['password_hash'] = generate_password_hash(password) if password else None
-            share['auth_version'] = int(share.get('auth_version') or 1) + 1
-        _save_shares(shares)
-        return jsonify(_serialize_share_for_list(share))
-    return jsonify({'error': 'Share not found'}), 404
 
 
 @app.route('/api/shares/<share_id>', methods=['DELETE'])
@@ -1529,7 +1455,6 @@ def revoke_share(share_id):
         if share.get('id') != share_id:
             continue
         share['revoked'] = True
-        share['auth_version'] = int(share.get('auth_version') or 1) + 1
         changed = True
         break
     if not changed:
@@ -1564,52 +1489,6 @@ def share_sheet(token, sheet_id):
     if not _share_allows_sheet(share, sheet_id):
         return jsonify({'error': 'Not found'}), 404
     return jsonify(_load(_sheet_file(sheet_id), {'data': []}))
-
-
-@app.route('/api/share/<token>/gdoc/<gdoc_id>', methods=['GET'])
-def share_gdoc(token, gdoc_id):
-    share, error = _active_share_or_401(token)
-    if error:
-        return error
-    if not _share_allows_doc(share, 'gdoc', gdoc_id):
-        return jsonify({'error': 'Not found'}), 404
-    doc = next((item for item in _load_gdocs() if item.get('id') == gdoc_id), None)
-    if not doc:
-        return jsonify({'error': 'Not found'}), 404
-    return jsonify(doc)
-
-
-@app.route('/api/share/<token>/gsheet/<gsheet_id>', methods=['GET'])
-def share_gsheet(token, gsheet_id):
-    share, error = _active_share_or_401(token)
-    if error:
-        return error
-    if not _share_allows_doc(share, 'gsheet', gsheet_id):
-        return jsonify({'error': 'Not found'}), 404
-    sheet = next((item for item in _load_gsheets() if item.get('id') == gsheet_id), None)
-    if not sheet:
-        return jsonify({'error': 'Not found'}), 404
-    return jsonify(sheet)
-
-
-@app.route('/api/share/<token>/report/<report_id>', methods=['GET'])
-def share_report(token, report_id):
-    share, error = _active_share_or_401(token)
-    if error:
-        return error
-    if not _share_allows_doc(share, 'report', report_id):
-        return jsonify({'error': 'Not found'}), 404
-    record = next((item for item in _load_reports() if item.get('id') == report_id), None)
-    if record is None:
-        return jsonify({'error': 'Not found'}), 404
-    blob = _load_report(report_id) or {}
-    return jsonify({
-        'id': report_id,
-        'name': record.get('name') or blob.get('name', ''),
-        'html': blob.get('html', ''),
-        'created_at': record.get('created_at') or blob.get('created_at'),
-        'updated_at': record.get('updated_at') or blob.get('updated_at'),
-    })
 
 
 # ── Boards ───────────────────────────────────────────────────────────────────
@@ -3552,15 +3431,8 @@ def share_search(token):
     share, error = _active_share_or_401(token)
     if error:
         return error
-    _sync_missing_only()
     payload = _scoped_share_payload(share)
-    return jsonify(_search_payload(
-        boards=payload['boards'],
-        sheets=payload['sheets'],
-        gdocs=payload['gdocs'],
-        gsheets=payload['gsheets'],
-        reports=payload['reports'],
-    ))
+    return jsonify(_search_payload(boards=payload['boards'], sheets=payload['sheets']))
 
 
 @app.route('/')

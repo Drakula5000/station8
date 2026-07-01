@@ -67,12 +67,6 @@
   .modal-search {
     width: min(34rem, 100%);
   }
-  .share-link-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .share-link-row .share-url {
-    grid-column: 1 / -1;
-  }
 
   /* Database home: more compact topbar layout */
   .database-topbar {
@@ -685,7 +679,6 @@
   }
   .tree-delete-btn,
   .tree-privacy-btn,
-  .tree-share-btn,
   .tree-rename-btn {
     opacity: 1 !important;
   }

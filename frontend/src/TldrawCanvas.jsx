@@ -417,7 +417,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, shareSlug,
 
     loadingRef.current = true
     const url = ro && mode === 'share' && slug
-      ? `${API}/api/share/${encodeURIComponent(slug)}/board/${bid}`
+      ? `${API}/api/share/${slug}/board/${bid}`
       : ro && mode === 'visitor'
       ? `${API}/api/visitor/boards/${bid}`
       : `${API}/api/boards/${bid}`
