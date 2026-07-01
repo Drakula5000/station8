@@ -67,18 +67,14 @@
   .modal-search {
     width: min(34rem, 100%);
   }
-  .access-create-row,
-  .access-layout,
-  .access-editor-grid,
-  .access-selection {
-    grid-template-columns: 1fr;
+  .modal-access {
+    width: min(42rem, 100%);
   }
-  .access-profile-list {
-    border-right: none;
-    border-bottom: 0.0625rem solid var(--s8-sidebar-border);
-    max-height: 10rem;
-    padding-right: 0;
-    padding-bottom: 0.75rem;
+  .access-create-row,
+  .access-config,
+  .access-fields,
+  .access-tree-toolbar {
+    grid-template-columns: 1fr;
   }
 
   /* Database home: more compact topbar layout */
@@ -146,16 +142,14 @@
     overflow-y: auto;
   }
   .access-create-row,
-  .access-layout,
-  .access-editor-grid,
-  .access-selection {
+  .access-config,
+  .access-fields,
+  .access-tree-toolbar {
     grid-template-columns: 1fr;
   }
   .access-toggle-row {
     align-items: stretch;
-  }
-  .access-count {
-    margin-left: 0;
+    justify-content: flex-start;
   }
   .modal-footer {
     margin-top: 1rem;

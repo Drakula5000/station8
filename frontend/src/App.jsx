@@ -2878,7 +2878,8 @@ function AccessProfilesModal({
   onToggleFolder,
   onToggleDoc,
 }) {
-  const folderOptions = buildFolderOptions(folders)
+  const [accessQuery, setAccessQuery] = useState('')
+  const [collapsedFolders, setCollapsedFolders] = useState({})
   const selectedFolders = new Set(selectedProfile?.folders || [])
   const fullWorkspace = Boolean(selectedProfile?.workspace)
   const selectedFolderTree = new Set()
@@ -2889,12 +2890,173 @@ function AccessProfilesModal({
   const docCount = fullWorkspace
     ? docs.length
     : docs.filter(doc => explicitDocKeys.has(accessDocKey(doc)) || selectedFolderTree.has(doc.folder_id)).length
+  const query = accessQuery.trim().toLowerCase()
+
+  const foldersByParent = useMemo(() => {
+    const map = new Map()
+    for (const folder of [...folders].sort(compareByName)) {
+      const key = folder.parent_id || ROOT_FOLDER
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(folder)
+    }
+    return map
+  }, [folders])
+
+  const docsByFolder = useMemo(() => {
+    const map = new Map()
+    for (const doc of docs) {
+      const key = doc.folder_id || ROOT_FOLDER
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(doc)
+    }
+    for (const [, items] of map) items.sort(compareByName)
+    return map
+  }, [docs])
+
+  const folderDocCounts = useMemo(() => {
+    const counts = {}
+    for (const folder of folders) {
+      const tree = collectFolderTree(folder.id, folders)
+      counts[folder.id] = docs.filter(doc => tree.has(doc.folder_id)).length
+    }
+    return counts
+  }, [docs, folders])
+
+  const docMatchesQuery = useCallback((doc) => {
+    if (!query) return true
+    const path = buildFolderPath(doc.folder_id, folderById)
+    return `${DOC_KIND_LABEL[doc.type]} ${doc.name || ''} ${path}`.toLowerCase().includes(query)
+  }, [folderById, query])
+
+  const folderMatchesQuery = useCallback((folder) => {
+    if (!query) return true
+    if ((folder.name || '').toLowerCase().includes(query)) return true
+    const docsHere = docsByFolder.get(folder.id) || []
+    if (docsHere.some(docMatchesQuery)) return true
+    return (foldersByParent.get(folder.id) || []).some(child => folderMatchesQuery(child))
+  }, [docsByFolder, docMatchesQuery, foldersByParent, query])
+
+  const selectedDocsInFolderTree = useCallback((folderId) => {
+    const tree = collectFolderTree(folderId, folders)
+    return docs.filter(doc => tree.has(doc.folder_id) && (
+      explicitDocKeys.has(accessDocKey(doc)) || selectedFolderTree.has(doc.folder_id)
+    )).length
+  }, [docs, explicitDocKeys, folders, selectedFolderTree])
+
+  const toggleFolderCollapsed = useCallback((folderId) => {
+    setCollapsedFolders(current => ({ ...current, [folderId]: !current[folderId] }))
+  }, [])
+
+  const renderTree = useCallback((parentId = null, depth = 0) => {
+    const parentKey = parentId || ROOT_FOLDER
+    const childFolders = foldersByParent.get(parentKey) || []
+    const childDocs = (docsByFolder.get(parentKey) || []).filter(docMatchesQuery)
+    const rows = []
+
+    for (const folder of childFolders) {
+      if (!folderMatchesQuery(folder)) continue
+      const folderId = folder.id
+      const isSelected = selectedFolders.has(folderId)
+      const isIncluded = fullWorkspace || selectedFolderTree.has(folderId)
+      const isOpen = query ? true : collapsedFolders[folderId] !== true
+      const total = folderDocCounts[folderId] || 0
+      const selectedTotal = selectedDocsInFolderTree(folderId)
+      const hasChildren = (foldersByParent.get(folderId) || []).length > 0 || (docsByFolder.get(folderId) || []).length > 0
+      const meta = fullWorkspace
+        ? 'included'
+        : isSelected
+        ? `${total} ${total === 1 ? 'item' : 'items'} included`
+        : selectedTotal
+        ? `${selectedTotal} selected inside`
+        : `${total} ${total === 1 ? 'item' : 'items'}`
+
+      rows.push(
+        <Fragment key={`folder-${folderId}`}>
+          <div
+            className={`access-tree-row access-folder-row${isIncluded ? ' is-included' : ''}${selectedTotal && !isSelected ? ' is-partial' : ''}`}
+            style={{ '--access-depth': depth }}
+          >
+            <button
+              className={`access-expander${isOpen ? ' open' : ''}`}
+              onClick={() => toggleFolderCollapsed(folderId)}
+              disabled={!hasChildren}
+              type="button"
+              title={isOpen ? 'Collapse folder' : 'Expand folder'}
+            >
+              <ChevronRightIcon />
+            </button>
+            <input
+              type="checkbox"
+              checked={fullWorkspace || isSelected}
+              onChange={() => onToggleFolder(folderId)}
+              disabled={fullWorkspace}
+            />
+            <FolderIcon />
+            <div className="access-tree-main">
+              <div className="access-tree-title">{folder.name}</div>
+              <div className="access-tree-meta">{meta}</div>
+            </div>
+          </div>
+          {isOpen && renderTree(folderId, depth + 1)}
+        </Fragment>
+      )
+    }
+
+    for (const doc of childDocs) {
+      const key = accessDocKey(doc)
+      const explicit = explicitDocKeys.has(key)
+      const viaFolder = selectedFolderTree.has(doc.folder_id)
+      const checked = fullWorkspace || explicit || viaFolder
+      rows.push(
+        <div
+          key={key}
+          className={`access-tree-row access-doc-row${checked ? ' is-included' : ''}${viaFolder ? ' is-via-folder' : ''}`}
+          style={{ '--access-depth': depth }}
+        >
+          <span className="access-expander-placeholder" />
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={() => onToggleDoc(doc)}
+            disabled={fullWorkspace || viaFolder}
+          />
+          {docKindIcon(doc.type)}
+          <div className="access-tree-main">
+            <div className="access-tree-title">{doc.name}</div>
+            <div className="access-tree-meta">
+              {viaFolder ? 'included by folder' : DOC_KIND_LABEL[doc.type]}
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    return rows
+  }, [
+    collapsedFolders,
+    docMatchesQuery,
+    docsByFolder,
+    explicitDocKeys,
+    folderDocCounts,
+    folderMatchesQuery,
+    foldersByParent,
+    fullWorkspace,
+    onToggleDoc,
+    onToggleFolder,
+    query,
+    selectedDocsInFolderTree,
+    selectedFolderTree,
+    selectedFolders,
+    toggleFolderCollapsed,
+  ])
+
+  const treeRows = selectedProfile ? renderTree() : []
 
   return (
-    <Modal onClose={onClose} title="Visitor access" wide>
+    <Modal onClose={onClose} title="Visitor access" wide className="modal-access">
       <div className="access-modal-body">
         <p className="modal-copy">
-          Create a visitor password, then choose the folders and individual items that password can see. Visitors enter the password from the normal Station 8 screen.
+          Visitor passwords open Station 8 directly into the matching folders and items. Folder access includes everything inside that folder.
         </p>
 
         <div className="access-create-row">
@@ -2920,7 +3082,7 @@ function AccessProfilesModal({
         {profiles.length === 0 ? (
           <div className="access-empty">No visitor passwords yet.</div>
         ) : (
-          <div className="access-layout">
+          <>
             <div className="access-profile-list">
               {profiles.map(profile => {
                 const active = profile.id === selectedProfileId
@@ -2942,89 +3104,67 @@ function AccessProfilesModal({
 
             {selectedProfile && (
               <div className="access-editor">
-                <div className="access-editor-grid">
-                  <label className="modal-field">
-                    <span className="modal-field-label">Name</span>
-                    <input
-                      value={selectedProfile.name || ''}
-                      onChange={e => onPatchProfile(selectedProfile.id, { name: e.target.value })}
-                      placeholder="Person or group name"
-                    />
-                  </label>
-                  <label className="modal-field">
-                    <span className="modal-field-label">Change password</span>
-                    <input
-                      type="password"
-                      value={passwordDraft}
-                      onChange={e => onPasswordDraft(e.target.value)}
-                      placeholder={selectedProfile.has_password ? 'Leave blank to keep current' : 'At least 6 characters'}
-                    />
-                  </label>
-                </div>
-
-                <div className="access-toggle-row">
-                  <label className="access-toggle">
-                    <input
-                      type="checkbox"
-                      checked={selectedProfile.active !== false}
-                      onChange={e => onPatchProfile(selectedProfile.id, { active: e.target.checked })}
-                    />
-                    <span>Enabled</span>
-                  </label>
-                  <label className="access-toggle">
-                    <input
-                      type="checkbox"
-                      checked={fullWorkspace}
-                      onChange={e => onPatchProfile(selectedProfile.id, { workspace: e.target.checked })}
-                    />
-                    <span>Full workspace</span>
-                  </label>
-                  <span className="access-count">{fullWorkspace ? 'Everything visible' : `${docCount} selected`}</span>
-                </div>
-
-                <div className={`access-selection${fullWorkspace ? ' disabled' : ''}`}>
-                  <div className="access-section">
-                    <div className="access-section-title">Folders</div>
-                    <div className="access-check-list">
-                      {folderOptions.length === 0 ? (
-                        <div className="access-empty small">No folders yet.</div>
-                      ) : folderOptions.map(option => (
-                        <label key={option.value} className="access-check">
-                          <input
-                            type="checkbox"
-                            checked={selectedFolders.has(option.value)}
-                            onChange={() => onToggleFolder(option.value)}
-                            disabled={fullWorkspace}
-                          />
-                          <span>{option.label}</span>
-                        </label>
-                      ))}
-                    </div>
+                <div className="access-config">
+                  <div className="access-fields">
+                    <label className="modal-field">
+                      <span className="modal-field-label">Name</span>
+                      <input
+                        value={selectedProfile.name || ''}
+                        onChange={e => onPatchProfile(selectedProfile.id, { name: e.target.value })}
+                        placeholder="Person or group name"
+                      />
+                    </label>
+                    <label className="modal-field">
+                      <span className="modal-field-label">Change password</span>
+                      <input
+                        type="password"
+                        value={passwordDraft}
+                        onChange={e => onPasswordDraft(e.target.value)}
+                        placeholder={selectedProfile.has_password ? 'Leave blank to keep current' : 'At least 6 characters'}
+                      />
+                    </label>
                   </div>
 
-                  <div className="access-section">
-                    <div className="access-section-title">Individual items</div>
-                    <div className="access-check-list">
-                      {docs.length === 0 ? (
-                        <div className="access-empty small">No items yet.</div>
-                      ) : docs.map(doc => {
-                        const folderPath = buildFolderPath(doc.folder_id, folderById)
-                        return (
-                          <label key={accessDocKey(doc)} className="access-check access-check-doc">
-                            <input
-                              type="checkbox"
-                              checked={selectedDocKeys.has(accessDocKey(doc))}
-                              onChange={() => onToggleDoc(doc)}
-                              disabled={fullWorkspace}
-                            />
-                            <span className="access-doc-label">
-                              <span className="access-doc-title">{DOC_KIND_LABEL[doc.type]} · {doc.name}</span>
-                              {folderPath && <span className="access-doc-path">{folderPath}</span>}
-                            </span>
-                          </label>
-                        )
-                      })}
+                  <div className="access-toggle-row">
+                    <label className="access-toggle">
+                      <input
+                        type="checkbox"
+                        checked={selectedProfile.active !== false}
+                        onChange={e => onPatchProfile(selectedProfile.id, { active: e.target.checked })}
+                      />
+                      <span>Enabled</span>
+                    </label>
+                    <label className="access-toggle">
+                      <input
+                        type="checkbox"
+                        checked={fullWorkspace}
+                        onChange={e => onPatchProfile(selectedProfile.id, { workspace: e.target.checked })}
+                      />
+                      <span>Full workspace</span>
+                    </label>
+                    <span className="access-count">{fullWorkspace ? 'Everything visible' : `${docCount} selected`}</span>
+                  </div>
+                </div>
+
+                <div className={`access-tree-panel${fullWorkspace ? ' disabled' : ''}`}>
+                  <div className="access-tree-toolbar">
+                    <div>
+                      <div className="access-section-title">Contents</div>
+                      <div className="access-tree-subtitle">Select a folder or any item inside the same tree.</div>
                     </div>
+                    <input
+                      className="access-tree-search"
+                      value={accessQuery}
+                      onChange={e => setAccessQuery(e.target.value)}
+                      placeholder="Filter contents"
+                    />
+                  </div>
+                  <div className="access-tree-list">
+                    {treeRows.length ? treeRows : (
+                      <div className="access-empty small">
+                        {query ? 'No matching folders or items.' : 'No folders or items yet.'}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -3036,7 +3176,7 @@ function AccessProfilesModal({
                 </div>
               </div>
             )}
-          </div>
+          </>
         )}
       </div>
     </Modal>
@@ -3647,10 +3787,10 @@ function DatabaseHome({
   )
 }
 
-function Modal({ title, children, onClose, wide }) {
+function Modal({ title, children, onClose, wide, className = '' }) {
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target.classList.contains('modal-overlay')) onClose() }}>
-      <div className={`modal ${wide ? 'modal-search' : ''}`}>
+      <div className={`modal ${wide ? 'modal-search' : ''}${className ? ` ${className}` : ''}`}>
         {title && <div className="modal-title">{title}</div>}
         {children}
       </div>
