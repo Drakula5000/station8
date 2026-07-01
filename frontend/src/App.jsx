@@ -103,6 +103,97 @@ function collectFolderTree(folderId, folders) {
   return folderIds
 }
 
+function getAccessEntries(parentId, foldersByParent, docsByFolder, matchingDocKeys, visibleFolderIds) {
+  const parentKey = parentId || ROOT_FOLDER
+  const childFolders = (foldersByParent.get(parentKey) || [])
+    .filter(folder => !visibleFolderIds || visibleFolderIds.has(folder.id))
+    .map(folder => ({ kind: 'folder', folder }))
+  const childDocs = (docsByFolder.get(parentKey) || [])
+    .filter(doc => matchingDocKeys.has(accessDocKey(doc)))
+    .map(doc => ({ kind: 'doc', doc }))
+  return [...childFolders, ...childDocs]
+}
+
+function buildAccessRows({
+  collapsedFolders,
+  docsByFolder,
+  explicitDocKeys,
+  folderDocCounts,
+  foldersByParent,
+  fullWorkspace,
+  matchingDocKeys,
+  query,
+  selectedDocCountsByFolder,
+  selectedFolderTree,
+  selectedFolders,
+  visibleFolderIds,
+}) {
+  const rows = []
+  const stack = getAccessEntries(null, foldersByParent, docsByFolder, matchingDocKeys, visibleFolderIds)
+    .reverse()
+    .map(entry => ({ ...entry, depth: 0 }))
+
+  while (stack.length) {
+    const entry = stack.pop()
+    const depth = entry.depth || 0
+
+    if (entry.kind === 'folder') {
+      const folder = entry.folder
+      const folderId = folder.id
+      const isSelected = selectedFolders.has(folderId)
+      const isIncluded = fullWorkspace || selectedFolderTree.has(folderId)
+      const isOpen = query ? true : collapsedFolders[folderId] !== true
+      const total = folderDocCounts[folderId] || 0
+      const selectedTotal = selectedDocCountsByFolder[folderId] || 0
+      const hasChildren = (foldersByParent.get(folderId) || []).length > 0 || (docsByFolder.get(folderId) || []).length > 0
+      const meta = fullWorkspace
+        ? 'included'
+        : isSelected
+          ? `${total} ${total === 1 ? 'item' : 'items'} included`
+          : isIncluded
+            ? `${selectedTotal} ${selectedTotal === 1 ? 'item' : 'items'} included by folder`
+            : selectedTotal
+              ? `${selectedTotal} selected inside`
+              : `${total} ${total === 1 ? 'item' : 'items'}`
+
+      rows.push({
+        kind: 'folder',
+        depth,
+        folder,
+        hasChildren,
+        isIncluded,
+        isOpen,
+        isSelected,
+        meta,
+        selectedTotal,
+      })
+
+      if (isOpen && hasChildren) {
+        const childEntries = getAccessEntries(folderId, foldersByParent, docsByFolder, matchingDocKeys, visibleFolderIds).reverse()
+        for (const child of childEntries) stack.push({ ...child, depth: depth + 1 })
+      }
+      continue
+    }
+
+    const doc = entry.doc
+    const key = accessDocKey(doc)
+    const explicit = explicitDocKeys.has(key)
+    const viaFolder = selectedFolderTree.has(doc.folder_id)
+    const checked = fullWorkspace || explicit || viaFolder
+    rows.push({
+      kind: 'doc',
+      checked,
+      depth,
+      doc,
+      explicit,
+      key,
+      viaFolder,
+    })
+  }
+
+  return rows
+}
+
 function summarizeFolderDelete(folder, folders, docsByKind) {
   const folderIds = collectFolderTree(folder.id, folders)
   const childFolderCount = folders.filter(item => item.parent_id === folder.id).length
@@ -442,10 +533,6 @@ export default function App() {
   const selectedAccessProfile = useMemo(
     () => accessProfiles.find(profile => profile.id === selectedAccessId) || accessProfiles[0] || null,
     [accessProfiles, selectedAccessId]
-  )
-  const selectedAccessDocKeys = useMemo(
-    () => new Set((selectedAccessProfile?.docs || []).map(accessDocKey)),
-    [selectedAccessProfile]
   )
 
   useEffect(() => {
@@ -2408,7 +2495,6 @@ export default function App() {
         <AccessProfilesModal
           profiles={accessProfiles}
           selectedProfile={selectedAccessProfile}
-          selectedDocKeys={selectedAccessDocKeys}
           selectedProfileId={selectedAccessId}
           folders={folders}
           folderById={folderById}
@@ -2874,7 +2960,6 @@ function AccessGate({
 function AccessProfilesModal({
   profiles,
   selectedProfile,
-  selectedDocKeys,
   selectedProfileId,
   folders,
   folderById,
@@ -2899,13 +2984,22 @@ function AccessProfilesModal({
 }) {
   const [accessQuery, setAccessQuery] = useState('')
   const [collapsedFolders, setCollapsedFolders] = useState({})
-  const selectedFolders = new Set(selectedProfile?.folders || [])
+  const selectedFolders = useMemo(
+    () => new Set(selectedProfile?.folders || []),
+    [selectedProfile]
+  )
   const fullWorkspace = Boolean(selectedProfile?.workspace)
-  const selectedFolderTree = new Set()
-  for (const folderId of selectedFolders) {
-    for (const id of collectFolderTree(folderId, folders)) selectedFolderTree.add(id)
-  }
-  const explicitDocKeys = new Set((selectedProfile?.docs || []).map(accessDocKey))
+  const selectedFolderTree = useMemo(() => {
+    const tree = new Set()
+    for (const folderId of selectedFolders) {
+      for (const id of collectFolderTree(folderId, folders)) tree.add(id)
+    }
+    return tree
+  }, [folders, selectedFolders])
+  const explicitDocKeys = useMemo(
+    () => new Set((selectedProfile?.docs || []).map(accessDocKey)),
+    [selectedProfile]
+  )
   const docCount = fullWorkspace
     ? docs.length
     : docs.filter(doc => explicitDocKeys.has(accessDocKey(doc)) || selectedFolderTree.has(doc.folder_id)).length
@@ -2941,140 +3035,85 @@ function AccessProfilesModal({
     return counts
   }, [docs, folders])
 
-  const docMatchesQuery = useCallback((doc) => {
-    if (!query) return true
-    const path = buildFolderPath(doc.folder_id, folderById)
-    return `${DOC_KIND_LABEL[doc.type]} ${doc.name || ''} ${path}`.toLowerCase().includes(query)
-  }, [folderById, query])
-
-  const folderMatchesQuery = useCallback((folder) => {
-    if (!query) return true
-    if ((folder.name || '').toLowerCase().includes(query)) return true
-    const docsHere = docsByFolder.get(folder.id) || []
-    if (docsHere.some(docMatchesQuery)) return true
-    return (foldersByParent.get(folder.id) || []).some(child => folderMatchesQuery(child))
-  }, [docsByFolder, docMatchesQuery, foldersByParent, query])
-
-  const selectedDocsInFolderTree = useCallback((folderId) => {
-    const tree = collectFolderTree(folderId, folders)
-    return docs.filter(doc => tree.has(doc.folder_id) && (
-      explicitDocKeys.has(accessDocKey(doc)) || selectedFolderTree.has(doc.folder_id)
-    )).length
-  }, [docs, explicitDocKeys, folders, selectedFolderTree])
-
   const toggleFolderCollapsed = useCallback((folderId) => {
     setCollapsedFolders(current => ({ ...current, [folderId]: !current[folderId] }))
   }, [])
 
-  const renderTree = useCallback((parentId = null, depth = 0) => {
-    const parentKey = parentId || ROOT_FOLDER
-    const childFolders = foldersByParent.get(parentKey) || []
-    const childDocs = (docsByFolder.get(parentKey) || []).filter(docMatchesQuery)
-    const rows = []
-
-    for (const folder of childFolders) {
-      if (!folderMatchesQuery(folder)) continue
-      const folderId = folder.id
-      const isSelected = selectedFolders.has(folderId)
-      const isIncluded = fullWorkspace || selectedFolderTree.has(folderId)
-      const isOpen = query ? true : collapsedFolders[folderId] !== true
-      const total = folderDocCounts[folderId] || 0
-      const selectedTotal = selectedDocsInFolderTree(folderId)
-      const hasChildren = (foldersByParent.get(folderId) || []).length > 0 || (docsByFolder.get(folderId) || []).length > 0
-      const meta = fullWorkspace
-        ? 'included'
-        : isSelected
-        ? `${total} ${total === 1 ? 'item' : 'items'} included`
-        : isIncluded
-        ? `${selectedTotal} ${selectedTotal === 1 ? 'item' : 'items'} included by folder`
-        : selectedTotal
-        ? `${selectedTotal} selected inside`
-        : `${total} ${total === 1 ? 'item' : 'items'}`
-
-      rows.push(
-        <Fragment key={`folder-${folderId}`}>
-          <div
-            className={`access-tree-row access-folder-row${isSelected ? ' is-selected' : ''}${isIncluded && !isSelected ? ' is-via-folder' : ''}${selectedTotal && !isSelected ? ' is-partial' : ''}`}
-            style={{ '--access-depth': depth }}
-          >
-            {hasChildren ? (
-              <button
-                className={`access-expander${isOpen ? ' open' : ''}`}
-                onClick={() => toggleFolderCollapsed(folderId)}
-                type="button"
-                title={isOpen ? 'Collapse folder' : 'Expand folder'}
-              >
-                <ChevronRightIcon />
-              </button>
-            ) : (
-              <span className="access-expander-placeholder" />
-            )}
-            <input
-              type="checkbox"
-              checked={fullWorkspace || isSelected}
-              onChange={() => onToggleFolder(folderId)}
-              disabled={fullWorkspace}
-            />
-            <FolderIcon />
-            <div className="access-tree-main">
-              <div className="access-tree-title">{folder.name}</div>
-              <div className="access-tree-meta">{meta}</div>
-            </div>
-          </div>
-          {isOpen && renderTree(folderId, depth + 1)}
-        </Fragment>
-      )
+  const matchingDocKeys = useMemo(() => {
+    const keys = new Set()
+    for (const doc of docs) {
+      if (!query) {
+        keys.add(accessDocKey(doc))
+        continue
+      }
+      const path = buildFolderPath(doc.folder_id, folderById)
+      const searchable = `${DOC_KIND_LABEL[doc.type]} ${doc.name || ''} ${path}`.toLowerCase()
+      if (searchable.includes(query)) keys.add(accessDocKey(doc))
     }
+    return keys
+  }, [docs, folderById, query])
 
-    for (const doc of childDocs) {
-      const key = accessDocKey(doc)
-      const explicit = explicitDocKeys.has(key)
-      const viaFolder = selectedFolderTree.has(doc.folder_id)
-      const checked = fullWorkspace || explicit || viaFolder
-      rows.push(
-        <div
-          key={key}
-          className={`access-tree-row access-doc-row${explicit ? ' is-selected' : ''}${viaFolder ? ' is-via-folder' : ''}`}
-          style={{ '--access-depth': depth }}
-        >
-          <span className="access-expander-placeholder" />
-          <input
-            type="checkbox"
-            checked={checked}
-            onChange={() => onToggleDoc(doc)}
-            disabled={fullWorkspace || viaFolder}
-          />
-          {docKindIcon(doc.type)}
-          <div className="access-tree-main">
-            <div className="access-tree-title">{doc.name}</div>
-            <div className="access-tree-meta">
-              {viaFolder ? 'included by folder' : DOC_KIND_LABEL[doc.type]}
-            </div>
-          </div>
-        </div>
-      )
+  const visibleFolderIds = useMemo(() => {
+    if (!query) return null
+    const visible = new Set()
+    const addFolderAndAncestors = (folderId) => {
+      let cursor = folderId
+      const seen = new Set()
+      while (cursor && !seen.has(cursor)) {
+        seen.add(cursor)
+        const folder = folderById[cursor]
+        if (!folder) break
+        visible.add(cursor)
+        cursor = folder.parent_id || null
+      }
     }
+    for (const folder of folders) {
+      if ((folder.name || '').toLowerCase().includes(query)) addFolderAndAncestors(folder.id)
+    }
+    for (const doc of docs) {
+      if (matchingDocKeys.has(accessDocKey(doc))) addFolderAndAncestors(doc.folder_id)
+    }
+    return visible
+  }, [docs, folderById, folders, matchingDocKeys, query])
 
-    return rows
-  }, [
+  const selectedDocCountsByFolder = useMemo(() => {
+    const counts = {}
+    for (const folder of folders) {
+      const tree = collectFolderTree(folder.id, folders)
+      counts[folder.id] = docs.filter(doc => tree.has(doc.folder_id) && (
+        explicitDocKeys.has(accessDocKey(doc)) || selectedFolderTree.has(doc.folder_id)
+      )).length
+    }
+    return counts
+  }, [docs, explicitDocKeys, folders, selectedFolderTree])
+
+  const accessRows = useMemo(() => buildAccessRows({
     collapsedFolders,
-    docMatchesQuery,
     docsByFolder,
     explicitDocKeys,
     folderDocCounts,
-    folderMatchesQuery,
     foldersByParent,
     fullWorkspace,
-    onToggleDoc,
-    onToggleFolder,
+    matchingDocKeys,
     query,
-    selectedDocsInFolderTree,
+    selectedDocCountsByFolder,
     selectedFolderTree,
     selectedFolders,
-    toggleFolderCollapsed,
+    visibleFolderIds,
+  }), [
+    collapsedFolders,
+    docsByFolder,
+    explicitDocKeys,
+    folderDocCounts,
+    foldersByParent,
+    fullWorkspace,
+    matchingDocKeys,
+    query,
+    selectedDocCountsByFolder,
+    selectedFolderTree,
+    selectedFolders,
+    visibleFolderIds,
   ])
-
-  const treeRows = selectedProfile ? renderTree() : []
 
   return (
     <Modal onClose={onClose} title="Visitor access" wide className="modal-access">
@@ -3185,7 +3224,60 @@ function AccessProfilesModal({
                     />
                   </div>
                   <div className="access-tree-list">
-                    {treeRows.length ? treeRows : (
+                    {selectedProfile && accessRows.length ? accessRows.map(row => (
+                      row.kind === 'folder' ? (
+                        <div
+                          key={`folder-${row.folder.id}`}
+                          className={`access-tree-row access-folder-row${row.isSelected ? ' is-selected' : ''}${row.isIncluded && !row.isSelected ? ' is-via-folder' : ''}${row.selectedTotal && !row.isSelected ? ' is-partial' : ''}`}
+                          style={{ '--access-depth': row.depth }}
+                        >
+                          {row.hasChildren ? (
+                            <button
+                              className={`access-expander${row.isOpen ? ' open' : ''}`}
+                              onClick={() => toggleFolderCollapsed(row.folder.id)}
+                              type="button"
+                              title={row.isOpen ? 'Collapse folder' : 'Expand folder'}
+                            >
+                              <ChevronRightIcon />
+                            </button>
+                          ) : (
+                            <span className="access-expander-placeholder" />
+                          )}
+                          <input
+                            type="checkbox"
+                            checked={fullWorkspace || row.isSelected}
+                            onChange={() => onToggleFolder(row.folder.id)}
+                            disabled={fullWorkspace}
+                          />
+                          <FolderIcon />
+                          <div className="access-tree-main">
+                            <div className="access-tree-title">{row.folder.name}</div>
+                            <div className="access-tree-meta">{row.meta}</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          key={row.key}
+                          className={`access-tree-row access-doc-row${row.explicit ? ' is-selected' : ''}${row.viaFolder ? ' is-via-folder' : ''}`}
+                          style={{ '--access-depth': row.depth }}
+                        >
+                          <span className="access-expander-placeholder" />
+                          <input
+                            type="checkbox"
+                            checked={row.checked}
+                            onChange={() => onToggleDoc(row.doc)}
+                            disabled={fullWorkspace || row.viaFolder}
+                          />
+                          {docKindIcon(row.doc.type)}
+                          <div className="access-tree-main">
+                            <div className="access-tree-title">{row.doc.name}</div>
+                            <div className="access-tree-meta">
+                              {row.viaFolder ? 'included by folder' : DOC_KIND_LABEL[row.doc.type]}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    )) : (
                       <div className="access-empty small">
                         {query ? 'No matching folders or items.' : 'No folders or items yet.'}
                       </div>
