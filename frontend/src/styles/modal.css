@@ -271,11 +271,18 @@
 .access-tree-row:hover {
   background: var(--s8-hover);
 }
-.access-tree-row.is-included {
+.access-folder-row.is-selected,
+.access-doc-row.is-selected {
   background: var(--s8-accent-dim);
 }
-.access-tree-row.is-partial:not(.is-included) {
+.access-tree-row.is-partial:not(.is-selected) {
   color: var(--s8-accent);
+}
+.access-tree-row.is-via-folder:not(.is-selected) {
+  background: transparent;
+}
+.access-tree-row.is-via-folder:not(.is-selected):hover {
+  background: var(--s8-hover);
 }
 .access-tree-row svg {
   color: var(--s8-text-mid);
@@ -333,7 +340,7 @@
   white-space: nowrap;
 }
 .access-doc-row.is-via-folder .access-tree-meta {
-  color: var(--s8-accent);
+  color: var(--s8-text-mid);
 }
 .access-footer {
   align-items: center;

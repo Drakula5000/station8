@@ -2985,6 +2985,8 @@ function AccessProfilesModal({
         ? 'included'
         : isSelected
         ? `${total} ${total === 1 ? 'item' : 'items'} included`
+        : isIncluded
+        ? `${selectedTotal} ${selectedTotal === 1 ? 'item' : 'items'} included by folder`
         : selectedTotal
         ? `${selectedTotal} selected inside`
         : `${total} ${total === 1 ? 'item' : 'items'}`
@@ -2992,7 +2994,7 @@ function AccessProfilesModal({
       rows.push(
         <Fragment key={`folder-${folderId}`}>
           <div
-            className={`access-tree-row access-folder-row${isIncluded ? ' is-included' : ''}${selectedTotal && !isSelected ? ' is-partial' : ''}`}
+            className={`access-tree-row access-folder-row${isSelected ? ' is-selected' : ''}${isIncluded && !isSelected ? ' is-via-folder' : ''}${selectedTotal && !isSelected ? ' is-partial' : ''}`}
             style={{ '--access-depth': depth }}
           >
             {hasChildren ? (
@@ -3032,7 +3034,7 @@ function AccessProfilesModal({
       rows.push(
         <div
           key={key}
-          className={`access-tree-row access-doc-row${checked ? ' is-included' : ''}${viaFolder ? ' is-via-folder' : ''}`}
+          className={`access-tree-row access-doc-row${explicit ? ' is-selected' : ''}${viaFolder ? ' is-via-folder' : ''}`}
           style={{ '--access-depth': depth }}
         >
           <span className="access-expander-placeholder" />
