@@ -143,10 +143,18 @@ function pluralize(count, singular, plural = `${singular}s`) {
 function parseRoute() {
   const url = new URL(window.location.href)
   const path = url.pathname.replace(/\/+$/, '') || '/'
-  const docMatch = path.match(/^\/(board|gdoc|gsheet)\/([^/]+)$/)
+  const sharePathMatch = path.match(/^\/share\/([^/]+)(?:\/(board|gdoc|gsheet|report)\/([^/]+))?$/)
+  if (sharePathMatch) {
+    return {
+      shareToken: decodeURIComponent(sharePathMatch[1]),
+      doc: sharePathMatch[2] ? { type: sharePathMatch[2], id: sharePathMatch[3] } : null,
+    }
+  }
+
+  const docMatch = path.match(/^\/(board|gdoc|gsheet|report)\/([^/]+)$/)
   const shareToken = url.searchParams.get('share') || null
 
-  // Known routes: /, /board/<id>, /gdoc/<id>, /gsheet/<id>
+  // Known routes: /, /board/<id>, /gdoc/<id>, /gsheet/<id>, /report/<id>, /share/<token>
   // Everything else redirects to /
   if (path !== '/' && !docMatch) {
     window.history.replaceState({}, '', '/')
@@ -160,8 +168,11 @@ function parseRoute() {
 }
 
 function buildUrl(doc = null, shareToken = null) {
-  const pathname = doc?.type && doc?.id ? `/${doc.type}/${doc.id}` : '/'
-  return shareToken ? `${pathname}?share=${encodeURIComponent(shareToken)}` : pathname
+  if (shareToken) {
+    const base = `/share/${encodeURIComponent(shareToken)}`
+    return doc?.type && doc?.id ? `${base}/${doc.type}/${doc.id}` : base
+  }
+  return doc?.type && doc?.id ? `/${doc.type}/${doc.id}` : '/'
 }
 
 function docTypeLabel(type) {
@@ -327,8 +338,11 @@ export default function App() {
   const [tagInputOpen, setTagInputOpen] = useState(false)
   const [workspace, setWorkspace] = useState(null)
   const [shareOpen, setShareOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [copiedDocLink, setCopiedDocLink] = useState(false)
+  const [shareTarget, setShareTarget] = useState(null)
+  const [shares, setShares] = useState([])
+  const [shareBusy, setShareBusy] = useState(false)
+  const [shareCopiedId, setShareCopiedId] = useState(null)
+  const [sharePassword, setSharePassword] = useState('')
   const [ownerPromptOpen, setOwnerPromptOpen] = useState(false)
   const [ownerPromptDismissed, setOwnerPromptDismissed] = useState(false)
   const [ownerInput, setOwnerInput] = useState('')
@@ -364,15 +378,19 @@ export default function App() {
   // Inline rename in sidebar — { type: 'folder' | 'board' | 'gdoc' | 'gsheet', id, value }
   const [renameTarget, setRenameTarget] = useState(null)
   const [renameValue, setRenameValue] = useState('')
+  const [ownerDatabaseMode, setOwnerDatabaseMode] = useState(false)
   // Backend wake-up state for visitor/share mode
   const [backendStatus, setBackendStatus] = useState('checking') // 'checking' | 'ready'
   const backendReadyRef = useRef(false)
 
   const viewerMode = route.shareToken ? 'share' : auth.access
-  const readOnly = viewerMode === 'visitor' || viewerMode === 'share'
+  const ownerMode = viewerMode === 'owner'
+  const readOnly = viewerMode === 'visitor' || viewerMode === 'share' || ownerDatabaseMode
+  const showSidebar = ownerMode && !ownerDatabaseMode
 
   useEffect(() => {
-    if (!readOnly) {
+    const needsBackendWake = viewerMode === 'visitor' || viewerMode === 'share'
+    if (!needsBackendWake) {
       setBackendStatus('ready')
       backendReadyRef.current = true
       return
@@ -380,8 +398,12 @@ export default function App() {
     let cancelled = false
     const ping = async () => {
       try {
-        // Ping the workspace endpoint — only resolves when the full app is ready
-        const res = await fetch(`${API}/api/visitor/workspace`, { credentials: 'include' })
+        // Ping the endpoint this mode can actually access. Share-password
+        // sessions are token-scoped and cannot call generic visitor routes.
+        const pingUrl = viewerMode === 'share' && route.shareToken
+          ? `${API}/api/share/${encodeURIComponent(route.shareToken)}`
+          : `${API}/api/visitor/workspace`
+        const res = await fetch(pingUrl, { credentials: 'include' })
         if (!cancelled && res.ok) {
           const data = await res.json()
           // Only mark ready if we got a real workspace response
@@ -398,7 +420,7 @@ export default function App() {
     }
     ping()
     return () => { cancelled = true }
-  }, [readOnly])
+  }, [route.shareToken, viewerMode])
 
   useEffect(() => {
     if (!titleMenuOpen) return
@@ -408,9 +430,6 @@ export default function App() {
     document.addEventListener('mousedown', close)
     return () => document.removeEventListener('mousedown', close)
   }, [titleMenuOpen])
-
-  const ownerMode = viewerMode === 'owner'
-  const showSidebar = ownerMode
 
   const folderById = buildFolderMap(folders)
   const folderOptions = [{ value: ROOT_FOLDER, label: 'Workspace root' }, ...buildFolderOptions(folders)]
@@ -454,12 +473,19 @@ export default function App() {
     if (!ownerMode) setSidebarCollapsed(true)
   }, [ownerMode])
 
+  useEffect(() => {
+    if (!ownerMode && ownerDatabaseMode) setOwnerDatabaseMode(false)
+  }, [ownerDatabaseMode, ownerMode])
+
   const updateAuthStatus = useCallback(async () => {
     setAuth(current => ({ ...current, loading: true }))
     let data = null
     let backendOffline = false
+    const statusUrl = route.shareToken
+      ? `${API}/api/auth/status?share_token=${encodeURIComponent(route.shareToken)}`
+      : `${API}/api/auth/status`
     try {
-      const res = await fetch(`${API}/api/auth/status`, { credentials: 'include' })
+      const res = await fetch(statusUrl, { credentials: 'include' })
       if (res.status >= 500) {
         backendOffline = true
       } else if (res.ok) {
@@ -477,7 +503,7 @@ export default function App() {
       setupAllowed: Boolean(data?.setup_allowed),
       requiresSetup: Boolean(data?.requires_setup),
     })
-  }, [])
+  }, [route.shareToken])
 
   useEffect(() => {
     updateAuthStatus()
@@ -555,7 +581,7 @@ export default function App() {
       const routedDoc = route.doc && nextDocsByKind[route.doc.type]?.find(item => item.id === route.doc.id)
       const nextActive = routedDoc
         ? route.doc
-        : viewerMode === 'visitor'
+        : viewerMode === 'visitor' || ownerDatabaseMode
         ? null
         : pickNextActiveDoc(currentActiveId, nextDocsByKind)
       setActiveId(nextActive)
@@ -566,7 +592,7 @@ export default function App() {
     }
 
     if (viewerMode === 'share') {
-      const data = await fetchJson(`${API}/api/share/${route.shareToken}`, {}, null)
+      const data = await fetchJson(`${API}/api/share/${encodeURIComponent(route.shareToken)}`, {}, null)
       if (!data) return
       const nextDocsByKind = {
         board: data.boards || [],
@@ -595,7 +621,7 @@ export default function App() {
     }
     if (ownerMode && ws && !ws.owner && !ownerPromptDismissed) setOwnerPromptOpen(true)
     applyResult(nextDocsByKind, ws?.folders || [], ws)
-  }, [auth.authenticated, auth.loading, expandFolderPath, ownerMode, ownerPromptDismissed, route.doc, route.shareToken, viewerMode])
+  }, [auth.authenticated, auth.loading, expandFolderPath, ownerDatabaseMode, ownerMode, ownerPromptDismissed, route.doc, route.shareToken, viewerMode])
 
   useEffect(() => {
     refresh()
@@ -817,7 +843,7 @@ export default function App() {
     if (!viewerMode) return
     if (backendStatus !== 'ready') return
     const url = viewerMode === 'share'
-      ? `${API}/api/share/${route.shareToken}/search`
+      ? `${API}/api/share/${encodeURIComponent(route.shareToken)}/search`
       : viewerMode === 'visitor'
       ? `${API}/api/visitor/search`
       : `${API}/api/search`
@@ -832,7 +858,95 @@ export default function App() {
       }
     }, 200)
     return () => clearTimeout(t)
-  }, [query, route.shareToken, viewerMode, searchScope])
+  }, [backendStatus, query, route.shareToken, viewerMode, searchScope])
+
+  const openOwnerDatabaseView = useCallback(() => {
+    setOwnerDatabaseMode(true)
+    setActiveId(null)
+    setSearchScope(null)
+    setFindQuery(null)
+    navigate(null)
+  }, [navigate])
+
+  const exitOwnerDatabaseView = useCallback(() => {
+    setOwnerDatabaseMode(false)
+    setSearchScope(null)
+    setFindQuery(null)
+  }, [])
+
+  const openShareDialog = useCallback((target = null) => {
+    const fallback = activeDoc && activeDocType
+      ? { type: activeDocType, id: activeDoc.id, name: activeDoc.name }
+      : { type: 'workspace', id: null, name: workspace?.name || 'Workspace' }
+    setShareTarget(target || fallback)
+    setShareOpen(true)
+    setShareCopiedId(null)
+    setSharePassword('')
+  }, [activeDoc, activeDocType, workspace?.name])
+
+  const refreshShares = useCallback(async () => {
+    const data = await fetchJson(`${API}/api/shares`, {}, [])
+    setShares(Array.isArray(data) ? data : [])
+  }, [])
+
+  useEffect(() => {
+    if (!shareOpen || !ownerMode) return
+    refreshShares()
+  }, [ownerMode, refreshShares, shareOpen])
+
+  const createShareForTarget = async () => {
+    if (!shareTarget || shareBusy) return
+    if (shareTarget.type !== 'workspace' && !shareTarget.id) return
+    setShareBusy(true)
+    try {
+      const created = await fetchJsonPost(`${API}/api/shares`, {
+        scope_type: shareTarget.type,
+        scope_id: shareTarget.type === 'workspace' ? null : shareTarget.id,
+        password: sharePassword.trim() || undefined,
+      })
+      if (created) {
+        setShares(current => [created, ...current.filter(item => item.id !== created.id)])
+        setSharePassword('')
+      }
+    } finally {
+      setShareBusy(false)
+    }
+  }
+
+  const updateSharePassword = async (share) => {
+    const password = sharePassword.trim()
+    if (!share?.id || password.length < 6 || shareBusy) return
+    setShareBusy(true)
+    try {
+      const updated = await fetchJsonPatch(`${API}/api/shares/${share.id}`, { password }, null)
+      if (updated) {
+        setShares(current => current.map(item => item.id === updated.id ? updated : item))
+        setSharePassword('')
+      }
+    } finally {
+      setShareBusy(false)
+    }
+  }
+
+  const copyShareLink = async (share) => {
+    if (!share?.url) return
+    await navigator.clipboard.writeText(`${window.location.origin}${share.url}`)
+    setShareCopiedId(share.id)
+    setTimeout(() => setShareCopiedId(current => current === share.id ? null : current), 1500)
+  }
+
+  const revokeShareLink = async (share) => {
+    if (!share?.id || shareBusy) return
+    setShareBusy(true)
+    try {
+      const res = await fetch(`${API}/api/shares/${share.id}`, { method: 'DELETE', credentials: 'include' })
+      if (res.ok) {
+        setShares(current => current.map(item => item.id === share.id ? { ...item, revoked: true } : item))
+      }
+    } finally {
+      setShareBusy(false)
+    }
+  }
 
   const openNewBoardModal = () => {
     setNewBoardName('')
@@ -1223,6 +1337,18 @@ export default function App() {
               <PencilIcon />
             </button>
             <button
+              className="tree-share-btn"
+              aria-label={`Share ${doc.name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                openShareDialog({ type: doc.type, id: doc.id, name: doc.name })
+              }}
+              title="Share"
+              type="button"
+            >
+              <GlobeIcon />
+            </button>
+            <button
               className={`tree-privacy-btn ${priv ? 'is-private' : ''}`}
               aria-label={priv ? `Make ${doc.name} public` : `Make ${doc.name} private`}
               onClick={(e) => { e.stopPropagation(); togglePrivate(doc, false) }}
@@ -1307,6 +1433,18 @@ export default function App() {
                 <PencilIcon />
               </button>
               <button
+                className="tree-share-btn"
+                aria-label={`Share ${folder.name}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  openShareDialog({ type: 'folder', id: folder.id, name: folder.name })
+                }}
+                title="Share"
+                type="button"
+              >
+                <GlobeIcon />
+              </button>
+              <button
                 className={`tree-privacy-btn ${priv ? 'is-private' : ''}`}
                 aria-label={priv ? `Make ${folder.name} public` : `Make ${folder.name} private`}
                 onClick={(e) => { e.stopPropagation(); togglePrivate(folder, true) }}
@@ -1346,17 +1484,17 @@ export default function App() {
   const rootDocs = docsByFolder[ROOT_FOLDER] || []
   const hasWorkspaceItems = rootFolders.some(folder => !tagFilter || folderHasVisibleContent(folder.id)) || rootDocs.length > 0
 
-  // Map a search hit's `kind` field to our doc-type kinds.
-  // Backend returns 'board' for board hits and 'sheet' for the legacy
-  // spreadsheet (no longer creatable, but old data may still index).
-  // Backend returns 'gdoc' / 'gsheet' / 'report' for non-board doc hits.
-  const hitKindToDocType = (kind) => {
+  // Prefer backend `doc_type`; `kind` describes the matched field/source
+  // (`name`, `tag`, `ocr`, etc.) and is not reliable for routing.
+  const hitToDocType = (hit) => {
+    if (DOC_KINDS.includes(hit?.doc_type)) return hit.doc_type
+    const kind = hit?.kind
     if (kind === 'gdoc' || kind === 'gsheet' || kind === 'report') return kind
     return 'board'
   }
 
   const findDocFromHit = (hit) => {
-    const type = hitKindToDocType(hit.kind)
+    const type = hitToDocType(hit)
     return (docsByKind[type] || []).find(item => item.id === hit.doc_id)
   }
 
@@ -1381,7 +1519,7 @@ export default function App() {
       for (const hit of results) {
         const doc = findDocFromHit(hit)
         if (!doc) continue
-        const type = hitKindToDocType(hit.kind)
+        const type = hitToDocType(hit)
         if (!seen.has(hit.doc_id)) {
           seen.set(hit.doc_id, {
             key: hit.doc_id,
@@ -1406,6 +1544,26 @@ export default function App() {
       return [...seen.values()]
     })()
     : []
+
+  const shareTargetTitle = (() => {
+    if (!shareTarget) return ''
+    if (shareTarget.type === 'workspace') return workspace?.name || 'Workspace'
+    if (shareTarget.type === 'folder') return shareTarget.name || 'Folder'
+    return shareTarget.name || docTypeLabel(shareTarget.type)
+  })()
+
+  const shareTargetKind = (() => {
+    if (!shareTarget) return 'item'
+    if (shareTarget.type === 'workspace') return 'workspace'
+    if (shareTarget.type === 'folder') return 'folder'
+    return docTypeLabel(shareTarget.type).toLowerCase()
+  })()
+
+  const currentShareLinks = (shares || []).filter((share) => {
+    if (!shareTarget || share.revoked) return false
+    return share.scope_type === shareTarget.type && (share.scope_id || null) === (shareTarget.id || null)
+  })
+  const sharePasswordInvalid = Boolean(sharePassword.trim()) && sharePassword.trim().length < 6
 
   const saveOwner = async () => {
     const name = ownerInput.trim()
@@ -1591,7 +1749,7 @@ export default function App() {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({ password, share_token: route.shareToken || null }),
         })
       } catch {
         setAuthError('Backend offline. Make sure dev.command is running.')
@@ -1790,6 +1948,9 @@ export default function App() {
             <span className="search-btn-label"><SearchIcon /> Search</span>
             <span className="kbd">⌘K</span>
           </button>
+          <button className="search-btn" onClick={openOwnerDatabaseView} type="button">
+            <span className="search-btn-label"><FolderOpenIcon /> Database view</span>
+          </button>
 
           {/* Sticky footer */}
           <div className="sidebar-footer">
@@ -1948,7 +2109,9 @@ export default function App() {
                 setFindBoards(boardIds)
               }
             }}
-            onLogout={handleLogout}
+            onLogout={ownerDatabaseMode ? exitOwnerDatabaseView : handleLogout}
+            logoutLabel={ownerDatabaseMode ? 'Owner view' : 'Logout'}
+            logoutDanger={!ownerDatabaseMode}
             searchRef={homeSearchRef}
             backendStatus={backendStatus}
             searchLoading={searchLoading}
@@ -2016,9 +2179,28 @@ export default function App() {
                       </div>
                     </div>
                     <div className="title-menu-sep" />
-                    <button className="title-menu-item" onClick={() => { setShareOpen(true); setTitleMenuOpen(false) }} type="button">
+                    <button
+                      className="title-menu-item"
+                      onClick={() => {
+                        openShareDialog({ type: 'workspace', id: null, name: workspace?.name || 'Workspace' })
+                        setTitleMenuOpen(false)
+                      }}
+                      type="button"
+                    >
                       Share workspace
                     </button>
+                    {activeDoc && activeDocType && (
+                      <button
+                        className="title-menu-item"
+                        onClick={() => {
+                          openShareDialog({ type: activeDocType, id: activeDoc.id, name: activeDoc.name })
+                          setTitleMenuOpen(false)
+                        }}
+                        type="button"
+                      >
+                        Share this {docTypeLabel(activeDocType).toLowerCase()}
+                      </button>
+                    )}
                     <button
                       className="title-menu-item"
                       onClick={() => {
@@ -2080,6 +2262,11 @@ export default function App() {
                   <div className="pill-sep" />
                   <span className="pill-title-text pill-title-static">{activeDoc.name}</span>
                   <span className="pill-ro-badge">Read Only</span>
+                  {ownerDatabaseMode && (
+                    <button className="pill-mode-btn" onClick={exitOwnerDatabaseView} type="button">
+                      Owner View
+                    </button>
+                  )}
                   <div className="pill-sep" />
                   <button
                     className="pill-icon-btn pill-search-btn"
@@ -2131,7 +2318,8 @@ export default function App() {
               {activeId?.type === 'report' && activeDoc && (
                 <ReportViewer
                   reportId={activeId.id}
-                  viewerMode={readOnly ? 'visitor' : 'owner'}
+                  viewerMode={viewerMode}
+                  shareSlug={route.shareToken}
                 />
               )}
               {!activeId && ownerMode && (
@@ -2223,52 +2411,74 @@ export default function App() {
         </Modal>
       )}
 
-      {shareOpen && workspace && (
-        <Modal onClose={() => setShareOpen(false)} title="Share your research">
+      {shareOpen && workspace && shareTarget && (
+        <Modal onClose={() => setShareOpen(false)} title={`Share ${shareTargetKind}`}>
           <div className="share-body">
             <div className="modal-copy">
-              These links use the visitor password gate. Visitors land in the database view by default, and deep links can open a specific board or sheet directly.
+              {shareTarget.type === 'folder'
+                ? 'Visitors will see this folder and everything inside it. Share this link with the password you set here.'
+                : shareTarget.type === 'workspace'
+                ? 'Visitors will see the full workspace database. Share this link with the password you set here.'
+                : `Visitors will see only this ${shareTargetKind}. Share this link with the password you set here.`}
             </div>
-            <div className="share-url-row">
+            <div className="share-target-card">
+              <span className="share-target-kind">{shareTargetKind}</span>
+              <span className="share-target-name">{shareTargetTitle}</span>
+            </div>
+            <label className="share-password-row">
+              <span className="modal-field-label">Share password</span>
               <input
-                readOnly
-                className="share-url"
-                value={`${window.location.origin}/`}
-                onFocus={(e) => e.target.select()}
+                className="share-owner-input"
+                type="password"
+                value={sharePassword}
+                onChange={(e) => setSharePassword(e.target.value)}
+                placeholder={currentShareLinks[0]?.has_password ? 'Enter a new password to reset it' : 'At least 6 characters'}
               />
+              <span className="share-password-hint">
+                {currentShareLinks[0]?.has_password
+                  ? 'This link already has its own password.'
+                  : 'Leave blank to use the universal visitor password.'}
+              </span>
+              {sharePasswordInvalid && <span className="share-password-error">Use at least 6 characters.</span>}
+            </label>
+            {currentShareLinks.length === 0 ? (
               <button
                 className="btn-primary"
-                onClick={() => {
-                  navigator.clipboard.writeText(`${window.location.origin}/`).then(() => {
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 1500)
-                  })
-                }}
+                onClick={createShareForTarget}
+                disabled={shareBusy || sharePasswordInvalid}
                 type="button"
               >
-                {copied ? 'Copied' : 'Copy home'}
+                {shareBusy ? 'Creating...' : 'Create share link'}
               </button>
-            </div>
-            {activeDoc && activeDocType && (
-              <div className="share-url-row">
-                <input
-                  readOnly
-                  className="share-url"
-                  value={`${window.location.origin}/${activeDocType}/${activeDoc.id}`}
-                  onFocus={(e) => e.target.select()}
-                />
-                <button
-                  className="btn-primary"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}/${activeDocType}/${activeDoc.id}`).then(() => {
-                      setCopiedDocLink(true)
-                      setTimeout(() => setCopiedDocLink(false), 1500)
-                    })
-                  }}
-                  type="button"
-                >
-                  {copiedDocLink ? 'Copied' : `Copy ${activeDocType}`}
-                </button>
+            ) : (
+              <div className="share-link-list">
+                {currentShareLinks.map((share) => {
+                  const url = `${window.location.origin}${share.url}`
+                  return (
+                    <div className="share-link-row" key={share.id}>
+                      <input
+                        readOnly
+                        className="share-url"
+                        value={url}
+                        onFocus={(e) => e.target.select()}
+                      />
+                      <button className="btn-primary" onClick={() => copyShareLink(share)} type="button">
+                        {shareCopiedId === share.id ? 'Copied' : 'Copy'}
+                      </button>
+                      <button
+                        className="btn-ghost"
+                        onClick={() => updateSharePassword(share)}
+                        disabled={shareBusy || sharePassword.trim().length < 6}
+                        type="button"
+                      >
+                        Save password
+                      </button>
+                      <button className="btn-ghost" onClick={() => revokeShareLink(share)} disabled={shareBusy} type="button">
+                        Revoke
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             )}
             <div className="share-owner-row">
@@ -2573,7 +2783,7 @@ export default function App() {
                   key={i}
                   className="result"
                   onClick={() => {
-                    const hitType = hitKindToDocType(r.kind)
+                    const hitType = hitToDocType(r)
                     const hitDoc = (docsByKind[hitType] || []).find(item => item.id === r.doc_id)
                     openDocument(hitType, r.doc_id, hitDoc?.folder_id)
                     if (hitType === 'board') {
@@ -2663,7 +2873,7 @@ function AccessGate({
     )
   }
 
-  const directLabel = route?.doc ? `${docTypeLabel(route.doc.type)} link` : 'Workspace'
+  const directLabel = route?.shareToken ? 'Share link' : route?.doc ? `${docTypeLabel(route.doc.type)} link` : 'Workspace'
   const allowSetup = requiresSetup && setupAllowed
   const configMissing = !authConfigured && !setupAllowed
 
@@ -2677,6 +2887,8 @@ function AccessGate({
             ? 'Create the owner and visitor passwords. After setup, the same password field routes people into owner or visitor mode automatically.'
             : configMissing
             ? 'Station 8 access is not configured on the server. The owner needs to set OWNER_PASSWORD and VISITOR_PASSWORD on the backend.'
+            : route?.shareToken
+            ? `${directLabel} is protected. Enter the password for this share, or the owner password.`
             : `${directLabel} is protected. Enter either the owner password or the visitor password to continue.`}
         </p>
 
@@ -2739,6 +2951,8 @@ function DatabaseHome({
   tagColor,
   onOpenItem,
   onLogout,
+  logoutLabel = 'Logout',
+  logoutDanger = true,
   searchRef,
   backendStatus,
   searchLoading,
@@ -2969,7 +3183,9 @@ function DatabaseHome({
             <ThemeToggleIcon />
           </button>
         )}
-        <button className="database-logout" onClick={onLogout} type="button">Logout</button>
+        <button className={`database-logout${logoutDanger ? '' : ' database-logout--neutral'}`} onClick={onLogout} type="button">
+          {logoutLabel}
+        </button>
         <div className="database-overflow" ref={menuRef}>
           <button
             className="database-overflow-btn"
@@ -3000,10 +3216,10 @@ function DatabaseHome({
               <button
                 type="button"
                 role="menuitem"
-                className="database-overflow-item database-overflow-item--danger"
+                className={`database-overflow-item${logoutDanger ? ' database-overflow-item--danger' : ''}`}
                 onClick={() => { setMenuOpen(false); onLogout() }}
               >
-                <span>Logout</span>
+                <span>{logoutLabel}</span>
               </button>
             </div>
           )}
@@ -3044,7 +3260,7 @@ function DatabaseHome({
             </div>
           )}
           {!searchLoading && (searchHits || []).length === 0 && (
-            <div className="database-search-results-empty">Nothing public matched that search.</div>
+            <div className="database-search-results-empty">Nothing matched that search.</div>
           )}
         </div>
       )}
@@ -3280,8 +3496,8 @@ function DatabaseHome({
                   </>
                 ) : hasQuery ? (
                   <>
-                    <div className="database-empty-title">Nothing public matched that search.</div>
-                    <div className="database-empty-copy">Clear the query or add more public material to the workspace.</div>
+                    <div className="database-empty-title">Nothing matched that search.</div>
+                    <div className="database-empty-copy">Clear the query or try another term.</div>
                   </>
                 ) : selectedTags.size > 0 ? (
                   <>

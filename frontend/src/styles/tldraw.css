@@ -599,6 +599,7 @@ html[data-mode="light"] .database-search-hint { background: rgba(0, 0, 0, 0.05);
 }
 .database-theme-btn:hover { color: var(--s8-accent); border-color: var(--s8-accent-border); }
 .database-logout:hover { color: var(--s8-danger); border-color: var(--s8-danger); }
+.database-logout--neutral:hover { color: var(--s8-accent); border-color: var(--s8-accent-border); }
 
 /* Overflow `⋯` menu — phone-only. Hidden on desktop; the base
    `display: none` is overridden inside the @media (max-width: 599px)

@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react'
 
 const API = import.meta.env.VITE_API_URL || ''
 
-export default function ReportViewer({ reportId, viewerMode = 'owner' }) {
+export default function ReportViewer({ reportId, viewerMode = 'owner', shareSlug = null }) {
   const [html, setHtml] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     let cancelled = false
-    const url = viewerMode === 'visitor'
+    const url = viewerMode === 'share' && shareSlug
+      ? `${API}/api/share/${encodeURIComponent(shareSlug)}/report/${reportId}`
+      : viewerMode === 'visitor'
       ? `${API}/api/visitor/reports/${reportId}`
       : `${API}/api/reports/${reportId}`
 
@@ -22,7 +24,7 @@ export default function ReportViewer({ reportId, viewerMode = 'owner' }) {
       .catch(e => { if (!cancelled) setError(e.message) })
 
     return () => { cancelled = true }
-  }, [reportId, viewerMode])
+  }, [reportId, shareSlug, viewerMode])
 
   if (error) return (
     <div className="report-embed-wrap">

@@ -518,6 +518,7 @@
 .tree-item-shell:hover .item-actions { display: flex; }
 .tree-delete-btn,
 .tree-privacy-btn,
+.tree-share-btn,
 .tree-rename-btn {
   display: flex; align-items: center; justify-content: center;
   width: 1.375rem; height: 1.375rem; border: none; background: transparent;
@@ -526,9 +527,11 @@
 }
 .tree-delete-btn svg,
 .tree-privacy-btn svg,
+.tree-share-btn svg,
 .tree-rename-btn svg { width: 0.9375rem; height: 0.9375rem; }
 .tree-delete-btn:hover { color: var(--s8-danger); background: var(--s8-danger-dim); }
 .tree-privacy-btn:hover { color: var(--s8-accent); background: var(--s8-accent-dim); }
+.tree-share-btn:hover { color: var(--s8-accent); background: var(--s8-accent-dim); }
 .tree-rename-btn:hover { color: var(--s8-accent); background: var(--s8-accent-dim); }
 /* When locked: always show the lock button (not just on hover) */
 .tree-privacy-btn.is-private {
@@ -550,7 +553,7 @@
 }
 .tree-item-shell.is-renaming .sb-item-main { cursor: text; }
 
-.sb-item-main { padding-right: 5rem; }
+.sb-item-main { padding-right: 6.75rem; }
 
 /* Always-visible lock icon for private items in the label area */
 .sb-private-badge {
