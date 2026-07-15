@@ -64,6 +64,28 @@ ops/.deploy-hook
 # Local env files (Google OAuth creds, etc.)
 .env
 .env.local
+.env.*
+!.env.example
+!**/.env.example
+
+# Credential files that must never enter the repository
+.npmrc
+.pypirc
+.netrc
+pip.conf
+credentials*.json
+client_secret*.json
+service-account*.json
+service_account*.json
+firebase-adminsdk*.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
 
 # Local macOS launcher scripts (live in private/)
 *.command
