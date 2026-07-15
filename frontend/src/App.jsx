@@ -1716,7 +1716,6 @@ export default function App() {
     const priv = isEffectivelyPrivate(folder, true)
     const isDragging = dragItem?.type === 'folder' && dragItem.id === folder.id
     const isDropTarget = dropTargetFolderId === folder.id
-    const isExternalDropTarget = externalPdfDragActive && isDropTarget
     const isRenaming = renameTarget?.id === folder.id && renameTarget.type === 'folder'
     return (
       <div key={folder.id}>
@@ -1742,7 +1741,7 @@ export default function App() {
             </div>
           ) : (
             <button
-              className={`sb-item sb-item-main tree-row tree-folder ${expanded ? 'folder-open' : ''} ${priv ? 'sb-item-private' : ''}${isDropTarget ? ' is-drop-target' : ''}${isExternalDropTarget ? ' is-external-drop-target' : ''}`}
+              className={`sb-item sb-item-main tree-row tree-folder ${expanded ? 'folder-open' : ''} ${priv ? 'sb-item-private' : ''}${isDropTarget ? ' is-drop-target' : ''}`}
               style={{ paddingLeft: `${0.625 + depth * 1.125}rem` }}
               draggable={!readOnly}
               onDragEnd={handleItemDragEnd}
@@ -1755,7 +1754,6 @@ export default function App() {
               <span className={`tree-chevron ${expanded ? 'open' : ''}`}><ChevronRightIcon /></span>
               {expanded ? <FolderOpenIcon /> : <FolderIcon />}
               <span className="sb-item-label">{folder.name}</span>
-              {isExternalDropTarget && <span className="tree-drop-label">Drop here</span>}
               {priv && <span className="sb-private-badge"><LockIcon /></span>}
             </button>
           )}
@@ -1942,7 +1940,7 @@ export default function App() {
     if (!isExternalFileDrag(event.dataTransfer)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
-    if (!event.target?.closest?.('.tree-row, .workspace-root-drop-zone')) {
+    if (!event.target?.closest?.('button.tree-row')) {
       clearFolderHoverExpand()
       if (dropTargetFolderId !== ROOT_FOLDER) setDropTargetFolderId(ROOT_FOLDER)
     }
@@ -2317,7 +2315,7 @@ export default function App() {
       </svg>
       {showSidebar && (
         <aside
-          className={`sidebar${externalPdfDragActive ? ' is-external-pdf-drag' : ''}`}
+          className="sidebar"
           id="workspace-sidebar"
           aria-hidden={sidebarCollapsed}
           onDragEnter={handleSidebarDragEnter}
@@ -2347,53 +2345,52 @@ export default function App() {
             </button>
           </div>
 
-          <div className="sb-section-row">
-            <div className="sb-section">Workspace</div>
-            <div className="sb-section-actions">
-              <button
-                className="sb-add"
-                onClick={collapseAllFolders}
-                title="Collapse all folders"
-                aria-label="Collapse all folders"
-                type="button"
-                disabled={!hasExpandedFolders}
+          <div className="sb-section-row workspace-section-row">
+            {externalPdfDragActive && externalDropDestination ? (
+              <div
+                className="workspace-drop-destination"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                aria-label={`PDF destination: ${externalDropDestination}`}
+                title={externalDropDestination}
               >
-                <CollapseAllIcon />
-              </button>
-              <button
-                className="sb-add"
-                onClick={openNewFolderModal}
-                title="New folder"
-                aria-label="New folder"
-                type="button"
-              >
-                <PlusIcon />
-              </button>
-            </div>
+                <span>PDF →</span>
+                <strong>{externalDropDestination}</strong>
+              </div>
+            ) : (
+              <>
+                <div className="sb-section">Workspace</div>
+                <div className="sb-section-actions">
+                  <button
+                    className="sb-add"
+                    onClick={collapseAllFolders}
+                    title="Collapse all folders"
+                    aria-label="Collapse all folders"
+                    type="button"
+                    disabled={!hasExpandedFolders}
+                  >
+                    <CollapseAllIcon />
+                  </button>
+                  <button
+                    className="sb-add"
+                    onClick={openNewFolderModal}
+                    title="New folder"
+                    aria-label="New folder"
+                    type="button"
+                  >
+                    <PlusIcon />
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-          {externalPdfDragActive && externalDropDestination && (
-            <div className="sidebar-pdf-drop-status" role="status" aria-live="polite">
-              <PdfIcon />
-              <span>Drop into</span>
-              <strong title={externalDropDestination}>{externalDropDestination}</strong>
-            </div>
-          )}
           <div
-            className={`workspace-tree${dropTargetFolderId === ROOT_FOLDER ? ' is-root-drop-target' : ''}`}
+            className={`workspace-tree${!externalPdfDragActive && dropTargetFolderId === ROOT_FOLDER ? ' is-root-drop-target' : ''}`}
             onDragLeave={handleWorkspaceDragLeave}
             onDragOver={handleWorkspaceDragOver}
             onDrop={handleWorkspaceDrop}
           >
-            {externalPdfDragActive && (
-              <div
-                className={`workspace-root-drop-zone${dropTargetFolderId === ROOT_FOLDER ? ' is-drop-target' : ''}`}
-                onDragOver={handleWorkspaceDragOver}
-                onDrop={handleWorkspaceDrop}
-              >
-                <PdfIcon />
-                <span>Drop into Workspace root</span>
-              </div>
-            )}
             {rootFolders.map(folder => renderFolderNode(folder))}
             {rootDocs.length > 0 && rootFolders.length > 0 && <div className="sb-subsection">Unfiled</div>}
             {rootDocs.map(doc => renderDocItem(doc))}
