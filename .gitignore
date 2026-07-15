@@ -25,6 +25,7 @@ frontend/dist/
 data/access_profiles.json
 data/
 uploads/
+pdfs/
 *.log
 
 # IDE

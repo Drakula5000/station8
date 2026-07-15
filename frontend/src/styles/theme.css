@@ -176,6 +176,12 @@ html[data-mode="dark"], html:not([data-mode]) {
   --s8-kind-gsheet:       #6dd890;
   --s8-kind-gsheet-dim:   rgba(109, 216, 144, 0.10);
   --s8-kind-gsheet-border:rgba(109, 216, 144, 0.34);
+  --s8-kind-report:       #9F7AEC;
+  --s8-kind-report-dim:   rgba(159, 122, 236, 0.10);
+  --s8-kind-report-border:rgba(159, 122, 236, 0.34);
+  --s8-kind-pdf:          #E85858;
+  --s8-kind-pdf-dim:      rgba(232, 88, 88, 0.10);
+  --s8-kind-pdf-border:   rgba(232, 88, 88, 0.34);
   --s8-kind-name:         #FFC428;
   --s8-kind-name-dim:     rgba(255, 196, 40, 0.12);
   --s8-kind-name-border:  rgba(255, 196, 40, 0.40);
@@ -252,6 +258,12 @@ html[data-mode="light"] {
   --s8-kind-gsheet:       #3aa766;
   --s8-kind-gsheet-dim:   rgba(58, 167, 102, 0.10);
   --s8-kind-gsheet-border:rgba(58, 167, 102, 0.32);
+  --s8-kind-report:       #7552bd;
+  --s8-kind-report-dim:   rgba(117, 82, 189, 0.10);
+  --s8-kind-report-border:rgba(117, 82, 189, 0.32);
+  --s8-kind-pdf:          #c94444;
+  --s8-kind-pdf-dim:      rgba(201, 68, 68, 0.10);
+  --s8-kind-pdf-border:   rgba(201, 68, 68, 0.32);
   --s8-kind-name:         #b07410;
   --s8-kind-name-dim:     rgba(176, 116, 16, 0.12);
   --s8-kind-name-border:  rgba(176, 116, 16, 0.36);
@@ -261,4 +273,3 @@ html[data-mode="light"] {
 
   --s8-grid-overlay: rgba(248, 250, 252, 0.05);
 }
-

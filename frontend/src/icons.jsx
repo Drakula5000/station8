@@ -45,6 +45,16 @@ export function ReportIcon(props) {
   )
 }
 
+export function PdfIcon(props) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...props}>
+      <path d="M3.2 1.5h4.6l3 3V12a1 1 0 0 1-1 1H3.2a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round"/>
+      <path d="M7.8 1.5v3h3" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round"/>
+      <path d="M4.1 9.9V7.2h1.15a.85.85 0 0 1 0 1.7H4.1M7.1 7.2h.75a1.35 1.35 0 0 1 0 2.7H7.1V7.2Zm3.15 2.7V7.2h1.65m-1.65 1.2h1.35" stroke="currentColor" strokeWidth=".72" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
+}
+
 export function DocIcon(props) {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" {...props}>
@@ -117,6 +127,20 @@ export function ChevronRightIcon(props) {
   return (
     <svg {...common} {...props}>
       <path d="M7.5 5.5 12.5 10l-5 4.5"/>
+    </svg>
+  )
+}
+
+export function CollapseAllIcon(props) {
+  return (
+    <svg className="collapse-all-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" {...props}>
+      <path
+        d="M1 4.5 6 1 11 4.5M1 11 6 7.5 11 11"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }

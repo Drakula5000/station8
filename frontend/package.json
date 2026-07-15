@@ -7,9 +7,14 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test": "node --test",
     "preview": "vite preview"
   },
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "dependencies": {
+    "pdfjs-dist": "^6.1.200",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-spreadsheet": "^0.10.1",

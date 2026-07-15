@@ -9,7 +9,7 @@
 
 <br>
 
-Searchable whiteboards for research. Every picture, sticky, knit, and spreadsheet cell is indexed.<br>
+Searchable research workspaces. Every picture, sticky, PDF page, knit, and spreadsheet cell is indexed.<br>
 Whiteboards beat walls of text. But FigJam and Miro can't search the images on them... and images are worth 1k words.
 
 </div>
@@ -20,11 +20,11 @@ Whiteboards beat walls of text. But FigJam and Miro can't search the images on t
 
 I use whiteboards for research, because people prefer it to reading pages of analysis and findings. But FigJam, Miro, et al. don't have the kind of searchability you get with documents. So a photo from a slide at a conference or a picture of a jellyfish is invisible to their search.
 
-Station 8 fixes that for me -- a searchable database for everything in my canvas-based research. Drop an image on a board and OCR runs in your browser, words printed inside the image become findable immediately. Tag the image with alt text and that's searchable too. Stickies, docs, knits, spreadsheet cells, all of it indexed in one place.
+Station 8 fixes that for me -- a searchable database for everything in my canvas-based research. Drop an image on a board and OCR runs in your browser, words printed inside the image become findable immediately. Tag the image with alt text and that's searchable too. Stickies, docs, PDFs, knits, spreadsheet cells, all of it indexed in one place.
 
 The search results also take you directly to the search hits, zooming your camera for you, and lighting up your find. Search specific boards or the whole database, our search will take you on the guided tour of your hits.
 
-You can create or import Google Docs + Sheets and R knits directly into the same workspace, so people can search your entire research database in one spot.
+You can create or import Google Docs + Sheets, add PDFs by picker or drag-and-drop, and push R knits directly into the same workspace, so people can search your entire research database in one spot. PDFs are indexed page-by-page; when a page is a scan instead of selectable text, Station 8 renders and OCRs it in your browser before adding it to the same search index.
 
 Station 8 is a free (or almost-free depending on your usage) way to show off your research and how you think.
 
@@ -64,9 +64,9 @@ One login, two access levels: the owner password lets you edit everything, the v
 
 ![Stack](./.github/assets/h-stack.svg)
 
-- **Frontend:** [tldraw](https://tldraw.dev) (canvas), [Tesseract.js](https://tesseract.projectnaptha.com/) (OCR), [react-spreadsheet](https://github.com/iddan/react-spreadsheet) (native sheets)
+- **Frontend:** [tldraw](https://tldraw.dev) (canvas), [PDF.js](https://mozilla.github.io/pdf.js/) (PDF parsing/page rendering), [Tesseract.js](https://tesseract.projectnaptha.com/) (image and scanned-PDF OCR), [react-spreadsheet](https://github.com/iddan/react-spreadsheet) (native sheets)
 - **Backend:** Flask (Python), scikit-learn (TF-IDF search ranking)
-- **Storage & hosting:** Supabase (data + image bucket), Vercel (frontend), Render (backend, free tier)
+- **Storage & hosting:** Supabase (data + image/PDF buckets), Vercel (frontend), Render (backend, free tier)
 
 <br>
 
@@ -75,7 +75,7 @@ One login, two access levels: the owner password lets you edit everything, the v
 You'll need four free accounts. Create them before you start — the free tier on each is enough to run Station 8.
 
 - [GitHub](https://github.com) — to fork this repo (you're already here)
-- [Supabase](https://supabase.com) — stores your boards and uploaded images (free tier: 500 MB database, 1 GB file storage; pauses after 1 week of inactivity)
+- [Supabase](https://supabase.com) — stores your workspace data, uploaded images, and private PDFs (free tier: 500 MB database, 1 GB file storage; pauses after 1 week of inactivity)
 - [Render](https://render.com) — runs the backend (free tier: sleeps after 15 min of inactivity, first request after sleep takes 30–90 sec)
 - [Vercel](https://vercel.com) — hosts the frontend, the website your visitors see (free Hobby plan, no restrictions)
 
@@ -96,21 +96,24 @@ Click **Fork** at the top-right of this page. This gives you your own copy of St
 
 <br>
 
-This is where your data lives — board content, workspace settings, and uploaded images.
+This is where your data lives — board content, workspace settings, uploaded images, and PDFs.
 
 - Create a new project at [supabase.com](https://supabase.com). Pick any region close to you.
 - Go to **Project Settings → API** (or click the **Connect** button at the top of your project) and copy two values — you'll need them in the next steps:
   - **Project URL** (looks like `https://abcdefg.supabase.co`)
-  - **anon / public key** (a long string starting with `eyJ...`)
+  - The server-only legacy **service_role key** (a JWT beginning with `eyJ...`). Do not use the publishable/anon key: private PDF reads and deletes must never be granted to the public Supabase role. The currently pinned Supabase Python client also does not accept the newer opaque `sb_secret_...` format. This key belongs only in Render, local `.env`, and GitHub Actions secrets — never in Vercel or frontend code.
 - Go to **SQL Editor** and run this to create the table that stores all your data:
   ```sql
   create table json_storage (
     id text primary key,
     data jsonb
   );
+
+  alter table json_storage enable row level security;
   ```
-  Leave Row Level Security (RLS) disabled on this table — it's off by default and Station 8 expects it that way. If you enable RLS, the backend won't be able to read or write data.
+  Do not add publishable/anon policies to this table. The server-only secret/service-role key bypasses RLS, while browsers and public project keys cannot read your workspace metadata directly.
 - Go to **Storage** and create a new bucket called `uploads`. Make sure **Public bucket** is turned on — this lets image URLs work directly from Supabase's CDN without going through your backend.
+- Create a second bucket called `pdfs`. Keep **Public bucket** turned **off**, set its maximum file size to **25 MB**, and allow only the MIME type `application/pdf`. Station 8 grants short-lived access to each PDF only after the owner or visitor has authenticated; making this bucket public would bypass those controls.
 
 </details>
 
@@ -134,7 +137,7 @@ When the deploy form appears:
   | `OWNER_PASSWORD` | The password you'll use to edit your workspace. **Required** — without it you're locked out (the app can't prompt you to create one in production). |
   | `VISITOR_PASSWORD` | The password you'll share with people who should have read-only access. **Required** — same reason. |
   | `SUPABASE_URL` | Your Supabase Project URL from step 2. |
-  | `SUPABASE_KEY` | Your Supabase anon key from step 2. |
+  | `SUPABASE_KEY` | Your server-only legacy Supabase `service_role` JWT from step 2. Never place it in Vercel. |
   | `CORS_ALLOWED_ORIGINS` | Your Vercel URL (you'll get this in step 4 — come back and add it). Example: `https://my-station8.vercel.app`. If you later add a custom domain, add it here too, comma-separated. |
   | `PYTHON_VERSION` | `3.11.0`. |
 
@@ -354,7 +357,7 @@ To disconnect a machine, delete `~/.station8/token` on that machine. To permanen
 
 <br>
 
-Run Station 8 on your own machine — to tinker with the code, test changes, or keep everything private with no cloud accounts needed. You'll need [Python 3.11+](https://www.python.org/downloads/) and [Node.js 18+](https://nodejs.org/) installed.
+Run Station 8 on your own machine — to tinker with the code, test changes, or keep everything private with no cloud accounts needed. You'll need [Python 3.11+](https://www.python.org/downloads/) and [Node.js 22.13+](https://nodejs.org/) installed.
 
 **1. Install dependencies.**
 
@@ -372,7 +375,7 @@ cd frontend && npm install && cd ..
 | `FLASK_SECRET_KEY` | `station8-dev-secret-change-me` | Fine for local use. |
 | `OWNER_PASSWORD` | `owner` | Password for editor access. |
 | `VISITOR_PASSWORD` | `visitor` | Password for read-only access. |
-| `SUPABASE_URL` / `SUPABASE_KEY` | — | Optional. Without these, data is stored in local JSON files under `data/` — no account needed. |
+| `SUPABASE_URL` / `SUPABASE_KEY` | — | Optional. Without these, data is stored in local JSON files under `data/`, images under `uploads/`, and PDFs under `pdfs/` — no account needed. |
 
 **3. Start the app.**
 
@@ -395,7 +398,7 @@ Visit `http://127.0.0.1:5173` and log in with your `OWNER_PASSWORD` (default: `o
 
 ![Acknowledgements](./.github/assets/h-acknowledgements.svg)
 
-[tldraw](https://tldraw.dev), [Tesseract.js](https://tesseract.projectnaptha.com/), and [react-spreadsheet](https://github.com/iddan/react-spreadsheet) do the heavy lifting.
+[tldraw](https://tldraw.dev), [PDF.js](https://mozilla.github.io/pdf.js/), [Tesseract.js](https://tesseract.projectnaptha.com/), and [react-spreadsheet](https://github.com/iddan/react-spreadsheet) do the heavy lifting.
 
 <br>
 
@@ -412,4 +415,3 @@ I built this with AI. AI transparency is important for your security, safety, an
 MIT. See [LICENSE](./LICENSE).
 
 tldraw requires its own license key for production use. A free 100-day trial and a free hobby license (non-commercial, shows a watermark) are available at [tldraw.dev/community/license](https://tldraw.dev/community/license).
-

@@ -79,6 +79,120 @@
 .btn-danger-text { color: var(--s8-danger); }
 .btn-danger-text:hover { background: var(--s8-danger-dim); color: var(--s8-danger); }
 
+/* ─── PDF upload ─── */
+.modal-pdf-upload {
+  width: 32rem;
+}
+.pdf-file-input {
+  display: none;
+}
+.pdf-drop-zone {
+  width: 100%;
+  min-height: 8.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4375rem;
+  border: 0.0625rem dashed var(--s8-accent-border);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  background: var(--s8-accent-dim);
+  color: var(--s8-text);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
+}
+.pdf-drop-zone:hover,
+.pdf-drop-zone.is-dragging {
+  border-color: var(--s8-accent);
+  background: var(--s8-active);
+  box-shadow: inset 0 0 0 0.0625rem var(--s8-accent-border);
+}
+.pdf-drop-zone:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+.pdf-drop-zone-title {
+  color: var(--s8-accent);
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+.pdf-drop-zone-copy {
+  color: var(--s8-text-mid);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  text-align: center;
+}
+.pdf-upload-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 10rem;
+  overflow-y: auto;
+  margin-top: 0.75rem;
+  border: 0.0625rem solid var(--s8-input-border);
+  border-radius: 0.5rem;
+  background: var(--s8-input-bg);
+}
+.pdf-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  border-bottom: 0.0625rem solid var(--s8-input-border);
+}
+.pdf-upload-row:last-child { border-bottom: none; }
+.pdf-upload-file {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+.pdf-upload-name {
+  overflow: hidden;
+  color: var(--s8-text);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdf-upload-size {
+  color: var(--s8-text-dim);
+  font-size: 0.625rem;
+}
+.pdf-upload-row > button {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: 0.3125rem;
+  background: transparent;
+  color: var(--s8-text-mid);
+  cursor: pointer;
+}
+.pdf-upload-row > button:hover { background: var(--s8-danger-dim); color: var(--s8-danger); }
+.pdf-upload-row > button:disabled { cursor: default; opacity: 0.45; }
+.pdf-upload-progress,
+.pdf-upload-errors {
+  margin-top: 0.75rem;
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+.pdf-upload-progress {
+  border: 0.0625rem solid var(--s8-accent-border);
+  background: var(--s8-accent-dim);
+  color: var(--s8-accent);
+}
+.pdf-upload-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  border: 0.0625rem solid var(--s8-danger);
+  background: var(--s8-danger-dim);
+  color: var(--s8-danger);
+}
+
 .modal-access {
   display: flex;
   flex-direction: column;
@@ -665,6 +779,8 @@
 .result-kind-pill.kind-sheet  { color: var(--s8-kind-sheet);  background: var(--s8-kind-sheet-dim);  border-color: var(--s8-kind-sheet-border); }
 .result-kind-pill.kind-gdoc   { color: var(--s8-kind-gdoc);   background: var(--s8-kind-gdoc-dim);   border-color: var(--s8-kind-gdoc-border); }
 .result-kind-pill.kind-gsheet { color: var(--s8-kind-gsheet); background: var(--s8-kind-gsheet-dim); border-color: var(--s8-kind-gsheet-border); }
+.result-kind-pill.kind-report { color: var(--s8-kind-report); background: var(--s8-kind-report-dim); border-color: var(--s8-kind-report-border); }
+.result-kind-pill.kind-pdf    { color: var(--s8-kind-pdf);    background: var(--s8-kind-pdf-dim);    border-color: var(--s8-kind-pdf-border); }
 .result-kind-pill.kind-name   { color: var(--s8-kind-name);   background: var(--s8-kind-name-dim);   border-color: var(--s8-kind-name-border); }
 .result-kind-pill.kind-tag    { color: var(--s8-kind-tag);    background: var(--s8-kind-tag-dim);    border-color: var(--s8-kind-tag-border); }
 .result-body { flex: 1; min-width: 0; }

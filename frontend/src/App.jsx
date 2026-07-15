@@ -1,10 +1,14 @@
-import { useEffect, useState, useCallback, useRef, useMemo, Fragment } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo, useId, Fragment } from 'react'
 import TldrawCanvas from './TldrawCanvas'
 import {
-  BoardIcon, SheetIcon, DocIcon, ReportIcon, GoogleLogoIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, SearchIcon, CloseIcon, ThemeToggleIcon, LogoutIcon,
+  BoardIcon, SheetIcon, DocIcon, ReportIcon, PdfIcon, GoogleLogoIcon, FolderIcon, FolderOpenIcon, ChevronRightIcon, CollapseAllIcon, SearchIcon, CloseIcon, ThemeToggleIcon, LogoutIcon,
   SidebarExpandIcon, TrashIcon, LockIcon, UnlockIcon, PencilIcon, PlusIcon, GlobeIcon, PinIcon,
 } from './icons'
 import ReportViewer from './components/ReportViewer'
+import PdfViewer from './components/PdfViewer'
+import PdfUploadPanel from './components/PdfUploadPanel'
+import { needsPdfTextReindex } from './pdf'
+import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'
 import './styles/index.css'
 
 const API = import.meta.env.VITE_API_URL || ''
@@ -19,23 +23,21 @@ if (typeof document !== 'undefined') {
   } catch { /* pre-render environments have no document */ }
 }
 
-// Doc-type kinds. `gdoc`/`gsheet` are Google Drive-backed (iframe embeds);
-// `board` is the tldraw canvas.
-const DOC_KINDS = ['board', 'gdoc', 'gsheet', 'report']
-
-const DOC_KIND_API = {
-  board: 'boards',
-  gdoc: 'gdocs',
-  gsheet: 'gsheets',
-  report: 'reports',
+// One registry drives every document-kind seam: API paths, labels, sort order,
+// route validation, folder summaries, access profiles, and database cards.
+// Keeping this exhaustive prevents new kinds from silently working in only
+// one surface (the drift that previously broke report routes/search hits).
+const DOC_KIND_CONFIG = {
+  board: { api: 'boards', label: 'Board', order: 0 },
+  gdoc: { api: 'gdocs', label: 'Doc', order: 1 },
+  gsheet: { api: 'gsheets', label: 'Sheet', order: 2 },
+  report: { api: 'reports', label: 'Report', order: 3 },
+  pdf: { api: 'pdfs', label: 'PDF', order: 4 },
 }
 
-const DOC_KIND_LABEL = {
-  board: 'Board',
-  gdoc: 'Doc',
-  gsheet: 'Sheet',
-  report: 'Report',
-}
+const DOC_KINDS = Object.keys(DOC_KIND_CONFIG)
+const DOC_KIND_API = Object.fromEntries(DOC_KINDS.map(kind => [kind, DOC_KIND_CONFIG[kind].api]))
+const DOC_KIND_LABEL = Object.fromEntries(DOC_KINDS.map(kind => [kind, DOC_KIND_CONFIG[kind].label]))
 
 const compareByName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
 const normalizeFolderValue = (value) => value === ROOT_FOLDER ? null : (value || null)
@@ -102,7 +104,7 @@ function buildFolderOptions(folders, parentId = null, depth = 0, seen = new Set(
     })
 }
 
-const DOC_KIND_ORDER = { board: 0, gdoc: 1, gsheet: 2, report: 3 }
+const DOC_KIND_ORDER = Object.fromEntries(DOC_KINDS.map(kind => [kind, DOC_KIND_CONFIG[kind].order]))
 
 function sortDocs(items) {
   return [...items].sort((a, b) => {
@@ -265,9 +267,9 @@ function pluralize(count, singular, plural = `${singular}s`) {
 function parseRoute() {
   const url = new URL(window.location.href)
   const path = url.pathname.replace(/\/+$/, '') || '/'
-  const docMatch = path.match(/^\/(board|gdoc|gsheet)\/([^/]+)$/)
+  const docMatch = path.match(new RegExp(`^/(${DOC_KINDS.join('|')})/([^/]+)$`))
 
-  // Known routes: /, /board/<id>, /gdoc/<id>, /gsheet/<id>
+  // Known routes: / plus every kind in DOC_KIND_CONFIG.
   // Everything else redirects to /
   if (path !== '/' && !docMatch) {
     window.history.replaceState({}, '', '/')
@@ -292,6 +294,7 @@ function docKindIcon(type) {
   if (type === 'gdoc') return <DocIcon />
   if (type === 'gsheet') return <SheetIcon />
   if (type === 'report') return <ReportIcon />
+  if (type === 'pdf') return <PdfIcon />
   return <BoardIcon />
 }
 
@@ -304,6 +307,7 @@ const KIND_PILL_LABEL = {
   gdoc:   'DOC',
   gsheet: 'SHEET',
   report: 'REPORT',
+  pdf:    'PDF',
   name:   'NAME',
   tag:    'TAG',
 }
@@ -388,6 +392,7 @@ export default function App() {
   const [gdocs, setGdocs] = useState([])
   const [gsheets, setGsheets] = useState([])
   const [reports, setReports] = useState([])
+  const [pdfs, setPdfs] = useState([])
   const [folders, setFolders] = useState([])
   const foldersRef = useRef([])
   const [expandedFolders, setExpandedFolders] = useState({})
@@ -431,6 +436,16 @@ export default function App() {
   const [newGSheetName, setNewGSheetName] = useState('')
   const [newGSheetFolderId, setNewGSheetFolderId] = useState(ROOT_FOLDER)
   const [newGSheetUrl, setNewGSheetUrl] = useState('')
+  const [newPdfOpen, setNewPdfOpen] = useState(false)
+  const [newPdfFolderId, setNewPdfFolderId] = useState(ROOT_FOLDER)
+  const [pdfModalBusy, setPdfModalBusy] = useState(false)
+  const [pdfPage, setPdfPage] = useState(null)
+  const [pdfDropBusy, setPdfDropBusy] = useState(false)
+  const [pdfDropProgress, setPdfDropProgress] = useState(null)
+  const pdfDropAbortRef = useRef(null)
+  const [pdfReindexProgress, setPdfReindexProgress] = useState(null)
+  const pdfUploadBusyRef = useRef(false)
+  const pdfReindexAttemptedRef = useRef(new Set())
   const [newFolderOpen, setNewFolderOpen] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
   const [newFolderParentId, setNewFolderParentId] = useState(ROOT_FOLDER)
@@ -466,10 +481,22 @@ export default function App() {
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState(null)
   const [errorVisible, setErrorVisible] = useState(false)
+  const showError = useCallback((message) => {
+    setErrorMessage(message)
+    setErrorVisible(true)
+    setTimeout(() => {
+      setErrorVisible(false)
+      setTimeout(() => setErrorMessage(null), 300)
+    }, 3000)
+  }, [])
   const [saveState, setSaveState] = useState('idle')
   const [dragItem, setDragItem] = useState(null)
   const dragItemRef = useRef(null)
   const [dropTargetFolderId, setDropTargetFolderId] = useState(null)
+  const [externalPdfDragActive, setExternalPdfDragActive] = useState(false)
+  const externalDragDepthRef = useRef(0)
+  const folderHoverExpandTimerRef = useRef(null)
+  const folderHoverExpandTargetRef = useRef(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'
@@ -487,8 +514,12 @@ export default function App() {
     try { window.localStorage.setItem('s8.colorMode', colorMode) } catch {}
   }, [colorMode])
 
+  useEffect(() => () => {
+    if (folderHoverExpandTimerRef.current) clearTimeout(folderHoverExpandTimerRef.current)
+  }, [])
+
   const [titleMenuOpen, setTitleMenuOpen] = useState(false)
-  // Inline rename in sidebar — { type: 'folder' | 'board' | 'gdoc' | 'gsheet', id, value }
+  // Inline rename in sidebar — folder or any DOC_KIND_CONFIG type.
   const [renameTarget, setRenameTarget] = useState(null)
   const [renameValue, setRenameValue] = useState('')
   const [ownerDatabaseMode, setOwnerDatabaseMode] = useState(false)
@@ -542,16 +573,57 @@ export default function App() {
 
   const folderById = buildFolderMap(folders)
   const folderOptions = [{ value: ROOT_FOLDER, label: 'Workspace root' }, ...buildFolderOptions(folders)]
+  const externalDropDestination = externalPdfDragActive && dropTargetFolderId
+    ? (dropTargetFolderId === ROOT_FOLDER
+        ? 'Workspace root'
+        : buildFolderPath(dropTargetFolderId, folderById) || 'Workspace root')
+    : null
   const docsByKind = useMemo(() => ({
     board: boards,
     gdoc: gdocs,
     gsheet: gsheets,
     report: reports,
-  }), [boards, gdocs, gsheets, reports])
+    pdf: pdfs,
+  }), [boards, gdocs, gsheets, reports, pdfs])
   const activeDoc = activeId
     ? (docsByKind[activeId.type] || []).find(item => item.id === activeId.id) || null
     : null
   const activeDocType = activeDoc ? activeId.type : null
+  const startPdfReindex = useCallback(async (record, { automatic = false } = {}) => {
+    if (!ownerMode || !record?.id) return
+    if (automatic && pdfReindexAttemptedRef.current.has(record.id)) return
+    if (pdfUploadBusyRef.current) {
+      if (!automatic) showError('Another PDF upload or text index is already in progress.')
+      return
+    }
+
+    pdfReindexAttemptedRef.current.add(record.id)
+    pdfUploadBusyRef.current = true
+    setPdfReindexProgress({ phase: 'opening', pdfId: record.id, name: record.name })
+    try {
+      const updated = await reindexPdf(record.id, progress => {
+        setPdfReindexProgress({ ...progress, pdfId: record.id, name: record.name })
+      })
+      setPdfs(items => items.map(item => item.id === updated.id ? { ...item, ...updated } : item))
+      if (updated.text_status === 'no_text') {
+        showError(`${record.name || 'The PDF'} was checked with OCR, but no readable printed text was found.`)
+      }
+    } catch (error) {
+      showError(`${record.name || 'The PDF'} could not be made searchable. ${error?.message || 'Try again.'}`)
+    } finally {
+      pdfUploadBusyRef.current = false
+      setPdfReindexProgress(null)
+    }
+  }, [ownerMode, showError])
+
+  // PDFs added before browser OCR existed have a valid private binary but an
+  // empty page index. Repair an opened legacy scan once per session so the
+  // owner does not have to delete/re-upload research just to make it searchable.
+  useEffect(() => {
+    if (!ownerMode || activeId?.type !== 'pdf' || !needsPdfTextReindex(activeDoc)) return
+    if (pdfDropBusy || pdfModalBusy) return
+    void startPdfReindex(activeDoc, { automatic: true })
+  }, [activeDoc, activeId?.type, ownerMode, pdfDropBusy, pdfModalBusy, startPdfReindex])
   const deleteImpact = deleteTarget?.type === 'folder'
     ? summarizeFolderDelete(deleteTarget, folders, docsByKind)
     : null
@@ -659,8 +731,9 @@ export default function App() {
     })
   }, [])
 
-  const openDocument = useCallback((type, id, folderId = null) => {
+  const openDocument = useCallback((type, id, folderId = null, { page = null } = {}) => {
     if (folderId) expandFolderPath(folderId)
+    setPdfPage(type === 'pdf' && Number.isInteger(page) && page > 0 ? page : null)
     const next = { type, id }
     setActiveId(next)
     navigate(next)
@@ -695,6 +768,7 @@ export default function App() {
       setGdocs(nextDocsByKind.gdoc || [])
       setGsheets(nextDocsByKind.gsheet || [])
       setReports(nextDocsByKind.report || [])
+      setPdfs(nextDocsByKind.pdf || [])
       setFolders(nextFolders)
       setExpandedFolders((current) => {
         const next = { ...current }
@@ -718,11 +792,12 @@ export default function App() {
     }
 
     const prefix = viewerMode === 'visitor' ? 'visitor/' : ''
-    const [bs, gd, gs, rp, ws] = await Promise.all([
+    const [bs, gd, gs, rp, pd, ws] = await Promise.all([
       fetchJson(`${API}/api/${prefix}boards`, {}, []),
       fetchJson(`${API}/api/${prefix}gdocs`, {}, []),
       fetchJson(`${API}/api/${prefix}gsheets`, {}, []),
       fetchJson(`${API}/api/${prefix}reports`, {}, []),
+      fetchJson(`${API}/api/${prefix}pdfs`, {}, []),
       fetchJson(`${API}/api/${prefix}workspace`, {}, null),
     ])
 
@@ -731,6 +806,7 @@ export default function App() {
       gdoc: Array.isArray(gd) ? gd : [],
       gsheet: Array.isArray(gs) ? gs : [],
       report: Array.isArray(rp) ? rp : [],
+      pdf: Array.isArray(pd) ? pd : [],
     }
     if (ownerMode && ws && !ws.owner && !ownerPromptDismissed) setOwnerPromptOpen(true)
     applyResult(nextDocsByKind, ws?.folders || [], ws)
@@ -799,7 +875,7 @@ export default function App() {
   const openDrivePicker = useCallback(() => {
     setDrivePickerOpen(true)
     loadDriveFolders(null, [{ id: null, name: 'My Drive' }])
-  }, [loadDriveFolders])
+  }, [loadDriveFolders, setDrivePickerOpen])
 
   const drivePickerEnter = (folder) => {
     loadDriveFolders(folder.id, [...drivePicker.breadcrumb, folder])
@@ -820,7 +896,7 @@ export default function App() {
       })
       setDrivePickerOpen(false)
     }
-  }, [])
+  }, [setDriveConfig, setDrivePickerOpen])
 
   const toggleDriveMirror = useCallback(async () => {
     const next = !driveConfig.mirror_folders
@@ -936,6 +1012,7 @@ export default function App() {
         setNewBoardOpen(false)
         setNewGDocOpen(false)
         setNewGSheetOpen(false)
+        if (!pdfModalBusy) setNewPdfOpen(false)
         setNewFolderOpen(false)
         setDeleteConfirmOpen(false)
         setDeleteTarget(null)
@@ -945,7 +1022,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [showDatabaseHome, activeId, boards])
+  }, [showDatabaseHome, activeId, boards, pdfModalBusy])
 
   useEffect(() => {
     if (!query.trim()) {
@@ -1003,6 +1080,46 @@ export default function App() {
     setNewGSheetUrl('')
     setNewGSheetFolderId(activeDoc?.folder_id || ROOT_FOLDER)
     setNewGSheetOpen(true)
+  }
+
+  const openNewPdfModal = () => {
+    if (pdfUploadBusyRef.current) {
+      showError('Another PDF upload is already in progress.')
+      return
+    }
+    setNewPdfFolderId(activeDoc?.folder_id || ROOT_FOLDER)
+    setPdfModalBusy(false)
+    setNewPdfOpen(true)
+  }
+
+  const setPdfModalUploadBusy = (busy) => {
+    pdfUploadBusyRef.current = busy
+    setPdfModalBusy(busy)
+  }
+
+  const addUploadedPdfRecords = (records, { openSingle = true } = {}) => {
+    if (!records.length) return
+    const ids = new Set(records.map(record => record.id))
+    setPdfs(items => [...records, ...items.filter(item => !ids.has(item.id))])
+    for (const record of records) {
+      if (record.folder_id) expandFolderPath(record.folder_id)
+    }
+    if (openSingle && records.length === 1) {
+      openDocument('pdf', records[0].id, records[0].folder_id)
+    }
+    const warnings = []
+    const noTextCount = records.filter(record => record.text_status === 'no_text').length
+    if (noTextCount) {
+      warnings.push(`${noTextCount === 1 ? records.find(record => record.text_status === 'no_text')?.name || 'The PDF' : `${noTextCount} PDFs`} added, but OCR found no readable printed text for search.`)
+    }
+    const truncatedCount = records.filter(record => record.text_status === 'truncated').length
+    if (truncatedCount) {
+      const subject = truncatedCount === 1
+        ? records.find(record => record.text_status === 'truncated')?.name || 'The PDF'
+        : `${truncatedCount} PDFs`
+      warnings.push(`${subject} added, but ${truncatedCount === 1 ? 'its' : 'their'} search index reached the text limit and is incomplete.`)
+    }
+    if (warnings.length) showError(warnings.join(' '))
   }
 
   const openNewFolderModal = () => {
@@ -1315,6 +1432,7 @@ export default function App() {
     else if (kind === 'gdoc') setGdocs(updater)
     else if (kind === 'gsheet') setGsheets(updater)
     else if (kind === 'report') setReports(updater)
+    else if (kind === 'pdf') setPdfs(updater)
   }
 
   const startRename = (item, isFolder) => {
@@ -1380,6 +1498,12 @@ export default function App() {
     setExpandedFolders(current => ({ ...current, [folderId]: current[folderId] === false ? true : false }))
   }
 
+  const hasExpandedFolders = folders.some(folder => expandedFolders[folder.id] !== false)
+
+  const collapseAllFolders = () => {
+    setExpandedFolders(Object.fromEntries(folders.map(folder => [folder.id, false])))
+  }
+
   const openDeleteDialog = (target) => {
     setDeleteTarget(target)
     if (target.type === 'folder') {
@@ -1392,6 +1516,10 @@ export default function App() {
   }
 
   const handleLogout = async () => {
+    if (pdfUploadBusyRef.current) {
+      showError('Wait for the PDF upload to finish before logging out.')
+      return
+    }
     try {
       const res = await fetch(`${API}/api/auth/logout`, {
         method: 'POST',
@@ -1405,6 +1533,8 @@ export default function App() {
       setBoards([])
       setGdocs([])
       setGsheets([])
+      setReports([])
+      setPdfs([])
       setFolders([])
       setActiveId(null)
       setQuery('')
@@ -1532,7 +1662,9 @@ export default function App() {
             style={{ paddingLeft: `${0.625 + depth * 1.125}rem` }}
             draggable={!readOnly}
             onDragEnd={handleItemDragEnd}
+            onDragOver={(event) => handleDocExternalDragOver(event, doc)}
             onDragStart={(event) => handleItemDragStart(event, doc)}
+            onDrop={(event) => handleDocExternalDrop(event, doc)}
             onClick={() => openDocument(doc.type, doc.id, doc.folder_id)}
             type="button"
           >
@@ -1541,7 +1673,7 @@ export default function App() {
             {priv && <span className="sb-private-badge"><LockIcon /></span>}
           </button>
         )}
-        {!readOnly && !isRenaming && (
+        {!readOnly && !isRenaming && !externalPdfDragActive && (
           <div className="item-actions">
             <button
               className="tree-rename-btn"
@@ -1584,6 +1716,7 @@ export default function App() {
     const priv = isEffectivelyPrivate(folder, true)
     const isDragging = dragItem?.type === 'folder' && dragItem.id === folder.id
     const isDropTarget = dropTargetFolderId === folder.id
+    const isExternalDropTarget = externalPdfDragActive && isDropTarget
     const isRenaming = renameTarget?.id === folder.id && renameTarget.type === 'folder'
     return (
       <div key={folder.id}>
@@ -1609,7 +1742,7 @@ export default function App() {
             </div>
           ) : (
             <button
-              className={`sb-item sb-item-main tree-row tree-folder ${expanded ? 'folder-open' : ''} ${priv ? 'sb-item-private' : ''}${isDropTarget ? ' is-drop-target' : ''}`}
+              className={`sb-item sb-item-main tree-row tree-folder ${expanded ? 'folder-open' : ''} ${priv ? 'sb-item-private' : ''}${isDropTarget ? ' is-drop-target' : ''}${isExternalDropTarget ? ' is-external-drop-target' : ''}`}
               style={{ paddingLeft: `${0.625 + depth * 1.125}rem` }}
               draggable={!readOnly}
               onDragEnd={handleItemDragEnd}
@@ -1622,10 +1755,11 @@ export default function App() {
               <span className={`tree-chevron ${expanded ? 'open' : ''}`}><ChevronRightIcon /></span>
               {expanded ? <FolderOpenIcon /> : <FolderIcon />}
               <span className="sb-item-label">{folder.name}</span>
+              {isExternalDropTarget && <span className="tree-drop-label">Drop here</span>}
               {priv && <span className="sb-private-badge"><LockIcon /></span>}
             </button>
           )}
-          {!readOnly && !isRenaming && (
+          {!readOnly && !isRenaming && !externalPdfDragActive && (
             <div className="item-actions">
               <button
                 className="tree-rename-btn"
@@ -1676,17 +1810,17 @@ export default function App() {
   const rootDocs = docsByFolder[ROOT_FOLDER] || []
   const hasWorkspaceItems = rootFolders.some(folder => !tagFilter || folderHasVisibleContent(folder.id)) || rootDocs.length > 0
 
-  // Map a search hit's `kind` field to our doc-type kinds.
-  // Backend returns 'board' for board hits and 'sheet' for the legacy
-  // spreadsheet (no longer creatable, but old data may still index).
-  // Backend returns 'gdoc' / 'gsheet' / 'report' for non-board doc hits.
-  const hitKindToDocType = (kind) => {
-    if (kind === 'gdoc' || kind === 'gsheet' || kind === 'report') return kind
+  // `doc_type` identifies the document; `kind` only identifies what matched
+  // inside it (name, tag, PDF page, OCR, etc.). Falling back to `kind` made
+  // title/tag hits for Docs, Sheets, and Reports open as boards.
+  const hitToDocType = (hit) => {
+    if (DOC_KIND_CONFIG[hit?.doc_type]) return hit.doc_type
+    if (DOC_KIND_CONFIG[hit?.kind]) return hit.kind
     return 'board'
   }
 
   const findDocFromHit = (hit) => {
-    const type = hitKindToDocType(hit.kind)
+    const type = hitToDocType(hit)
     return (docsByKind[type] || []).find(item => item.id === hit.doc_id)
   }
 
@@ -1711,16 +1845,18 @@ export default function App() {
       for (const hit of results) {
         const doc = findDocFromHit(hit)
         if (!doc) continue
-        const type = hitKindToDocType(hit.kind)
-        if (!seen.has(hit.doc_id)) {
-          seen.set(hit.doc_id, {
-            key: hit.doc_id,
+        const type = hitToDocType(hit)
+        const hitKey = `${type}:${hit.doc_id}`
+        if (!seen.has(hitKey)) {
+          seen.set(hitKey, {
+            key: hitKey,
             type,
             docId: hit.doc_id,
             name: hit.doc_name,
             snippet: hit.snippet,
             source: hit.source,
             score: hit.score,
+            page: hit.page || null,
             createdAt: doc.created_at,
             folderId: doc.folder_id || null,
             folderPath: buildFolderPath(doc.folder_id, folderById),
@@ -1728,9 +1864,9 @@ export default function App() {
           })
         }
         // If this hit has a better snippet (higher score), use it
-        else if (hit.score > seen.get(hit.doc_id).score) {
-          const existing = seen.get(hit.doc_id)
-          seen.set(hit.doc_id, { ...existing, snippet: hit.snippet, source: hit.source, score: hit.score })
+        else if (hit.score > seen.get(hitKey).score) {
+          const existing = seen.get(hitKey)
+          seen.set(hitKey, { ...existing, snippet: hit.snippet, source: hit.source, score: hit.score, page: hit.page || null })
         }
       }
       return [...seen.values()]
@@ -1752,19 +1888,111 @@ export default function App() {
     setOwnerPromptOpen(false)
   }
 
-  const showError = (message) => {
-    setErrorMessage(message)
-    setErrorVisible(true)
-    setTimeout(() => {
-      setErrorVisible(false)
-      setTimeout(() => setErrorMessage(null), 300)
-    }, 3000)
-  }
-
   const clearDragState = () => {
     dragItemRef.current = null
     setDragItem(null)
     setDropTargetFolderId(null)
+  }
+
+  const isExternalFileDrag = (dataTransfer) => Array.from(dataTransfer?.types || []).includes('Files')
+
+  const clearFolderHoverExpand = () => {
+    if (folderHoverExpandTimerRef.current) clearTimeout(folderHoverExpandTimerRef.current)
+    folderHoverExpandTimerRef.current = null
+    folderHoverExpandTargetRef.current = null
+  }
+
+  const finishExternalPdfDrag = () => {
+    externalDragDepthRef.current = 0
+    clearFolderHoverExpand()
+    setExternalPdfDragActive(false)
+    setDropTargetFolderId(null)
+  }
+
+  const scheduleFolderHoverExpand = (folderId) => {
+    if (expandedFolders[folderId] !== false) {
+      clearFolderHoverExpand()
+      return
+    }
+    if (folderHoverExpandTargetRef.current === folderId) return
+    clearFolderHoverExpand()
+    folderHoverExpandTargetRef.current = folderId
+    folderHoverExpandTimerRef.current = setTimeout(() => {
+      setExpandedFolders(current => ({ ...current, [folderId]: true }))
+      folderHoverExpandTimerRef.current = null
+      folderHoverExpandTargetRef.current = null
+    }, 600)
+  }
+
+  const handleSidebarDragEnter = (event) => {
+    if (!isExternalFileDrag(event.dataTransfer)) return
+    event.preventDefault()
+    externalDragDepthRef.current += 1
+    setExternalPdfDragActive(true)
+    if (!dropTargetFolderId) setDropTargetFolderId(ROOT_FOLDER)
+  }
+
+  const handleSidebarDragLeave = (event) => {
+    if (!isExternalFileDrag(event.dataTransfer)) return
+    externalDragDepthRef.current = Math.max(0, externalDragDepthRef.current - 1)
+    if (externalDragDepthRef.current === 0) finishExternalPdfDrag()
+  }
+
+  const handleSidebarDragOver = (event) => {
+    if (!isExternalFileDrag(event.dataTransfer)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    if (!event.target?.closest?.('.tree-row, .workspace-root-drop-zone')) {
+      clearFolderHoverExpand()
+      if (dropTargetFolderId !== ROOT_FOLDER) setDropTargetFolderId(ROOT_FOLDER)
+    }
+  }
+
+  const handleSidebarDrop = async (event) => {
+    if (!isExternalFileDrag(event.dataTransfer)) return
+    event.preventDefault()
+    const files = Array.from(event.dataTransfer.files || [])
+    finishExternalPdfDrag()
+    if (files.length) await uploadDroppedPdfs(files, null)
+  }
+
+  const uploadDroppedPdfs = async (files, targetFolderId) => {
+    if (pdfUploadBusyRef.current) {
+      showError('Another PDF upload is already in progress.')
+      return
+    }
+    const destination = targetFolderId
+      ? buildFolderPath(targetFolderId, folderById) || 'Workspace root'
+      : 'Workspace root'
+    pdfUploadBusyRef.current = true
+    setPdfDropBusy(true)
+    setPdfDropProgress({ phase: 'preparing', index: 0, total: files.length, destination })
+    const controller = new AbortController()
+    pdfDropAbortRef.current = controller
+    try {
+      const result = await uploadPdfFiles(files, targetFolderId, progress => {
+        setPdfDropProgress({ ...progress, destination })
+      }, { signal: controller.signal })
+      if (result.uploaded.length) addUploadedPdfRecords(result.uploaded, { openSingle: result.uploaded.length === 1 })
+      if (result.failed.length) {
+        const first = result.failed[0]
+        const suffix = result.failed.length > 1 ? ` (+${result.failed.length - 1} more)` : ''
+        showError(`${first.file?.name || 'PDF'}: ${first.error}${suffix}`)
+      }
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        if (error.uploaded?.length) {
+          addUploadedPdfRecords(error.uploaded, { openSingle: error.uploaded.length === 1 })
+        }
+      } else {
+        showError(error?.message || 'PDF upload failed.')
+      }
+    } finally {
+      pdfDropAbortRef.current = null
+      pdfUploadBusyRef.current = false
+      setPdfDropBusy(false)
+      setPdfDropProgress(null)
+    }
   }
 
   const isFolderDescendant = (folderId, possibleAncestorId) => {
@@ -1807,6 +2035,15 @@ export default function App() {
   }
 
   const handleFolderDragOver = (event, folderId) => {
+    if (isExternalFileDrag(event.dataTransfer)) {
+      event.preventDefault()
+      event.stopPropagation()
+      event.dataTransfer.dropEffect = 'copy'
+      setExternalPdfDragActive(true)
+      scheduleFolderHoverExpand(folderId)
+      if (dropTargetFolderId !== folderId) setDropTargetFolderId(folderId)
+      return
+    }
     const dragged = dragItemRef.current
     if (!canDropIntoFolder(dragged, folderId)) return
     event.preventDefault()
@@ -1848,6 +2085,14 @@ export default function App() {
   }
 
   const handleFolderDrop = async (event, folderId) => {
+    if (isExternalFileDrag(event.dataTransfer)) {
+      event.preventDefault()
+      event.stopPropagation()
+      const files = Array.from(event.dataTransfer.files || [])
+      finishExternalPdfDrag()
+      if (files.length) await uploadDroppedPdfs(files, folderId)
+      return
+    }
     const dragged = dragItemRef.current
     if (!canDropIntoFolder(dragged, folderId)) return
     event.preventDefault()
@@ -1855,7 +2100,37 @@ export default function App() {
     await moveDraggedItem(folderId)
   }
 
+  const handleDocExternalDragOver = (event, doc) => {
+    if (!isExternalFileDrag(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+    setExternalPdfDragActive(true)
+    clearFolderHoverExpand()
+    const targetFolderId = doc.folder_id || ROOT_FOLDER
+    if (dropTargetFolderId !== targetFolderId) setDropTargetFolderId(targetFolderId)
+  }
+
+  const handleDocExternalDrop = async (event, doc) => {
+    if (!isExternalFileDrag(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    const files = Array.from(event.dataTransfer.files || [])
+    const targetFolderId = doc.folder_id || null
+    finishExternalPdfDrag()
+    if (files.length) await uploadDroppedPdfs(files, targetFolderId)
+  }
+
   const handleWorkspaceDragOver = (event) => {
+    if (isExternalFileDrag(event.dataTransfer)) {
+      event.preventDefault()
+      event.stopPropagation()
+      event.dataTransfer.dropEffect = 'copy'
+      setExternalPdfDragActive(true)
+      clearFolderHoverExpand()
+      if (dropTargetFolderId !== ROOT_FOLDER) setDropTargetFolderId(ROOT_FOLDER)
+      return
+    }
     const dragged = dragItemRef.current
     if (!canDropIntoFolder(dragged, null)) return
     event.preventDefault()
@@ -1864,6 +2139,14 @@ export default function App() {
   }
 
   const handleWorkspaceDrop = async (event) => {
+    if (isExternalFileDrag(event.dataTransfer)) {
+      event.preventDefault()
+      event.stopPropagation()
+      const files = Array.from(event.dataTransfer.files || [])
+      finishExternalPdfDrag()
+      if (files.length) await uploadDroppedPdfs(files, null)
+      return
+    }
     const dragged = dragItemRef.current
     if (!canDropIntoFolder(dragged, null)) return
     event.preventDefault()
@@ -1871,6 +2154,7 @@ export default function App() {
   }
 
   const handleWorkspaceDragLeave = (event) => {
+    if (externalPdfDragActive) return
     if (event.currentTarget.contains(event.relatedTarget)) return
     setDropTargetFolderId(null)
   }
@@ -2032,15 +2316,23 @@ export default function App() {
         </defs>
       </svg>
       {showSidebar && (
-        <aside className="sidebar" id="workspace-sidebar" aria-hidden={sidebarCollapsed}>
+        <aside
+          className={`sidebar${externalPdfDragActive ? ' is-external-pdf-drag' : ''}`}
+          id="workspace-sidebar"
+          aria-hidden={sidebarCollapsed}
+          onDragEnter={handleSidebarDragEnter}
+          onDragLeave={handleSidebarDragLeave}
+          onDragOver={handleSidebarDragOver}
+          onDrop={handleSidebarDrop}
+        >
           <div className="sidebar-head">
             <span className="sidebar-brand">Station 8</span>
           </div>
 
-          {/* Content actions — three doc kinds on equal footing.
+          {/* Content actions — four doc kinds on equal footing.
               Folder is a structural action and lives in the WORKSPACE
               section header below, not here. */}
-          <div className="sidebar-actions sidebar-actions-3up">
+          <div className="sidebar-actions">
             <button className="sidebar-action" onClick={openNewBoardModal} type="button">
               <BoardIcon /> Board
             </button>
@@ -2050,26 +2342,58 @@ export default function App() {
             <button className="sidebar-action" onClick={openNewGSheetModal} type="button">
               <SheetIcon /> Sheet
             </button>
+            <button className="sidebar-action" onClick={openNewPdfModal} type="button" disabled={pdfDropBusy}>
+              <PdfIcon /> PDF
+            </button>
           </div>
 
           <div className="sb-section-row">
             <div className="sb-section">Workspace</div>
-            <button
-              className="sb-add"
-              onClick={openNewFolderModal}
-              title="New folder"
-              aria-label="New folder"
-              type="button"
-            >
-              <PlusIcon />
-            </button>
+            <div className="sb-section-actions">
+              <button
+                className="sb-add"
+                onClick={collapseAllFolders}
+                title="Collapse all folders"
+                aria-label="Collapse all folders"
+                type="button"
+                disabled={!hasExpandedFolders}
+              >
+                <CollapseAllIcon />
+              </button>
+              <button
+                className="sb-add"
+                onClick={openNewFolderModal}
+                title="New folder"
+                aria-label="New folder"
+                type="button"
+              >
+                <PlusIcon />
+              </button>
+            </div>
           </div>
+          {externalPdfDragActive && externalDropDestination && (
+            <div className="sidebar-pdf-drop-status" role="status" aria-live="polite">
+              <PdfIcon />
+              <span>Drop into</span>
+              <strong title={externalDropDestination}>{externalDropDestination}</strong>
+            </div>
+          )}
           <div
             className={`workspace-tree${dropTargetFolderId === ROOT_FOLDER ? ' is-root-drop-target' : ''}`}
             onDragLeave={handleWorkspaceDragLeave}
             onDragOver={handleWorkspaceDragOver}
             onDrop={handleWorkspaceDrop}
           >
+            {externalPdfDragActive && (
+              <div
+                className={`workspace-root-drop-zone${dropTargetFolderId === ROOT_FOLDER ? ' is-drop-target' : ''}`}
+                onDragOver={handleWorkspaceDragOver}
+                onDrop={handleWorkspaceDrop}
+              >
+                <PdfIcon />
+                <span>Drop into Workspace root</span>
+              </div>
+            )}
             {rootFolders.map(folder => renderFolderNode(folder))}
             {rootDocs.length > 0 && rootFolders.length > 0 && <div className="sb-subsection">Unfiled</div>}
             {rootDocs.map(doc => renderDocItem(doc))}
@@ -2232,8 +2556,9 @@ export default function App() {
               <button
                 className="sidebar-utility-btn sidebar-utility-danger"
                 onClick={handleLogout}
-                title="Log out"
+                title={pdfDropBusy ? 'Wait for the PDF upload to finish' : 'Log out'}
                 type="button"
+                disabled={pdfDropBusy}
               >
                 <LogoutIcon />
                 <span>Log out</span>
@@ -2266,8 +2591,8 @@ export default function App() {
             allTags={allTags}
             topTags={allTags.slice(0, 3).map(([t]) => t)}
             tagColor={tagColor}
-            onOpenItem={(type, docId) => {
-              openDocument(type, docId)
+            onOpenItem={(type, docId, page = null) => {
+              openDocument(type, docId, null, { page })
               // If opening a board from a search result, trigger FindBar
               if (type === 'board' && query.trim()) {
                 setFindQuery(query)
@@ -2459,19 +2784,31 @@ export default function App() {
               {activeId?.type === 'report' && activeDoc && (
                 <ReportViewer
                   reportId={activeId.id}
-                  viewerMode={readOnly ? 'visitor' : 'owner'}
+                  viewerMode={viewerMode}
+                />
+              )}
+              {activeId?.type === 'pdf' && activeDoc && (
+                <PdfViewer
+                  pdfId={activeId.id}
+                  name={activeDoc.name}
+                  viewerMode={viewerMode}
+                  initialPage={pdfPage}
+                  textStatus={activeDoc.text_status}
+                  reindexing={pdfReindexProgress?.pdfId === activeDoc.id}
+                  onReindex={ownerMode ? () => startPdfReindex(activeDoc) : null}
                 />
               )}
               {!activeId && ownerMode && (
                 <div className="database-empty-main">
                   <div className="database-hero" style={{ paddingTop: 0 }}>
                     <h1 className="database-hero-title">Nothing open</h1>
-                    <p className="database-hero-sub">Create folders, boards, docs, and sheets to organize your research.</p>
+                    <p className="database-hero-sub">Create folders, boards, docs, sheets, and PDFs to organize your research.</p>
                     <div className="database-hero-tries" style={{ marginTop: '1rem' }}>
                       <button className="database-hero-try" onClick={openNewFolderModal} type="button">New folder</button>
                       <button className="database-hero-try" onClick={openNewBoardModal} type="button">New board</button>
                       <button className="database-hero-try" onClick={openNewGDocModal} type="button">New doc</button>
                       <button className="database-hero-try" onClick={openNewGSheetModal} type="button">New sheet</button>
+                      <button className="database-hero-try" onClick={openNewPdfModal} type="button">Add PDF</button>
                     </div>
                   </div>
                 </div>
@@ -2534,6 +2871,19 @@ export default function App() {
             kindLabel="sheet"
           />
           <ModalFooter onCancel={() => setNewGSheetOpen(false)} onConfirm={createGsheet} disabled={!newGSheetName.trim()} />
+        </Modal>
+      )}
+
+      {newPdfOpen && (
+        <Modal onClose={() => { if (!pdfModalBusy) setNewPdfOpen(false) }} title="Add PDFs" className="modal-pdf-upload">
+          <PdfUploadPanel
+            folderOptions={folderOptions}
+            initialFolderId={newPdfFolderId}
+            onCancel={() => setNewPdfOpen(false)}
+            onComplete={() => setNewPdfOpen(false)}
+            onBusyChange={setPdfModalUploadBusy}
+            onUploaded={records => addUploadedPdfRecords(records, { openSingle: records.length === 1 })}
+          />
         </Modal>
       )}
 
@@ -2665,6 +3015,12 @@ export default function App() {
             {deleteTarget.type === 'board' && (
               <p className="delete-dialog-note">
                 Its canvas data will be removed, and uploaded images tied only to this board will be cleaned up too.
+              </p>
+            )}
+
+            {deleteTarget.type === 'pdf' && (
+              <p className="delete-dialog-note">
+                The PDF file and its searchable page text will both be permanently removed.
               </p>
             )}
 
@@ -2874,7 +3230,7 @@ export default function App() {
               type="button"
             >Search all boards</button>
           )}
-          {!query && <div className="hint">Text, shapes, sticky notes, sheet cells, OCR — across all boards and sheets.</div>}
+          {!query && <div className="hint">Text, shapes, sticky notes, PDF pages, sheet cells, and OCR — across the whole workspace.</div>}
           <div className="results">
               {searchLoading ? (
                 <div className="result-empty">Searching…</div>
@@ -2883,9 +3239,9 @@ export default function App() {
                   key={i}
                   className="result"
                   onClick={() => {
-                    const hitType = hitKindToDocType(r.kind)
+                    const hitType = hitToDocType(r)
                     const hitDoc = (docsByKind[hitType] || []).find(item => item.id === r.doc_id)
-                    openDocument(hitType, r.doc_id, hitDoc?.folder_id)
+                    openDocument(hitType, r.doc_id, hitDoc?.folder_id, { page: r.page || r.page_number || null })
                     if (hitType === 'board') {
                       setFindQuery(query)
                       const boardIds = [...new Set(
@@ -2902,7 +3258,7 @@ export default function App() {
                     <div className="result-breadcrumb">
                       <span className="crumb">{r.doc_name}</span>
                       <span className="crumb-sep">→</span>
-                      <span className="crumb crumb-tail">{r.source}</span>
+                      <span className="crumb crumb-tail">{r.source}{r.page ? ` · page ${r.page}` : ''}</span>
                     </div>
                   </div>
                 </div>
@@ -2914,6 +3270,32 @@ export default function App() {
 
       {errorVisible && errorMessage && (
         <div className="error-toast">{errorMessage}</div>
+      )}
+      {pdfDropBusy && (
+        <div className="pdf-drop-progress-toast" role="status">
+          <span className="pdf-drop-progress-dot" />
+          {pdfDropProgress?.file?.name || 'Adding PDF…'}
+          {pdfDropProgress?.destination ? ` to ${pdfDropProgress.destination}` : ''}
+          {pdfDropProgress ? ` · ${pdfProgressLabel(pdfDropProgress)}` : ''}
+          {!pdfDropProgress?.stopping && ['opening', 'reading', 'ocr'].includes(pdfDropProgress?.phase) && (
+            <button
+              className="pdf-drop-progress-stop"
+              type="button"
+              onClick={() => {
+                setPdfDropProgress(current => ({ ...(current || {}), stopping: true }))
+                pdfDropAbortRef.current?.abort()
+              }}
+            >
+              Stop
+            </button>
+          )}
+        </div>
+      )}
+      {pdfReindexProgress && (
+        <div className="pdf-drop-progress-toast" role="status">
+          <span className="pdf-drop-progress-dot" />
+          {pdfReindexProgress.name || 'PDF'} · {pdfProgressLabel(pdfReindexProgress, { includeQueue: false })}
+        </div>
       )}
     </div>
   )
@@ -3733,7 +4115,7 @@ function DatabaseHome({
                   key={`sr-${item.key}`}
                   type="button"
                   className="database-search-result"
-                  onClick={() => onOpenItem(item.type, item.docId)}
+                  onClick={() => onOpenItem(item.type, item.docId, item.page || null)}
                 >
                   <span className="database-sr-type">{docTypeLabel(item.type)}</span>
                   <span className="database-sr-content">
@@ -3753,7 +4135,7 @@ function DatabaseHome({
 
       <div className="database-hero">
           <h1 className="database-hero-title">Research Database</h1>
-          <p className="database-hero-sub">Boards, docs, and field notes from across Station 8. Every image, sticky, and cell is indexed.</p>
+          <p className="database-hero-sub">Boards, docs, PDFs, and field notes from across Station 8. Selectable PDF text, images, stickies, and cells are indexed.</p>
           {topTags && topTags.length > 0 && (
             <div className="database-hero-tries">
               <span className="database-hero-tries-label">Try</span>
@@ -3880,7 +4262,7 @@ function DatabaseHome({
                 <button
                   key={item.key}
                   className="database-card"
-                  onClick={() => onOpenItem(item.type, item.docId)}
+                  onClick={() => onOpenItem(item.type, item.docId, item.page || null)}
                   type="button"
                 >
                   <div className="database-card-top">
@@ -3939,7 +4321,7 @@ function DatabaseHome({
               <button
                 key={item.key}
                 className="database-card"
-                onClick={() => onOpenItem(item.type, item.docId)}
+                onClick={() => onOpenItem(item.type, item.docId, item.page || null)}
                 type="button"
               >
                 <div className="database-card-top">
@@ -4031,10 +4413,52 @@ function DatabaseHome({
 }
 
 function Modal({ title, children, onClose, wide, className = '' }) {
+  const dialogRef = useRef(null)
+  const titleId = useId()
+
+  useEffect(() => {
+    const previousFocus = document.activeElement
+    const dialog = dialogRef.current
+    if (dialog && !dialog.contains(document.activeElement)) dialog.focus()
+    return () => previousFocus?.focus?.()
+  }, [])
+
+  const keepFocusInside = (event) => {
+    if (event.key !== 'Tab') return
+    const dialog = dialogRef.current
+    if (!dialog) return
+    const focusable = [...dialog.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+    )].filter(element => element.getClientRects().length > 0)
+    if (!focusable.length) {
+      event.preventDefault()
+      dialog.focus()
+      return
+    }
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target.classList.contains('modal-overlay')) onClose() }}>
-      <div className={`modal ${wide ? 'modal-search' : ''}${className ? ` ${className}` : ''}`}>
-        {title && <div className="modal-title">{title}</div>}
+      <div
+        ref={dialogRef}
+        className={`modal ${wide ? 'modal-search' : ''}${className ? ` ${className}` : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={title ? undefined : 'Dialog'}
+        tabIndex={-1}
+        onKeyDown={keepFocusInside}
+      >
+        {title && <div className="modal-title" id={titleId}>{title}</div>}
         {children}
       </div>
     </div>

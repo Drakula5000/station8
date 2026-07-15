@@ -6,11 +6,13 @@ import json
 import os
 import re
 import secrets
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta as _timedelta
+from datetime import datetime, timedelta as _timedelta, timezone as _timezone
 from functools import wraps
 from html.parser import HTMLParser as _StdlibHTMLParser
+from threading import RLock
 
 from flask import Flask, jsonify, request, send_from_directory, session, redirect
 from cryptography.fernet import Fernet, InvalidToken
@@ -56,9 +58,13 @@ ACCESS_PROFILES_FILE = os.path.join(DATA_DIR, 'access_profiles.json')
 AUTH_FILE = os.path.join(DATA_DIR, 'auth.json')
 REPORTS_FILE = os.path.join(DATA_DIR, 'reports.json')
 R_TOKENS_FILE = os.path.join(DATA_DIR, 'r_tokens.json')
+PDFS_FILE = os.path.join(DATA_DIR, 'pdfs.json')
+PDFS_DIR = os.path.join(STORAGE_ROOT, 'pdfs')
 
 SUPABASE_BUCKET = 'uploads'
+PDF_BUCKET = 'pdfs'
 SUPABASE_TABLE = 'json_storage'
+PDF_BUCKET_MIME_TYPES = ('application/pdf',)
 
 # `/uploads/<filename>` references inside board snapshots, asset src URLs, etc.
 # Capture group is the filename. Single source of truth — used by snapshot
@@ -76,6 +82,26 @@ ACCESS_OWNER = 'owner'
 ACCESS_VISITOR = 'visitor'
 
 MAX_REPORT_HTML_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_PDF_BYTES = 25 * 1024 * 1024
+MAX_PDF_COMPLETION_BYTES = 12 * 1024 * 1024
+MAX_PDF_TEXT_CHARS = 2_000_000
+MAX_PDF_PAGE_TEXT_CHARS = 100_000
+MAX_PDF_PAGES = 1_000
+MAX_PENDING_PDF_UPLOADS = 8
+MAX_PDF_PRUNE_SCAN = 500
+MAX_PDF_PRUNE_DELETE = 50
+PDF_UPLOAD_TICKET_TTL_SECONDS = 2 * 60 * 60
+PDF_READ_URL_TTL_SECONDS = 60 * 60
+PDF_BUCKET_CONFIG_TTL_SECONDS = 5 * 60
+PDF_UPLOAD_TICKETS_SESSION_KEY = 'pdf_upload_tickets'
+PDF_TEXT_STATUSES = frozenset({'indexed', 'truncated', 'no_text'})
+PDF_TEXT_INDEX_VERSION = 2
+PDF_LEGACY_TEXT_INDEX_VERSION = 1
+PDF_SERVICE_ROLE_ERROR = (
+    'PDF storage requires SUPABASE_KEY to be the legacy service_role JWT; '
+    'the anon key cannot protect private PDFs.'
+)
+_PDF_STORAGE_PATH_RE = re.compile(r'^[0-9a-f]{32}\.pdf$')
 
 
 def _env_flag(name, default=False):
@@ -100,6 +126,7 @@ app.config.update(
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
+os.makedirs(PDFS_DIR, exist_ok=True)
 
 
 def _allowed_origins():
@@ -193,6 +220,66 @@ def _save(path, data):
         json.dump(data, f, indent=2)
 
 
+def _write_local_json_atomic(path, data):
+    """Write JSON without exposing a half-written cache file to another request."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = f'{path}.tmp-{uuid.uuid4().hex}'
+    try:
+        with open(tmp_path, 'w') as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def _save_json_strict(path, data):
+    """Persist critical metadata or raise instead of silently falling back.
+
+    General document saves intentionally tolerate a transient Supabase failure
+    and retain a local cache. A completed PDF points at an object in a private
+    bucket, so acknowledging it without durable metadata would strand the
+    object after Render restarts. PDF create/delete flows use this strict path.
+    """
+    file_id = os.path.basename(path)
+    _write_local_json_atomic(path, data)
+    if supabase:
+        # Do the fallible remote operation last. Once it succeeds there are no
+        # remaining steps that can turn the write into a false success.
+        supabase.table(SUPABASE_TABLE).upsert({'id': file_id, 'data': data}).execute()
+
+
+def _delete_json_blob(path, *, strict=False):
+    """Delete a JSON-storage row and its local cache copy.
+
+    Existing document deletion code historically removed only local files.
+    PDF deletion uses this helper so extracted text cannot remain orphaned in
+    Supabase. Callers can request strict error propagation when user-visible
+    deletion must not report a false success.
+    """
+    file_id = os.path.basename(path)
+    remote_error = None
+    local_error = None
+    if supabase:
+        try:
+            supabase.table(SUPABASE_TABLE).delete().eq('id', file_id).execute()
+        except Exception as exc:
+            remote_error = exc
+            print(f'Supabase delete failed for {file_id}: {exc}', flush=True)
+    if remote_error is None or not strict:
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError as exc:
+            local_error = exc
+            print(f'Local JSON delete failed for {file_id}: {exc}', flush=True)
+            if strict:
+                raise
+    if remote_error is not None and strict:
+        raise remote_error
+    return remote_error is None and local_error is None
+
+
 def _board_file(item_id):
     return os.path.join(DATA_DIR, f'board-{item_id}.json')
 
@@ -203,6 +290,10 @@ def _sheet_file(item_id):
 
 def _report_file(item_id):
     return os.path.join(DATA_DIR, f'report-{item_id}.json')
+
+
+def _pdf_file(item_id):
+    return os.path.join(DATA_DIR, f'pdf-{item_id}.json')
 
 
 def _get_env_password(env_names, dev_default):
@@ -440,6 +531,10 @@ def _get_workspace():
     return normalized
 
 
+def _save_workspace_strict(workspace):
+    _save_json_strict(WORKSPACE_FILE, _normalize_workspace(workspace))
+
+
 def _parse_tags(raw):
     if isinstance(raw, list):
         return [str(t).strip().lstrip('#') for t in raw if str(t).strip()]
@@ -473,6 +568,11 @@ def _save_boards(boards):
     _save(BOARDS_FILE, [_normalize_board(board, folders) for board in boards])
 
 
+def _save_boards_strict(boards):
+    folders = _get_workspace().get('folders', [])
+    _save_json_strict(BOARDS_FILE, [_normalize_board(board, folders) for board in boards])
+
+
 def _load_sheets():
     folders = _get_workspace().get('folders', [])
     return [_normalize_doc(sheet, folders) for sheet in _load(SHEETS_FILE, [])]
@@ -481,6 +581,11 @@ def _load_sheets():
 def _save_sheets(sheets):
     folders = _get_workspace().get('folders', [])
     _save(SHEETS_FILE, [_normalize_doc(sheet, folders) for sheet in sheets])
+
+
+def _save_sheets_strict(sheets):
+    folders = _get_workspace().get('folders', [])
+    _save_json_strict(SHEETS_FILE, [_normalize_doc(sheet, folders) for sheet in sheets])
 
 
 def _normalize_gdrive_doc(doc, folders):
@@ -501,6 +606,11 @@ def _save_gdocs(gdocs):
     _save(GDOCS_FILE, [_normalize_gdrive_doc(d, folders) for d in gdocs])
 
 
+def _save_gdocs_strict(gdocs):
+    folders = _get_workspace().get('folders', [])
+    _save_json_strict(GDOCS_FILE, [_normalize_gdrive_doc(d, folders) for d in gdocs])
+
+
 def _load_gsheets():
     folders = _get_workspace().get('folders', [])
     return [_normalize_gdrive_doc(d, folders) for d in _load(GSHEETS_FILE, [])]
@@ -511,12 +621,21 @@ def _save_gsheets(gsheets):
     _save(GSHEETS_FILE, [_normalize_gdrive_doc(d, folders) for d in gsheets])
 
 
+def _save_gsheets_strict(gsheets):
+    folders = _get_workspace().get('folders', [])
+    _save_json_strict(GSHEETS_FILE, [_normalize_gdrive_doc(d, folders) for d in gsheets])
+
+
 def _load_reports():
     return _load(REPORTS_FILE, [])
 
 
 def _save_reports(reports):
     _save(REPORTS_FILE, reports)
+
+
+def _save_reports_strict(reports):
+    _save_json_strict(REPORTS_FILE, reports)
 
 
 def _load_report(report_id):
@@ -527,17 +646,104 @@ def _save_report(report_id, data):
     _save(_report_file(report_id), data)
 
 
-ACCESS_PROFILE_DOC_KINDS = {'board', 'sheet', 'gdoc', 'gsheet', 'report'}
+def _normalize_pdf_text_status(value, text_chars):
+    if text_chars <= 0:
+        return 'no_text'
+    requested = str(value or '').strip()
+    return requested if requested in PDF_TEXT_STATUSES and requested != 'no_text' else 'indexed'
+
+
+def _normalize_pdf_text_index_version(value):
+    if isinstance(value, bool):
+        return PDF_LEGACY_TEXT_INDEX_VERSION
+    if isinstance(value, int):
+        version = value
+    elif isinstance(value, str) and re.fullmatch(r'\d+', value.strip()):
+        version = int(value.strip())
+    else:
+        return PDF_LEGACY_TEXT_INDEX_VERSION
+    return version if version >= 0 else PDF_LEGACY_TEXT_INDEX_VERSION
+
+
+def _normalize_pdf(item, folders):
+    source = dict(item or {})
+    pdf = _normalize_doc(source, folders)
+    pdf['original_filename'] = str(source.get('original_filename') or '').strip()
+    pdf['storage_path'] = str(source.get('storage_path') or '').strip()
+    try:
+        pdf['size_bytes'] = max(0, int(source.get('size_bytes') or 0))
+    except (TypeError, ValueError):
+        pdf['size_bytes'] = 0
+    try:
+        pdf['page_count'] = max(0, int(source.get('page_count') or 0))
+    except (TypeError, ValueError):
+        pdf['page_count'] = 0
+    try:
+        pdf['text_chars'] = max(0, int(source.get('text_chars') or 0))
+    except (TypeError, ValueError):
+        pdf['text_chars'] = 0
+    pdf['text_status'] = _normalize_pdf_text_status(
+        source.get('text_status'),
+        pdf['text_chars'],
+    )
+    pdf['text_index_version'] = _normalize_pdf_text_index_version(
+        source.get('text_index_version'),
+    )
+    return pdf
+
+
+def _load_pdfs():
+    folders = _get_workspace().get('folders', [])
+    raw = _load(PDFS_FILE, [])
+    return [_normalize_pdf(item, folders) for item in raw if isinstance(item, dict)]
+
+
+def _save_pdfs(pdfs):
+    folders = _get_workspace().get('folders', [])
+    _save(PDFS_FILE, [_normalize_pdf(item, folders) for item in pdfs])
+
+
+def _save_pdfs_strict(pdfs):
+    folders = _get_workspace().get('folders', [])
+    _save_json_strict(PDFS_FILE, [_normalize_pdf(item, folders) for item in pdfs])
+
+
+def _load_pdf_text(pdf_id):
+    data = _load(_pdf_file(pdf_id), None)
+    if not isinstance(data, dict):
+        return None
+    detail = dict(data)
+    detail['text_index_version'] = _normalize_pdf_text_index_version(
+        detail.get('text_index_version'),
+    )
+    return detail
+
+
+def _save_pdf_text_strict(pdf_id, data):
+    detail = dict(data or {})
+    detail['text_index_version'] = _normalize_pdf_text_index_version(
+        detail.get('text_index_version'),
+    )
+    _save_json_strict(_pdf_file(pdf_id), detail)
+
+
+def _doc_index_handlers():
+    """Single registry for hierarchy and visitor-profile document kinds."""
+    return {
+        'board': (_load_boards, _save_boards, _save_boards_strict),
+        'sheet': (_load_sheets, _save_sheets, _save_sheets_strict),
+        'gdoc': (_load_gdocs, _save_gdocs, _save_gdocs_strict),
+        'gsheet': (_load_gsheets, _save_gsheets, _save_gsheets_strict),
+        'report': (_load_reports, _save_reports, _save_reports_strict),
+        'pdf': (_load_pdfs, _save_pdfs, _save_pdfs_strict),
+    }
+
+
+ACCESS_PROFILE_DOC_KINDS = frozenset(_doc_index_handlers())
 
 
 def _profile_doc_loaders():
-    return {
-        'board': _load_boards,
-        'sheet': _load_sheets,
-        'gdoc': _load_gdocs,
-        'gsheet': _load_gsheets,
-        'report': _load_reports,
-    }
+    return {kind: handlers[0] for kind, handlers in _doc_index_handlers().items()}
 
 
 def _normalize_access_doc(item):
@@ -1081,39 +1287,6 @@ def _folder_with_descendants(folder_id, folders):
     return folder_ids
 
 
-def _move_docs_from_folder(folder_ids, target_parent_id):
-    boards = _load_boards()
-    updated_boards = False
-    for board in boards:
-        if board.get('folder_id') in folder_ids:
-            board['folder_id'] = target_parent_id
-            updated_boards = True
-    if updated_boards:
-        _save_boards(boards)
-
-    sheets = _load_sheets()
-    updated_sheets = False
-    for sheet in sheets:
-        if sheet.get('folder_id') in folder_ids:
-            sheet['folder_id'] = target_parent_id
-            updated_sheets = True
-    if updated_sheets:
-        _save_sheets(sheets)
-
-    reports = _load_reports()
-    updated_reports = False
-    for report in reports:
-        if report.get('folder_id') in folder_ids:
-            report['folder_id'] = target_parent_id
-            updated_reports = True
-    if updated_reports:
-        _save_reports(reports)
-
-
-def _move_direct_docs_from_folder(folder_id, target_parent_id):
-    _move_docs_from_folder({folder_id}, target_parent_id)
-
-
 def _reparent_child_folders(folder_id, folders, target_parent_id):
     for folder in folders:
         if folder.get('parent_id') == folder_id:
@@ -1397,6 +1570,1025 @@ def _r_token_required(fn):
     return wrapped
 
 
+# ── PDF storage and upload tickets ──────────────────────────────────────────
+
+_pdf_bucket_ready_client_id = None
+_pdf_bucket_ready_at = 0.0
+_pdf_prune_offset = 0
+_pdf_mutation_lock = RLock()
+
+
+def _serialize_pdf_mutation(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with _pdf_mutation_lock:
+            return fn(*args, **kwargs)
+    return wrapped
+
+
+def _pdf_original_filename(value):
+    name = str(value or '').replace('\\', '/').rsplit('/', 1)[-1].strip()
+    name = re.sub(r'[\x00-\x1f\x7f]+', ' ', name).strip()
+    return name[:255]
+
+
+def _pdf_storage_path(ticket):
+    path = f'{ticket}.pdf'
+    return path if _PDF_STORAGE_PATH_RE.fullmatch(path) else None
+
+
+def _local_pdf_path(storage_path):
+    if not _PDF_STORAGE_PATH_RE.fullmatch(str(storage_path or '')):
+        raise ValueError('invalid PDF storage path')
+    return os.path.join(PDFS_DIR, storage_path)
+
+
+def _bucket_public_value(bucket):
+    return _bucket_value(bucket, 'public') is True
+
+
+def _bucket_value(bucket, key):
+    if isinstance(bucket, dict):
+        return bucket.get(key)
+    return getattr(bucket, key, None)
+
+
+def _supabase_key_is_server_secret():
+    """Recognize Supabase server-only keys without logging the credential."""
+    key = str(SUPABASE_KEY or '').strip()
+    if key.startswith(('sb_secret_', 'sb_publishable_')):
+        # The pinned supabase-py client accepts legacy JWT keys. New opaque
+        # key formats require a dependency upgrade before they can be used.
+        return False
+    parts = key.split('.')
+    if len(parts) != 3:
+        return False
+    try:
+        encoded = parts[1] + '=' * (-len(parts[1]) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(encoded).decode('utf-8'))
+    except Exception:
+        return False
+    return payload.get('role') == 'service_role'
+
+
+def _pdf_bucket_config_matches(bucket):
+    if _bucket_value(bucket, 'public') is not False:
+        return False
+    try:
+        size_limit = int(_bucket_value(bucket, 'file_size_limit'))
+    except (TypeError, ValueError):
+        return False
+    mime_types = _bucket_value(bucket, 'allowed_mime_types')
+    return (
+        size_limit == MAX_PDF_BYTES
+        and isinstance(mime_types, (list, tuple))
+        and set(mime_types) == set(PDF_BUCKET_MIME_TYPES)
+    )
+
+
+def _ensure_pdf_bucket():
+    """Ensure the dedicated PDF bucket exists and is private.
+
+    The image bucket is deliberately public for tldraw assets, so PDFs cannot
+    share it without bypassing document privacy. A service-role-backed server
+    can lazily create the separate bucket on the first owner upload.
+    """
+    global _pdf_bucket_ready_client_id, _pdf_bucket_ready_at
+    if not supabase:
+        return
+    if not _supabase_key_is_server_secret() and not (
+        app.config.get('TESTING') and not str(SUPABASE_KEY or '').strip()
+    ):
+        raise RuntimeError(PDF_SERVICE_ROLE_ERROR)
+    client_id = id(supabase)
+    now = time.time()
+    if (
+        _pdf_bucket_ready_client_id == client_id
+        and now - _pdf_bucket_ready_at < PDF_BUCKET_CONFIG_TTL_SECONDS
+    ):
+        return
+
+    desired = {
+        'public': False,
+        'file_size_limit': MAX_PDF_BYTES,
+        'allowed_mime_types': list(PDF_BUCKET_MIME_TYPES),
+    }
+    bucket = None
+    try:
+        bucket = supabase.storage.get_bucket(PDF_BUCKET)
+    except Exception:
+        try:
+            supabase.storage.create_bucket(
+                PDF_BUCKET,
+                options=desired,
+            )
+            bucket = supabase.storage.get_bucket(PDF_BUCKET)
+        except Exception as exc:
+            # A concurrent first request may have created it between the two
+            # calls. One final read distinguishes that race from real failure.
+            try:
+                bucket = supabase.storage.get_bucket(PDF_BUCKET)
+            except Exception:
+                raise RuntimeError(f'PDF storage is unavailable: {exc}') from exc
+
+    if not _pdf_bucket_config_matches(bucket):
+        try:
+            supabase.storage.update_bucket(PDF_BUCKET, desired)
+            bucket = supabase.storage.get_bucket(PDF_BUCKET)
+        except Exception as exc:
+            raise RuntimeError(f'PDF storage configuration failed: {exc}') from exc
+    if not _pdf_bucket_config_matches(bucket):
+        raise RuntimeError('The Supabase pdfs bucket configuration is unsafe')
+    _pdf_bucket_ready_client_id = client_id
+    _pdf_bucket_ready_at = now
+
+
+def _pdf_storage_size(storage_path):
+    if not supabase:
+        return os.path.getsize(_local_pdf_path(storage_path))
+    _ensure_pdf_bucket()
+    bucket = supabase.storage.from_(PDF_BUCKET)
+    listed = bucket.list(None, {
+        'limit': 2,
+        'offset': 0,
+        'sortBy': {'column': 'name', 'order': 'asc'},
+        'search': storage_path,
+    }) or []
+    item = next(
+        (entry for entry in listed if isinstance(entry, dict) and entry.get('name') == storage_path),
+        None,
+    )
+    if item is None:
+        raise FileNotFoundError(storage_path)
+    metadata = item.get('metadata') if isinstance(item.get('metadata'), dict) else {}
+    raw_size = metadata.get('size', item.get('size'))
+    try:
+        size = int(raw_size)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError('PDF storage returned no object size') from exc
+    if size < 0:
+        raise RuntimeError('PDF storage returned an invalid object size')
+    return size
+
+
+def _pdf_storage_bytes(storage_path):
+    if supabase:
+        _ensure_pdf_bucket()
+        return supabase.storage.from_(PDF_BUCKET).download(storage_path)
+    with open(_local_pdf_path(storage_path), 'rb') as f:
+        return f.read(MAX_PDF_BYTES + 1)
+
+
+def _delete_pdf_binary(storage_path, *, strict=False):
+    if not storage_path:
+        return True
+    error = None
+    if supabase:
+        try:
+            _ensure_pdf_bucket()
+            supabase.storage.from_(PDF_BUCKET).remove([storage_path])
+        except Exception as exc:
+            error = exc
+    else:
+        try:
+            path = _local_pdf_path(storage_path)
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception as exc:
+            error = exc
+    if error is not None:
+        print(f'PDF object delete failed for {storage_path}: {error}', flush=True)
+        if strict:
+            raise error
+        return False
+    return True
+
+
+def _delete_unreferenced_pdf_artifacts(pdf_id, storage_path, *, strict=False):
+    """Delete extracted text first so the binary remains a retry marker."""
+    text_deleted = _delete_json_blob(_pdf_file(pdf_id), strict=strict)
+    if not text_deleted:
+        return False
+    return _delete_pdf_binary(storage_path, strict=strict)
+
+
+def _pdf_reference_paths_for_prune():
+    """Return a conservative union of remote and local PDF references.
+
+    Pruning must stop if the authoritative Supabase index cannot be read. A
+    stale or missing cache must never make a live private object look orphaned.
+    """
+    sources = []
+    local = _load_local_json(PDFS_FILE, None)
+    if isinstance(local, list):
+        sources.append(local)
+
+    if supabase:
+        try:
+            response = (
+                supabase.table(SUPABASE_TABLE)
+                .select('data')
+                .eq('id', os.path.basename(PDFS_FILE))
+                .execute()
+            )
+        except Exception as exc:
+            print(f'PDF orphan prune skipped; index read failed: {exc}', flush=True)
+            return None
+        rows = response.data
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+            # An anon/RLS-denied select can look exactly like an empty table.
+            # Never interpret that ambiguity as permission to delete objects.
+            print('PDF orphan prune skipped; authoritative index row was not returned', flush=True)
+            return None
+        remote = rows[0].get('data')
+        if not isinstance(remote, list):
+            print('PDF orphan prune skipped; index is malformed', flush=True)
+            return None
+        sources.append(remote)
+
+    references = set()
+    for records in sources:
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            storage_path = str(record.get('storage_path') or '')
+            if _PDF_STORAGE_PATH_RE.fullmatch(storage_path):
+                references.add(storage_path)
+            pdf_id = str(record.get('id') or '')
+            derived_path = f'{pdf_id}.pdf'
+            if _PDF_STORAGE_PATH_RE.fullmatch(derived_path):
+                references.add(derived_path)
+    return references
+
+
+def _authoritative_pdf_index_state(pdf_id):
+    """Return present/absent/unknown without Supabase-to-cache fallback."""
+    if supabase:
+        try:
+            response = (
+                supabase.table(SUPABASE_TABLE)
+                .select('data')
+                .eq('id', os.path.basename(PDFS_FILE))
+                .execute()
+            )
+        except Exception as exc:
+            print(f'PDF authoritative index read failed: {exc}', flush=True)
+            return 'unknown'
+        rows = response.data
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+            return 'unknown'
+        records = rows[0].get('data')
+    else:
+        if not os.path.exists(PDFS_FILE):
+            return 'absent'
+        records = _load_local_json(PDFS_FILE, None)
+    if not isinstance(records, list):
+        return 'unknown'
+    return 'present' if any(
+        isinstance(record, dict) and record.get('id') == pdf_id
+        for record in records
+    ) else 'absent'
+
+
+def _pdf_timestamp_epoch(value):
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        normalized = value.strip().replace('Z', '+00:00')
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_timezone.utc)
+    return parsed.timestamp()
+
+
+def _prune_stale_pdf_objects(now=None):
+    """Best-effort, bounded cleanup for uploads abandoned before completion."""
+    global _pdf_prune_offset
+    now = float(now if now is not None else time.time())
+    references = _pdf_reference_paths_for_prune()
+    if references is None:
+        return 0
+
+    candidates = []
+    next_offset = 0
+    try:
+        if supabase:
+            _ensure_pdf_bucket()
+            bucket = supabase.storage.from_(PDF_BUCKET)
+            candidates = bucket.list(None, {
+                'limit': MAX_PDF_PRUNE_SCAN,
+                'offset': _pdf_prune_offset,
+                'sortBy': {'column': 'name', 'order': 'asc'},
+            }) or []
+            next_offset = (
+                _pdf_prune_offset + len(candidates)
+                if len(candidates) >= MAX_PDF_PRUNE_SCAN else 0
+            )
+        else:
+            with os.scandir(PDFS_DIR) as entries:
+                for index, entry in enumerate(entries):
+                    if index < _pdf_prune_offset:
+                        continue
+                    if len(candidates) >= MAX_PDF_PRUNE_SCAN:
+                        break
+                    if entry.is_file(follow_symlinks=False):
+                        candidates.append({
+                            'name': entry.name,
+                            'created_at': entry.stat(follow_symlinks=False).st_mtime,
+                        })
+            next_offset = (
+                _pdf_prune_offset + len(candidates)
+                if len(candidates) >= MAX_PDF_PRUNE_SCAN else 0
+            )
+    except Exception as exc:
+        print(f'PDF orphan listing failed: {exc}', flush=True)
+        return 0
+    finally:
+        _pdf_prune_offset = next_offset
+
+    stale = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        name = str(candidate.get('name') or '')
+        if not _PDF_STORAGE_PATH_RE.fullmatch(name) or name in references:
+            continue
+        created_at = _pdf_timestamp_epoch(candidate.get('created_at'))
+        if created_at is None or now - created_at <= PDF_UPLOAD_TICKET_TTL_SECONDS:
+            continue
+        stale.append(name)
+        if len(stale) >= MAX_PDF_PRUNE_DELETE:
+            break
+
+    removed = 0
+    for name in stale:
+        pdf_id = name[:-4]
+        try:
+            if _delete_unreferenced_pdf_artifacts(pdf_id, name, strict=False):
+                removed += 1
+        except Exception as exc:
+            print(f'PDF orphan cleanup failed for {name}: {exc}', flush=True)
+    return removed
+
+
+def _pending_pdf_uploads():
+    raw = session.get(PDF_UPLOAD_TICKETS_SESSION_KEY)
+    pending = dict(raw) if isinstance(raw, dict) else {}
+    now = time.time()
+    changed = not isinstance(raw, dict)
+    for ticket, item in list(pending.items()):
+        try:
+            created_at = float(item.get('created_at') or 0)
+        except (AttributeError, TypeError, ValueError):
+            created_at = 0
+        valid_ticket = bool(_PDF_STORAGE_PATH_RE.fullmatch(f'{ticket}.pdf'))
+        if not valid_ticket or now - created_at > PDF_UPLOAD_TICKET_TTL_SECONDS:
+            storage_path = item.get('storage_path') if isinstance(item, dict) else None
+            # Session data lives in the signed browser cookie. If the client
+            # lost the completion response it can legitimately present an old
+            # cookie containing a ticket that already became a PDF. Never let
+            # stale-ticket pruning delete that completed document's object.
+            index_state = _authoritative_pdf_index_state(ticket) if valid_ticket else 'absent'
+            if index_state == 'present':
+                deleted = True
+            elif index_state == 'unknown':
+                deleted = False
+            else:
+                deleted = (
+                    _delete_unreferenced_pdf_artifacts(ticket, storage_path, strict=False)
+                    if valid_ticket else _delete_pdf_binary(storage_path, strict=False)
+                )
+            if deleted:
+                pending.pop(ticket, None)
+                changed = True
+    if changed:
+        session[PDF_UPLOAD_TICKETS_SESSION_KEY] = pending
+        session.modified = True
+    return pending
+
+
+def _save_pending_pdf_uploads(pending):
+    session[PDF_UPLOAD_TICKETS_SESSION_KEY] = pending
+    session.modified = True
+
+
+def _drop_pending_pdf_upload(ticket, pending=None):
+    pending = pending if pending is not None else _pending_pdf_uploads()
+    pending.pop(ticket, None)
+    _save_pending_pdf_uploads(pending)
+
+
+def _normalize_pdf_pages(raw_pages, declared_page_count):
+    if raw_pages is None:
+        raw_pages = []
+    if not isinstance(raw_pages, list):
+        raise ValueError('pages must be a list')
+    if len(raw_pages) > MAX_PDF_PAGES:
+        raise OverflowError('too many PDF pages')
+
+    pages = []
+    seen = set()
+    total_chars = 0
+    for index, raw_page in enumerate(raw_pages):
+        if isinstance(raw_page, dict):
+            page_number = raw_page.get('page', index + 1)
+            text = raw_page.get('text', '')
+        else:
+            page_number = index + 1
+            text = raw_page
+        try:
+            page_number = int(page_number)
+        except (TypeError, ValueError):
+            raise ValueError('invalid PDF page number')
+        if page_number < 1 or page_number > MAX_PDF_PAGES or page_number in seen:
+            raise ValueError('invalid or duplicate PDF page number')
+        if not isinstance(text, str):
+            raise ValueError('PDF page text must be a string')
+        if len(text) > MAX_PDF_PAGE_TEXT_CHARS:
+            raise OverflowError('PDF page text is too large')
+        total_chars += len(text)
+        if total_chars > MAX_PDF_TEXT_CHARS:
+            raise OverflowError('PDF text is too large')
+        seen.add(page_number)
+        pages.append({'page': page_number, 'text': text})
+
+    pages.sort(key=lambda item: item['page'])
+    max_page = pages[-1]['page'] if pages else 0
+    try:
+        page_count = int(declared_page_count or max_page)
+    except (TypeError, ValueError):
+        raise ValueError('invalid PDF page count')
+    if page_count < max_page:
+        raise ValueError('page count is smaller than extracted pages')
+    if page_count < 0 or page_count > MAX_PDF_PAGES:
+        raise OverflowError('too many PDF pages')
+    return pages, page_count, total_chars
+
+
+def _pdf_client_record(record):
+    """Strip internal storage metadata from every client-facing record."""
+    return {
+        key: value for key, value in record.items()
+        if key not in {'storage_path', 'original_filename'}
+    }
+
+
+def _pdf_download_filename(record):
+    name = str(record.get('name') or 'PDF').strip()
+    name = re.sub(r'[\x00-\x1f\x7f]+', ' ', name)
+    name = name.replace('/', '-').replace('\\', '-').strip(' .') or 'PDF'
+    stem = name[:-4] if name.lower().endswith('.pdf') else name
+    return f'{stem[:251]}.pdf'
+
+
+def _pdf_signed_read_url(storage_path):
+    _ensure_pdf_bucket()
+    signed = supabase.storage.from_(PDF_BUCKET).create_signed_url(
+        storage_path,
+        PDF_READ_URL_TTL_SECONDS,
+    )
+    url = signed.get('signedURL') or signed.get('signed_url')
+    if not url:
+        raise RuntimeError('storage returned no signed URL')
+    return url
+
+
+def _pdf_file_gateway(record):
+    storage_path = record.get('storage_path') or ''
+    if not _PDF_STORAGE_PATH_RE.fullmatch(storage_path):
+        return jsonify({'error': 'PDF file is unavailable'}), 404
+    if supabase:
+        try:
+            url = _pdf_signed_read_url(storage_path)
+        except Exception as exc:
+            print(f'PDF signed URL failed for {storage_path}: {exc}', flush=True)
+            return jsonify({'error': 'PDF file is temporarily unavailable'}), 502
+        response = redirect(url, code=302)
+    else:
+        path = _local_pdf_path(storage_path)
+        if not os.path.exists(path):
+            return jsonify({'error': 'PDF file is unavailable'}), 404
+        response = send_from_directory(
+            PDFS_DIR,
+            storage_path,
+            mimetype='application/pdf',
+            as_attachment=False,
+            download_name=_pdf_download_filename(record),
+        )
+    response.headers['Cache-Control'] = 'no-store, private'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+def _cleanup_pdf_completion(ticket, pending, storage_path):
+    if _delete_unreferenced_pdf_artifacts(ticket, storage_path, strict=False):
+        _drop_pending_pdf_upload(ticket, pending)
+
+
+@app.route('/api/pdfs/upload-ticket', methods=['POST'])
+@_studio_auth_required
+@_serialize_pdf_mutation
+def create_pdf_upload_ticket():
+    body = request.get_json(silent=True) or {}
+    filename = _pdf_original_filename(body.get('filename'))
+    mime_type = str(body.get('mime_type') or '').strip().lower()
+    try:
+        size_bytes = int(body.get('size_bytes') or 0)
+    except (TypeError, ValueError):
+        size_bytes = 0
+    if not filename or not filename.lower().endswith('.pdf'):
+        return jsonify({'error': 'A .pdf filename is required'}), 400
+    if mime_type not in {'application/pdf', 'application/x-pdf'}:
+        return jsonify({'error': 'Only PDF files are supported'}), 400
+    if size_bytes <= 0:
+        return jsonify({'error': 'PDF is empty'}), 400
+    if size_bytes > MAX_PDF_BYTES:
+        return jsonify({'error': f'PDF exceeds the {MAX_PDF_BYTES} byte limit'}), 413
+
+    pending = _pending_pdf_uploads()
+    if len(pending) >= MAX_PENDING_PDF_UPLOADS:
+        return jsonify({'error': 'Finish or cancel an existing PDF upload first'}), 429
+    _prune_stale_pdf_objects()
+
+    ticket = uuid.uuid4().hex
+    storage_path = _pdf_storage_path(ticket)
+    mode = 'local'
+    # Keep local uploads on the same browser origin as the ticket request. In
+    # development, Vite proxies /api from 127.0.0.1:5173 to localhost:5001;
+    # returning request.url_root would send the follow-up PUT directly to the
+    # other hostname, where the host-only owner session cookie is unavailable.
+    # The frontend prefixes this relative path with VITE_API_URL in deployments
+    # that use a separate backend origin.
+    upload_url = f'/api/pdfs/upload/{ticket}'
+    if supabase:
+        try:
+            _ensure_pdf_bucket()
+            signed = supabase.storage.from_(PDF_BUCKET).create_signed_upload_url(storage_path)
+            upload_url = signed.get('signed_url') or signed.get('signedURL')
+            if not upload_url:
+                raise RuntimeError('storage returned no signed upload URL')
+            mode = 'supabase'
+        except Exception as exc:
+            print(f'PDF upload ticket failed: {exc}', flush=True)
+            error = PDF_SERVICE_ROLE_ERROR if str(exc) == PDF_SERVICE_ROLE_ERROR else 'PDF storage is unavailable'
+            return jsonify({'error': error}), 503
+
+    pending[ticket] = {
+        'created_at': time.time(),
+        'filename': filename,
+        'mime_type': mime_type,
+        'size_bytes': size_bytes,
+        'storage_path': storage_path,
+        'mode': mode,
+    }
+    _save_pending_pdf_uploads(pending)
+    response = jsonify({
+        'ticket': ticket,
+        'mode': mode,
+        'upload_url': upload_url,
+        'max_bytes': MAX_PDF_BYTES,
+    })
+    response.headers['Cache-Control'] = 'no-store, private'
+    return response, 201
+
+
+@app.route('/api/pdfs/upload/<ticket>', methods=['PUT', 'POST'])
+@_studio_auth_required
+@_serialize_pdf_mutation
+def upload_pdf_local(ticket):
+    pending = _pending_pdf_uploads()
+    item = pending.get(ticket)
+    if not item or item.get('mode') != 'local':
+        return jsonify({'error': 'Upload ticket not found'}), 404
+    uploaded = request.files.get('file')
+    if uploaded is None:
+        return jsonify({'error': 'PDF file is required'}), 400
+
+    storage_path = item['storage_path']
+    final_path = _local_pdf_path(storage_path)
+    tmp_path = f'{final_path}.tmp-{uuid.uuid4().hex}'
+    written = 0
+    header = b''
+    try:
+        with open(tmp_path, 'wb') as f:
+            while True:
+                chunk = uploaded.stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                if len(header) < 1024:
+                    header += chunk[:1024 - len(header)]
+                written += len(chunk)
+                if written > MAX_PDF_BYTES:
+                    raise OverflowError
+                f.write(chunk)
+        if written != item['size_bytes']:
+            return jsonify({'error': 'Uploaded PDF size does not match the ticket'}), 400
+        if b'%PDF-' not in header:
+            return jsonify({'error': 'Uploaded file is not a PDF'}), 400
+        os.replace(tmp_path, final_path)
+    except OverflowError:
+        return jsonify({'error': f'PDF exceeds the {MAX_PDF_BYTES} byte limit'}), 413
+    except OSError as exc:
+        print(f'Local PDF upload failed: {exc}', flush=True)
+        return jsonify({'error': 'Could not store PDF'}), 500
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    return jsonify({'ok': True}), 201
+
+
+@app.route('/api/pdfs/upload-ticket', methods=['DELETE'])
+@_studio_auth_required
+@_serialize_pdf_mutation
+def delete_pdf_upload_ticket():
+    body = request.get_json(silent=True) or {}
+    ticket = str(body.get('ticket') or '').strip()
+    pending = _pending_pdf_uploads()
+    item = pending.get(ticket)
+    if not item:
+        return '', 204
+    index_state = _authoritative_pdf_index_state(ticket)
+    if index_state == 'present':
+        _drop_pending_pdf_upload(ticket, pending)
+        return '', 204
+    if index_state == 'unknown':
+        return jsonify({'error': 'Could not safely determine PDF upload state'}), 503
+    try:
+        _delete_unreferenced_pdf_artifacts(
+            ticket,
+            item.get('storage_path'),
+            strict=True,
+        )
+    except Exception:
+        return jsonify({'error': 'Could not clean up PDF upload'}), 502
+    _drop_pending_pdf_upload(ticket, pending)
+    return '', 204
+
+
+@app.route('/api/pdfs/complete', methods=['POST'])
+@_studio_auth_required
+@_serialize_pdf_mutation
+def complete_pdf_upload():
+    if request.content_length and request.content_length > MAX_PDF_COMPLETION_BYTES:
+        return jsonify({'error': 'PDF text payload is too large'}), 413
+    body = request.get_json(silent=True) or {}
+    ticket = str(body.get('ticket') or '').strip()
+    pending = _pending_pdf_uploads()
+    item = pending.get(ticket)
+    existing = next((pdf for pdf in _load_pdfs() if pdf.get('id') == ticket), None)
+    if existing:
+        if item:
+            _drop_pending_pdf_upload(ticket, pending)
+        return jsonify(_pdf_client_record(existing))
+    if not item:
+        return jsonify({'error': 'Upload ticket not found or expired'}), 404
+
+    storage_path = item['storage_path']
+    try:
+        stored_size = _pdf_storage_size(storage_path)
+    except (FileNotFoundError, OSError):
+        return jsonify({'error': 'Upload the PDF before completing it'}), 409
+    except Exception as exc:
+        print(f'PDF size verification failed: {exc}', flush=True)
+        return jsonify({'error': 'Could not verify uploaded PDF'}), 502
+    if stored_size > MAX_PDF_BYTES:
+        _cleanup_pdf_completion(ticket, pending, storage_path)
+        return jsonify({'error': f'PDF exceeds the {MAX_PDF_BYTES} byte limit'}), 413
+    if stored_size != item['size_bytes']:
+        _cleanup_pdf_completion(ticket, pending, storage_path)
+        return jsonify({'error': 'Uploaded PDF size does not match the ticket'}), 400
+    try:
+        blob = _pdf_storage_bytes(storage_path)
+    except (FileNotFoundError, OSError):
+        return jsonify({'error': 'Upload the PDF before completing it'}), 409
+    except Exception as exc:
+        print(f'PDF verification download failed: {exc}', flush=True)
+        return jsonify({'error': 'Could not verify uploaded PDF'}), 502
+    if len(blob) != stored_size:
+        _cleanup_pdf_completion(ticket, pending, storage_path)
+        return jsonify({'error': 'Uploaded PDF changed during verification'}), 409
+    if b'%PDF-' not in blob[:1024]:
+        _cleanup_pdf_completion(ticket, pending, storage_path)
+        return jsonify({'error': 'Uploaded file is not a PDF'}), 400
+
+    try:
+        pages, page_count, text_chars = _normalize_pdf_pages(
+            body.get('pages'),
+            body.get('page_count'),
+        )
+    except OverflowError as exc:
+        _cleanup_pdf_completion(ticket, pending, storage_path)
+        return jsonify({'error': str(exc)}), 413
+    except ValueError as exc:
+        _cleanup_pdf_completion(ticket, pending, storage_path)
+        return jsonify({'error': str(exc)}), 400
+
+    filename = item['filename']
+    default_name = os.path.splitext(filename)[0] or 'Untitled PDF'
+    name = str(body.get('name') or default_name).strip() or default_name
+    folders = _get_workspace().get('folders', [])
+    text_status = _normalize_pdf_text_status(body.get('text_status'), text_chars)
+    # Only the OCR-capable frontend knows it produced the current index
+    # format. Uploads from an older cached frontend omit this marker and must
+    # remain eligible for the viewer's one-time legacy reindex.
+    text_index_version = (
+        PDF_TEXT_INDEX_VERSION
+        if body.get('text_index_version') == PDF_TEXT_INDEX_VERSION
+        else PDF_LEGACY_TEXT_INDEX_VERSION
+    )
+    now = datetime.utcnow().isoformat() + 'Z'
+    record = {
+        'id': ticket,
+        'name': name,
+        'tags': _parse_tags(body.get('tags')),
+        'folder_id': _normalize_folder_id(body.get('folder_id'), folders),
+        'private': True if body.get('private') is True else (False if body.get('private') is False else None),
+        'original_filename': filename,
+        'storage_path': storage_path,
+        'size_bytes': len(blob),
+        'page_count': page_count,
+        'text_status': text_status,
+        'text_chars': text_chars,
+        'text_index_version': text_index_version,
+        'created_at': now,
+        'updated_at': now,
+    }
+    detail = {
+        'id': ticket,
+        'pages': pages,
+        'text_status': text_status,
+        'text_chars': text_chars,
+        'text_index_version': text_index_version,
+        'created_at': now,
+        'updated_at': now,
+    }
+    old_pdfs = _load_pdfs()
+    next_pdfs = [pdf for pdf in old_pdfs if pdf.get('id') != ticket]
+    index_save_started = False
+    try:
+        _save_pdf_text_strict(ticket, detail)
+        index_save_started = True
+        _save_pdfs_strict([*next_pdfs, record])
+    except Exception as exc:
+        print(f'PDF metadata persistence failed: {exc}', flush=True)
+        if index_save_started:
+            try:
+                _save_pdfs_strict(old_pdfs)
+            except Exception as rollback_exc:
+                print(f'PDF index rollback failed: {rollback_exc}', flush=True)
+            index_state = _authoritative_pdf_index_state(ticket)
+            if index_state != 'absent':
+                print(
+                    f'PDF artifacts retained after ambiguous index write for {ticket}',
+                    flush=True,
+                )
+                return jsonify({'error': 'Could not confirm PDF metadata persistence'}), 502
+        _cleanup_pdf_completion(ticket, pending, storage_path)
+        return jsonify({'error': 'Could not persist PDF metadata'}), 502
+
+    _drop_pending_pdf_upload(ticket, pending)
+    return jsonify(_pdf_client_record(record)), 201
+
+
+@app.route('/api/pdfs', methods=['GET'])
+@_studio_auth_required
+def list_pdfs():
+    pdfs = _list_docs_sorted(_load_pdfs())
+    return jsonify([_pdf_client_record(pdf) for pdf in pdfs])
+
+
+@app.route('/api/visitor/pdfs', methods=['GET'])
+@_viewer_auth_required
+def list_visitor_pdfs():
+    pdfs = _list_docs_sorted(_load_pdfs(), visitor=True, kind='pdf')
+    return jsonify([_pdf_client_record(pdf) for pdf in pdfs])
+
+
+@app.route('/api/pdfs/<pdf_id>', methods=['GET'])
+@_studio_auth_required
+def get_pdf(pdf_id):
+    record = next((pdf for pdf in _load_pdfs() if pdf.get('id') == pdf_id), None)
+    if not record:
+        return jsonify({'error': 'Not found'}), 404
+    return jsonify(_pdf_client_record(record))
+
+
+@app.route('/api/visitor/pdfs/<pdf_id>', methods=['GET'])
+@_viewer_auth_required
+def get_visitor_pdf(pdf_id):
+    record = next(
+        (pdf for pdf in _visitor_visible_docs('pdf', _load_pdfs()) if pdf.get('id') == pdf_id),
+        None,
+    )
+    if not record:
+        return jsonify({'error': 'Not found'}), 404
+    return jsonify(_pdf_client_record(record))
+
+
+@app.route('/api/pdfs/<pdf_id>', methods=['PATCH'])
+@_studio_auth_required
+@_serialize_pdf_mutation
+def patch_pdf(pdf_id):
+    body = request.get_json(silent=True) or {}
+    pdfs = _load_pdfs()
+    original = [dict(pdf) for pdf in pdfs]
+    folders = _get_workspace().get('folders', [])
+    record = next((pdf for pdf in pdfs if pdf.get('id') == pdf_id), None)
+    if not record:
+        return jsonify({'error': 'Not found'}), 404
+    if 'name' in body:
+        record['name'] = str(body.get('name') or '').strip() or record.get('name') or 'Untitled PDF'
+    if 'tags' in body:
+        record['tags'] = _parse_tags(body.get('tags'))
+    if 'folder_id' in body:
+        record['folder_id'] = _normalize_folder_id(body.get('folder_id'), folders)
+    if 'private' in body:
+        record['private'] = True if body.get('private') is True else (False if body.get('private') is False else None)
+    record['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+    try:
+        _save_pdfs_strict(pdfs)
+    except Exception as exc:
+        print(f'PDF patch persistence failed: {exc}', flush=True)
+        try:
+            _save_pdfs_strict(original)
+        except Exception:
+            pass
+        return jsonify({'error': 'Could not update PDF'}), 502
+    return jsonify(_pdf_client_record(record))
+
+
+@app.route('/api/pdfs/<pdf_id>/text-index', methods=['PUT'])
+@_studio_auth_required
+@_serialize_pdf_mutation
+def replace_pdf_text_index(pdf_id):
+    """Replace browser-extracted/OCR page text for an existing PDF."""
+    if request.content_length and request.content_length > MAX_PDF_COMPLETION_BYTES:
+        return jsonify({'error': 'PDF text payload is too large'}), 413
+
+    body = request.get_json(silent=True) or {}
+    pdfs = _load_pdfs()
+    original_pdfs = [dict(pdf) for pdf in pdfs]
+    record = next((pdf for pdf in pdfs if pdf.get('id') == pdf_id), None)
+    if not record:
+        return jsonify({'error': 'Not found'}), 404
+
+    try:
+        pages, page_count, text_chars = _normalize_pdf_pages(
+            body.get('pages'),
+            body.get('page_count'),
+        )
+    except OverflowError as exc:
+        return jsonify({'error': str(exc)}), 413
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    # Page count comes from the PDF.js parse performed when the immutable
+    # binary was first uploaded. Reindexing may replace text, but it must not
+    # be able to rewrite that authoritative binary property.
+    stored_page_count = record.get('page_count', 0)
+    if page_count != stored_page_count:
+        return jsonify({'error': 'PDF page count does not match the stored file'}), 400
+
+    original_detail = _load_pdf_text(pdf_id)
+    text_status = _normalize_pdf_text_status(body.get('text_status'), text_chars)
+    now = datetime.utcnow().isoformat() + 'Z'
+    detail = dict(original_detail or {})
+    detail.update({
+        'id': pdf_id,
+        'pages': pages,
+        'text_status': text_status,
+        'text_chars': text_chars,
+        'text_index_version': PDF_TEXT_INDEX_VERSION,
+        'updated_at': now,
+    })
+    if not detail.get('created_at'):
+        detail['created_at'] = record.get('created_at') or now
+
+    record['text_status'] = text_status
+    record['text_chars'] = text_chars
+    record['text_index_version'] = PDF_TEXT_INDEX_VERSION
+    record['updated_at'] = now
+
+    try:
+        _save_pdf_text_strict(pdf_id, detail)
+        _save_pdfs_strict(pdfs)
+    except Exception as exc:
+        print(f'PDF text reindex persistence failed for {pdf_id}: {exc}', flush=True)
+        rollback_failed = False
+        try:
+            _save_pdfs_strict(original_pdfs)
+        except Exception as rollback_exc:
+            rollback_failed = True
+            print(f'PDF text reindex metadata rollback failed for {pdf_id}: {rollback_exc}', flush=True)
+        try:
+            if original_detail is None:
+                _delete_json_blob(_pdf_file(pdf_id), strict=True)
+            else:
+                _save_pdf_text_strict(pdf_id, original_detail)
+        except Exception as rollback_exc:
+            rollback_failed = True
+            print(f'PDF text reindex detail rollback failed for {pdf_id}: {rollback_exc}', flush=True)
+        error = (
+            'Could not confirm PDF text index persistence'
+            if rollback_failed
+            else 'Could not update PDF text index'
+        )
+        return jsonify({'error': error}), 502
+
+    return jsonify(_pdf_client_record(record))
+
+
+@app.route('/api/pdfs/<pdf_id>', methods=['DELETE'])
+@_studio_auth_required
+@_serialize_pdf_mutation
+def delete_pdf(pdf_id):
+    pdfs = _load_pdfs()
+    record = next((pdf for pdf in pdfs if pdf.get('id') == pdf_id), None)
+    if not record:
+        return jsonify({'error': 'Not found'}), 404
+    remaining = [pdf for pdf in pdfs if pdf.get('id') != pdf_id]
+    try:
+        _save_pdfs_strict(remaining)
+    except Exception as exc:
+        print(f'PDF index deletion failed for {pdf_id}: {exc}', flush=True)
+        try:
+            _save_pdfs_strict(pdfs)
+        except Exception as rollback_exc:
+            print(f'PDF delete rollback failed for {pdf_id}: {rollback_exc}', flush=True)
+        return jsonify({'error': 'Could not delete PDF'}), 502
+
+    # The visible deletion is committed. Never resurrect an index entry after
+    # an ambiguous Storage failure—the binary may already have been removed.
+    try:
+        cleaned = _delete_unreferenced_pdf_artifacts(
+            pdf_id,
+            record.get('storage_path'),
+            strict=False,
+        )
+        if not cleaned:
+            print(f'PDF artifact cleanup deferred for {pdf_id}', flush=True)
+    except Exception as exc:
+        print(f'PDF artifact cleanup deferred for {pdf_id}: {exc}', flush=True)
+    return '', 204
+
+
+@app.route('/api/pdfs/<pdf_id>/file', methods=['GET'])
+@_studio_auth_required
+def get_pdf_file(pdf_id):
+    record = next((pdf for pdf in _load_pdfs() if pdf.get('id') == pdf_id), None)
+    if not record:
+        return jsonify({'error': 'Not found'}), 404
+    return _pdf_file_gateway(record)
+
+
+@app.route('/api/pdfs/<pdf_id>/reindex-source', methods=['GET'])
+@_studio_auth_required
+def get_pdf_reindex_source(pdf_id):
+    """Return a fetchable binary URL without leaking PDF record internals."""
+    record = next((pdf for pdf in _load_pdfs() if pdf.get('id') == pdf_id), None)
+    if not record:
+        return jsonify({'error': 'Not found'}), 404
+    storage_path = record.get('storage_path') or ''
+    if not _PDF_STORAGE_PATH_RE.fullmatch(storage_path):
+        return jsonify({'error': 'PDF file is unavailable'}), 404
+
+    if supabase:
+        try:
+            url = _pdf_signed_read_url(storage_path)
+        except Exception as exc:
+            print(f'PDF reindex source URL failed for {storage_path}: {exc}', flush=True)
+            return jsonify({'error': 'PDF file is temporarily unavailable'}), 502
+        payload = {'url': url, 'mode': 'supabase'}
+    else:
+        if not os.path.exists(_local_pdf_path(storage_path)):
+            return jsonify({'error': 'PDF file is unavailable'}), 404
+        payload = {'url': f'/api/pdfs/{pdf_id}/file', 'mode': 'local'}
+
+    response = jsonify(payload)
+    response.headers['Cache-Control'] = 'no-store, private'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+
+@app.route('/api/visitor/pdfs/<pdf_id>/file', methods=['GET'])
+@_viewer_auth_required
+def get_visitor_pdf_file(pdf_id):
+    record = next(
+        (pdf for pdf in _visitor_visible_docs('pdf', _load_pdfs()) if pdf.get('id') == pdf_id),
+        None,
+    )
+    if not record:
+        return jsonify({'error': 'Not found'}), 404
+    return _pdf_file_gateway(record)
+
+
 @app.route('/api/auth/r-token', methods=['POST'])
 def mint_r_token():
     body = request.get_json(silent=True) or {}
@@ -1574,9 +2766,10 @@ def patch_folder(folder_id):
 
 @app.route('/api/folders/<folder_id>', methods=['DELETE'])
 @_studio_auth_required
+@_serialize_pdf_mutation
 def delete_folder(folder_id):
     ws = _get_workspace()
-    folders = list(ws.get('folders', []))
+    folders = [dict(folder) for folder in ws.get('folders', [])]
     target = next((folder for folder in folders if folder['id'] == folder_id), None)
     if not target:
         return jsonify({'error': 'Not found'}), 404
@@ -1587,37 +2780,137 @@ def delete_folder(folder_id):
         return jsonify({'error': 'Invalid delete mode'}), 400
 
     if mode == 'move':
-        remaining = [folder for folder in folders if folder['id'] != folder_id]
-        _move_direct_docs_from_folder(folder_id, target_parent_id)
+        original_folders = [dict(folder) for folder in folders]
+        remaining = [dict(folder) for folder in folders if folder['id'] != folder_id]
+        docs_by_kind = {
+            kind: load_docs()
+            for kind, (load_docs, _save_docs, _strict_save_docs) in _doc_index_handlers().items()
+        }
+        moved_by_kind = {}
+        for kind, docs in docs_by_kind.items():
+            moved = [dict(doc) for doc in docs]
+            changed = False
+            for doc in moved:
+                if doc.get('folder_id') == folder_id:
+                    doc['folder_id'] = target_parent_id
+                    changed = True
+            if changed:
+                moved_by_kind[kind] = moved
         _reparent_child_folders(folder_id, remaining, target_parent_id)
-        ws['folders'] = remaining
-        _save(WORKSPACE_FILE, ws)
+        try:
+            for kind, moved in moved_by_kind.items():
+                _doc_index_handlers()[kind][2](moved)
+            ws['folders'] = remaining
+            _save_workspace_strict(ws)
+        except Exception as exc:
+            print(f'Folder move failed for {folder_id}: {exc}', flush=True)
+            ws['folders'] = original_folders
+            try:
+                _save_workspace_strict(ws)
+            except Exception:
+                pass
+            for kind in moved_by_kind:
+                try:
+                    _doc_index_handlers()[kind][2](docs_by_kind[kind])
+                except Exception:
+                    pass
+            return jsonify({'error': 'Could not move folder contents'}), 502
         return '', 204
 
     folder_ids = _folder_with_descendants(folder_id, folders)
-    boards_to_delete = [board for board in _load_boards() if board.get('folder_id') in folder_ids]
-    sheets_to_delete = [sheet for sheet in _load_sheets() if sheet.get('folder_id') in folder_ids]
-    reports_to_delete = [r for r in _load_reports() if r.get('folder_id') in folder_ids]
-    board_ids = [board.get('id') for board in boards_to_delete if board.get('id')]
-    sheet_ids = [sheet.get('id') for sheet in sheets_to_delete if sheet.get('id')]
-    report_ids = [r.get('id') for r in reports_to_delete if r.get('id')]
+    docs_by_kind = {
+        kind: load_docs()
+        for kind, (load_docs, _save_docs, _strict_save_docs) in _doc_index_handlers().items()
+    }
+    delete_ids = {
+        kind: {
+            doc.get('id') for doc in docs
+            if doc.get('id') and doc.get('folder_id') in folder_ids
+        }
+        for kind, docs in docs_by_kind.items()
+    }
+    board_ids = delete_ids['board']
+    sheet_ids = delete_ids['sheet']
+    report_ids = delete_ids['report']
+    pdf_ids = delete_ids['pdf']
+    pdf_records = [pdf for pdf in docs_by_kind['pdf'] if pdf.get('id') in pdf_ids]
     upload_filenames = set()
     for board_id in board_ids:
         upload_filenames.update(_board_upload_filenames(board_id))
 
     remaining = [folder for folder in folders if folder['id'] not in folder_ids]
-    if board_ids:
-        _save_boards([board for board in _load_boards() if board.get('id') not in set(board_ids)])
-        _delete_board_files(board_ids)
-    if sheet_ids:
-        _save_sheets([sheet for sheet in _load_sheets() if sheet.get('id') not in set(sheet_ids)])
-        _delete_sheet_files(sheet_ids)
-    if report_ids:
-        _save_reports([r for r in _load_reports() if r.get('id') not in set(report_ids)])
-        _delete_report_files(report_ids)
-    ws['folders'] = remaining
-    _save(WORKSPACE_FILE, ws)
-    _cleanup_unreferenced_uploads(upload_filenames)
+    try:
+        for kind, (_load_docs, _save_docs, strict_save_docs) in _doc_index_handlers().items():
+            ids = delete_ids[kind]
+            if not ids:
+                continue
+            kept = [doc for doc in docs_by_kind[kind] if doc.get('id') not in ids]
+            strict_save_docs(kept)
+
+        ws['folders'] = remaining
+        _save_workspace_strict(ws)
+    except Exception as exc:
+        # No document artifacts have been removed yet, so this metadata-only
+        # phase can still be rolled back without resurrecting ghost records.
+        print(f'Folder metadata deletion failed for {folder_id}: {exc}', flush=True)
+        ws['folders'] = folders
+        try:
+            _save_workspace_strict(ws)
+        except Exception:
+            pass
+        for kind, (_load_docs, _save_docs, strict_save_docs) in _doc_index_handlers().items():
+            try:
+                strict_save_docs(docs_by_kind[kind])
+            except Exception:
+                pass
+        return jsonify({'error': 'Could not delete folder contents'}), 502
+
+    # The visible deletion is now committed. Artifact deletion is irreversible,
+    # so cleanup is best-effort and never rolls indexes back to records whose
+    # binaries may already be gone. Remaining PDF objects are safe orphans and
+    # the bounded upload-ticket prune will retry them later.
+    for delete_files, ids, label in (
+        (_delete_board_files, board_ids, 'board'),
+        (_delete_sheet_files, sheet_ids, 'sheet'),
+        (_delete_report_files, report_ids, 'report'),
+    ):
+        try:
+            delete_files(ids)
+        except Exception as exc:
+            print(f'Folder {label} artifact cleanup failed for {folder_id}: {exc}', flush=True)
+    for record in pdf_records:
+        try:
+            cleaned = _delete_unreferenced_pdf_artifacts(
+                record['id'],
+                record.get('storage_path'),
+                strict=False,
+            )
+            if not cleaned:
+                print(f'Folder PDF artifact cleanup deferred for {record["id"]}', flush=True)
+        except Exception as exc:
+            print(f'Folder PDF artifact cleanup deferred for {record["id"]}: {exc}', flush=True)
+
+    drive_content_keys = {
+        *(f'gdoc-{doc_id}' for doc_id in delete_ids['gdoc']),
+        *(f'gsheet-{doc_id}' for doc_id in delete_ids['gsheet']),
+    }
+    if drive_content_keys:
+        try:
+            contents = _load_gdrive_contents()
+            changed = False
+            for key in drive_content_keys:
+                if key in contents:
+                    contents.pop(key, None)
+                    changed = True
+            if changed:
+                _save_gdrive_contents(contents)
+        except Exception as exc:
+            print(f'Folder Drive-cache cleanup failed for {folder_id}: {exc}', flush=True)
+
+    try:
+        _cleanup_unreferenced_uploads(upload_filenames)
+    except Exception as exc:
+        print(f'Folder upload artifact cleanup failed for {folder_id}: {exc}', flush=True)
     return '', 204
 
 
@@ -3467,12 +4760,13 @@ def _text_from_sheet(data):
     return out
 
 
-def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None):
+def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None, pdfs=None):
     board_items = boards if boards is not None else _load_boards()
     sheet_items = sheets if sheets is not None else _load_sheets()
     gdoc_items = gdocs if gdocs is not None else _load_gdocs()
     gsheet_items = gsheets if gsheets is not None else _load_gsheets()
     report_items = reports if reports is not None else _load_reports()
+    pdf_items = pdfs if pdfs is not None else _load_pdfs()
     drive_contents = _load_gdrive_contents()
 
     # Index every doc's name + tags so searches like "test" surface docs whose
@@ -3481,6 +4775,7 @@ def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None)
         ('board', board_items), ('sheet', sheet_items),
         ('gdoc', gdoc_items),   ('gsheet', gsheet_items),
         ('report', report_items),
+        ('pdf', pdf_items),
     ):
         for item in items:
             name = (item.get('name') or '').strip()
@@ -3561,6 +4856,26 @@ def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None)
             'kind': 'report',
             'text': text,
         }
+    for pdf in pdf_items:
+        detail = _load_pdf_text(pdf['id']) or {}
+        for page in detail.get('pages') or []:
+            if not isinstance(page, dict):
+                continue
+            text = (page.get('text') or '').strip()
+            if not text:
+                continue
+            try:
+                page_number = int(page.get('page'))
+            except (TypeError, ValueError):
+                continue
+            yield {
+                'doc_type': 'pdf',
+                'doc_id': pdf['id'],
+                'doc_name': pdf.get('name') or '',
+                'kind': 'pdf',
+                'text': text,
+                'page': page_number,
+            }
 
 
 _vectorizer = None
@@ -3617,13 +4932,20 @@ def _keyword(text, query):
     return score
 
 
-def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None):
+def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None, pdfs=None):
     body = request.json or {}
     query = (body.get('query') or '').strip()
     if not query:
         return {'hits': []}
 
-    items = list(_all_items(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets, reports=reports))
+    items = list(_all_items(
+        boards=boards,
+        sheets=sheets,
+        gdocs=gdocs,
+        gsheets=gsheets,
+        reports=reports,
+        pdfs=pdfs,
+    ))
     if not items:
         return {'hits': []}
 
@@ -3663,9 +4985,11 @@ def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, reports=
                     'gdoc': 'Doc',
                     'gsheet': 'Sheet',
                     'report': 'Report',
+                    'pdf': 'PDF page',
                 }.get(item['kind'], item['kind']),
                 'score': combined,
                 'shape_id': item.get('shape_id'),
+                'page': item.get('page'),
             })
     hits.sort(key=lambda hit: hit['score'], reverse=True)
     return {'hits': hits[:50]}
@@ -3689,13 +5013,22 @@ def visitor_search():
         'gdoc': _load_gdocs(),
         'gsheet': _load_gsheets(),
         'report': _load_reports(),
+        'pdf': _load_pdfs(),
     }
     boards = _visitor_visible_docs('board', docs_by_kind['board'], workspace=workspace, docs_by_kind=docs_by_kind)
     sheets = _visitor_visible_docs('sheet', docs_by_kind['sheet'], workspace=workspace, docs_by_kind=docs_by_kind)
     gdocs = _visitor_visible_docs('gdoc', docs_by_kind['gdoc'], workspace=workspace, docs_by_kind=docs_by_kind)
     gsheets = _visitor_visible_docs('gsheet', docs_by_kind['gsheet'], workspace=workspace, docs_by_kind=docs_by_kind)
     reports = _visitor_visible_docs('report', docs_by_kind['report'], workspace=workspace, docs_by_kind=docs_by_kind)
-    return jsonify(_search_payload(boards=boards, sheets=sheets, gdocs=gdocs, gsheets=gsheets, reports=reports))
+    pdfs = _visitor_visible_docs('pdf', docs_by_kind['pdf'], workspace=workspace, docs_by_kind=docs_by_kind)
+    return jsonify(_search_payload(
+        boards=boards,
+        sheets=sheets,
+        gdocs=gdocs,
+        gsheets=gsheets,
+        reports=reports,
+        pdfs=pdfs,
+    ))
 
 
 @app.route('/api/share/<token>/search', methods=['POST'])
