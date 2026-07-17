@@ -26,6 +26,8 @@ The search results also take you directly to the search hits, zooming your camer
 
 You can create or import Google Docs + Sheets, add PDFs by picker or drag-and-drop, and push R knits directly into the same workspace, so people can search your entire research database in one spot. PDFs are indexed page-by-page; when a page is a scan instead of selectable text, Station 8 renders and OCRs it in your browser before adding it to the same search index.
 
+Open search from anywhere with <kbd>Cmd</kbd>/<kbd>Ctrl</kbd> + <kbd>K</kbd>.
+
 Station 8 is a free (or almost-free depending on your usage) way to show off your research and how you think.
 
 <div align="center">
