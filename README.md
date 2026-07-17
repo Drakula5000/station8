@@ -9,7 +9,7 @@
 
 <br>
 
-Searchable research workspaces. Every picture, sticky, PDF page, knit, and spreadsheet cell is indexed.<br>
+Searchable research workspaces. Every picture, sticky, PDF page, R knit, Google Doc, and spreadsheet cell is indexed.<br>
 Whiteboards beat walls of text. But FigJam and Miro can't search the images on them... and images are worth 1k words.
 
 </div>
@@ -40,23 +40,32 @@ Station 8 is a free (or almost-free depending on your usage) way to show off you
 
 ![A free, searchable research database. Online.](./.github/assets/h-database.svg)
 
-What I needed, and most independent researchers do, too: a workspace that lives online for free, holds everything in one place (canvas, docs, sheets), and lets me find anything in it, including text inside images. Nothing else covers all four.
+What I needed, and most independent researchers do, too: a workspace that lives online for free, holds everything in one place (canvas, docs, sheets, PDFs, reports), and lets me find anything in it, including text inside images and scanned PDFs. Nothing else covers the whole loop.
 
-| tool | free online hosting | infinite canvas | canvas + docs + sheets | searches inside images | navigates to result |
+| tool | free online hosting | infinite canvas | docs + sheets + PDFs | searches inside images/scans | navigates to result |
 |:---|:---:|:---:|:---:|:---:|:---:|
 | **Station 8** | **✓** | ✓ | ✓ | ✓ | ✓ |
 | FigJam | ✓ | ✓ | ✗ | ✗ | ✗ |
 | Miro | ✓ | ✓ | ✗ | enterprise only | ✗ |
-| AFFiNE | ✓ | ✓ | ✗ | ✗ | ✗ |
-| Obsidian | ✗ local-only | ✗ | ✗ | plugin | ✗ |
-| Heptabase | ✗ $8.99/mo | ✓ | ✗ | ✗ | ✗ |
-| Notion | ✓ | ✗ | ✗ | ✗ | ✗ |
+| AFFiNE | ✓ | ✓ | partial | ✗ | ✗ |
+| Obsidian | ✗ local-first | ✗ | plugin | plugin | ✗ |
+| Heptabase | ✗ $8.99/mo | ✓ | partial | ✗ | ✗ |
+| Notion | ✓ | ✗ | partial | ✗ | ✗ |
+
+### What you can keep together
+
+- **Boards:** tldraw canvases with searchable text, notes, shapes, image OCR, and image alt text.
+- **Native sheets:** lightweight spreadsheet grids whose cells are indexed alongside the rest of the workspace.
+- **Google Docs and Sheets:** create new files in Drive or import existing URLs, embed them in Station 8, and search cached document text.
+- **PDFs:** add by picker or drag-and-drop into the sidebar folder tree. Station 8 reads selectable text with PDF.js, OCRs scanned/sparse pages in the browser, indexes results page-by-page, and opens search hits back to the exact PDF page.
+- **R reports:** push knitted HTML reports from RStudio; re-knitting updates the same report instead of creating duplicates.
+- **Folders, tags, and access profiles:** organize every document type in one hierarchy, then give visitors read-only access to the folders or files you choose.
 
 ### The trade-off for being free
 
 Search uses TF-IDF, not LLM embeddings. It finds exact matches and statistically related terms based on what's in your corpus -- so "sea creatures" can surface jellyfish content if that's what your boards talk about. It won't make conceptual leaps a language model would, but it's fast, private, runs on tiny hardware, and never sends your data anywhere.
 
-One login, two access levels: the owner password lets you edit everything, the visitor password is read-only. You can share individual boards with a private link too.
+One login, two access levels: the owner password lets you edit everything, and visitor passwords are read-only. Visitor profiles can be scoped to specific folders or documents, so people only see the research you grant them.
 
 <br>
 
@@ -177,6 +186,27 @@ The frontend is the website your visitors see — the canvas, search, everything
 Visit your Vercel URL. The backend may take 30–90 seconds to wake up on the first visit (Render free tier cold start). Once it's ready, you'll see the login screen — use the `OWNER_PASSWORD` you set in step 3.
 
 Share your Vercel URL + the `VISITOR_PASSWORD` with anyone you want to give read-only access.
+
+<details>
+<summary><strong>Adding searchable PDFs to your workspace</strong></summary>
+
+<br>
+
+PDFs are first-class research items in Station 8. They appear in the sidebar, live inside folders, show up in the database view, inherit folder privacy, and participate in the same search results as boards, docs, sheets, and reports.
+
+To add one, click **PDF** in the sidebar toolbar or drag a PDF into the workspace sidebar. While dragging, the Workspace heading shows the current destination and the active folder is highlighted, so you can see exactly where the file will land.
+
+When a PDF is added:
+
+- Station 8 validates the file before upload and keeps binaries out of the public `uploads` bucket.
+- Selectable PDF text is extracted in the browser with PDF.js.
+- Scanned or sparse pages are rendered and OCRed in the browser with Tesseract.js.
+- Page text is saved as a searchable index, so search results can jump back to the exact page.
+- Existing legacy PDFs with missing text indexes are repaired when the owner opens them, with an explicit retry available if OCR fails.
+
+Production PDFs live in the private Supabase `pdfs` bucket. Visitors can open only the PDFs their access profile allows, and the backend grants short-lived file access after authentication.
+
+</details>
 
 <details>
 <summary><strong>Adding Google Docs and Sheets to your workspace</strong></summary>
