@@ -61,7 +61,7 @@ What I needed, and most independent researchers do, too: a workspace that lives 
 - **Google Docs and Sheets:** create new files in Drive or import existing URLs, embed them in Station 8, and search cached document text.
 - **PDFs:** add by picker or drag-and-drop into the sidebar folder tree. Station 8 reads selectable text with PDF.js, OCRs scanned/sparse pages in the browser, indexes results page-by-page, and opens search hits back to the exact PDF page.
 - **R reports:** push knitted HTML reports from RStudio; re-knitting updates the same report instead of creating duplicates.
-- **Folders, tags, and access profiles:** organize every document type in one hierarchy, then give visitors read-only access to the folders or files you choose.
+- **Folders, tags, database view, and access profiles:** organize every document type in one hierarchy, scan the whole research database, then give visitors read-only access to the folders or files you choose.
 
 ### The trade-off for being free
 
