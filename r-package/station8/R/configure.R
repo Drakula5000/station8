@@ -1,4 +1,4 @@
-#' Interactive one-time setup. Prompts for hub URL + owner password,
+#' Interactive one-time setup. Prompts for hub URL + account password,
 #' exchanges them for a long-lived token, stores both at ~/.station8/.
 #'
 #' @param hub_url Optional hub URL (your Render backend URL). If NULL, prompts interactively.
@@ -14,7 +14,7 @@ configure <- function(hub_url = NULL, password = NULL) {
   }
 
   if (is.null(password)) {
-    password <- trimws(readline("Owner password: "))
+    password <- trimws(readline("Station 8 password: "))
   }
   if (!nzchar(password)) {
     message("[station8] password required; aborted")

@@ -34,7 +34,7 @@ services:
         value: /var/data
       - key: OWNER_PASSWORD
         sync: false
-      - key: VISITOR_PASSWORD
+      - key: S8_SECONDARY_PASSWORD
         sync: false
       - key: FLASK_SECRET_KEY
         generateValue: true

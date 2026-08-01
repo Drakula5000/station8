@@ -14,21 +14,23 @@ from functools import wraps
 from html.parser import HTMLParser as _StdlibHTMLParser
 from threading import RLock
 
-from flask import Flask, jsonify, request, send_from_directory, session, redirect
+from flask import Flask, g, has_app_context, has_request_context, jsonify, request, send_from_directory, session, redirect
 from cryptography.fernet import Fernet, InvalidToken
 from itsdangerous import URLSafeSerializer, BadSignature
 from werkzeug.security import check_password_hash, generate_password_hash
-from supabase import create_client, Client
 
 app = Flask(__name__)
 
 # Supabase Configuration
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-supabase: Client = None
+supabase = None
 
 if SUPABASE_URL and SUPABASE_KEY:
     try:
+        # Keep local startup and isolated tests lightweight. The Supabase SDK
+        # is needed only when persistent remote storage is actually configured.
+        from supabase import create_client
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         print("Supabase connected successfully!", flush=True)
     except Exception as e:
@@ -56,6 +58,7 @@ OCR_FILE = os.path.join(DATA_DIR, 'ocr.json')
 WORKSPACE_FILE = os.path.join(DATA_DIR, 'workspace.json')
 ACCESS_PROFILES_FILE = os.path.join(DATA_DIR, 'access_profiles.json')
 AUTH_FILE = os.path.join(DATA_DIR, 'auth.json')
+ACCOUNTS_FILE = os.path.join(DATA_DIR, 'accounts.json')
 REPORTS_FILE = os.path.join(DATA_DIR, 'reports.json')
 R_TOKENS_FILE = os.path.join(DATA_DIR, 'r_tokens.json')
 PDFS_FILE = os.path.join(DATA_DIR, 'pdfs.json')
@@ -80,6 +83,13 @@ PRODUCTION = bool(
 
 ACCESS_OWNER = 'owner'
 ACCESS_VISITOR = 'visitor'
+PRIMARY_ACCOUNT_ID = 'primary'
+SECONDARY_ACCOUNT_ID = 'secondary'
+ACCOUNT_LOGIN_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._+@-]{1,127}$')
+ACCOUNT_PASSWORD_MIN_LENGTH = 12
+ACCOUNT_STORAGE_PREFIX = 'account'
+GLOBAL_STORAGE_BASENAMES = frozenset({'auth.json', 'accounts.json'})
+SECONDARY_ACCOUNT_PASSWORD_ENV = 'S8_SECONDARY_PASSWORD'
 
 MAX_REPORT_HTML_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_PDF_BYTES = 25 * 1024 * 1024
@@ -101,7 +111,9 @@ PDF_SERVICE_ROLE_ERROR = (
     'PDF storage requires SUPABASE_KEY to be the legacy service_role JWT; '
     'the anon key cannot protect private PDFs.'
 )
-_PDF_STORAGE_PATH_RE = re.compile(r'^[0-9a-f]{32}\.pdf$')
+_PDF_STORAGE_PATH_RE = re.compile(
+    r'^(?:[0-9a-f]{32}|accounts/[a-z0-9-]{3,64}/[0-9a-f]{32})\.pdf$'
+)
 
 
 def _env_flag(name, default=False):
@@ -120,7 +132,9 @@ app.secret_key = (
 )
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE='None' if PRODUCTION else 'Lax',
+    # station8.space and api.station8.space are different origins but the same
+    # HTTPS site, so Lax cookies still work while blocking cross-site CSRF.
+    SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_SECURE=PRODUCTION,
 )
 
@@ -174,12 +188,47 @@ def handle_options():
         return ('', 204)
 
 
+def _safe_account_id(value):
+    account_id = str(value or '').strip().lower()
+    if account_id == PRIMARY_ACCOUNT_ID:
+        return account_id
+    return account_id if re.fullmatch(r'[a-z0-9-]{3,64}', account_id) else None
+
+
+def _current_workspace_account_id():
+    """Return the workspace whose storage the current request may access.
+
+    Full accounts and visitor profiles both carry this value in the signed
+    session. Legacy owner sessions intentionally map to the primary workspace
+    so the existing production data needs no risky bulk migration.
+    """
+    if has_app_context():
+        override = _safe_account_id(getattr(g, 'workspace_account_id', None))
+        if override:
+            return override
+    if not has_request_context():
+        return PRIMARY_ACCOUNT_ID
+    if session.get('studio_authed') or session.get('visitor_authed'):
+        return _safe_account_id(session.get('workspace_account_id')) or PRIMARY_ACCOUNT_ID
+    return PRIMARY_ACCOUNT_ID
+
+
+def _storage_location(path):
+    """Resolve one logical JSON file to its account-local cache and row id."""
+    basename = os.path.basename(path)
+    account_id = _current_workspace_account_id()
+    if basename in GLOBAL_STORAGE_BASENAMES or account_id == PRIMARY_ACCOUNT_ID:
+        return path, basename
+    local_path = os.path.join(DATA_DIR, 'accounts', account_id, basename)
+    remote_id = f'{ACCOUNT_STORAGE_PREFIX}-{account_id}-{basename}'
+    return local_path, remote_id
+
+
 def _load(path, default):
+    local_path, file_id = _storage_location(path)
     # Try Supabase first if configured
     if supabase:
         try:
-            # Use the filename (relative to DATA_DIR) as the ID
-            file_id = os.path.basename(path)
             response = supabase.table(SUPABASE_TABLE).select('data').eq('id', file_id).execute()
             if response.data:
                 return response.data[0]['data']
@@ -187,27 +236,28 @@ def _load(path, default):
             print(f"Supabase load failed for {path}: {exc}", flush=True)
 
     # Fallback to local file
-    if not os.path.exists(path):
+    if not os.path.exists(local_path):
         return default
-    with open(path, 'r') as f:
+    with open(local_path, 'r') as f:
         return json.load(f)
 
 
 def _load_local_json(path, default):
-    if not os.path.exists(path):
+    local_path, _file_id = _storage_location(path)
+    if not os.path.exists(local_path):
         return default
     try:
-        with open(path, 'r') as f:
+        with open(local_path, 'r') as f:
             return json.load(f)
     except Exception:
         return default
 
 
 def _save(path, data):
+    _local_path, file_id = _storage_location(path)
     # Save to Supabase first if configured
     if supabase:
         try:
-            file_id = os.path.basename(path)
             supabase.table(SUPABASE_TABLE).upsert({
                 'id': file_id,
                 'data': data
@@ -215,13 +265,15 @@ def _save(path, data):
         except Exception as exc:
             print(f"Supabase save failed for {path}: {exc}", flush=True)
 
-    # Always save to local file as well (as a cache/backup)
-    with open(path, 'w') as f:
-        json.dump(data, f, indent=2)
+    # Always save to local file as well (as a cache/backup). Requests for a
+    # newly-created workspace arrive in parallel, so a direct write can expose
+    # a zero-length/partial JSON file to a sibling request.
+    _write_local_json_atomic(path, data)
 
 
 def _write_local_json_atomic(path, data):
     """Write JSON without exposing a half-written cache file to another request."""
+    path, _file_id = _storage_location(path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp_path = f'{path}.tmp-{uuid.uuid4().hex}'
     try:
@@ -241,7 +293,7 @@ def _save_json_strict(path, data):
     bucket, so acknowledging it without durable metadata would strand the
     object after Render restarts. PDF create/delete flows use this strict path.
     """
-    file_id = os.path.basename(path)
+    _local_path, file_id = _storage_location(path)
     _write_local_json_atomic(path, data)
     if supabase:
         # Do the fallible remote operation last. Once it succeeds there are no
@@ -257,7 +309,7 @@ def _delete_json_blob(path, *, strict=False):
     Supabase. Callers can request strict error propagation when user-visible
     deletion must not report a false success.
     """
-    file_id = os.path.basename(path)
+    local_path, file_id = _storage_location(path)
     remote_error = None
     local_error = None
     if supabase:
@@ -268,8 +320,8 @@ def _delete_json_blob(path, *, strict=False):
             print(f'Supabase delete failed for {file_id}: {exc}', flush=True)
     if remote_error is None or not strict:
         try:
-            if os.path.exists(path):
-                os.remove(path)
+            if os.path.exists(local_path):
+                os.remove(local_path)
         except OSError as exc:
             local_error = exc
             print(f'Local JSON delete failed for {file_id}: {exc}', flush=True)
@@ -401,6 +453,229 @@ def _verify_visitor_password(password):
     return check_password_hash(stored_hash, password)
 
 
+def _normalize_account_login(value):
+    return str(value or '').strip().lower()
+
+
+def _normalize_account(source):
+    source = dict(source or {})
+    account_id = _safe_account_id(source.get('id')) or uuid.uuid4().hex[:12]
+    login = _normalize_account_login(source.get('login'))
+    now = datetime.now().isoformat()
+    return {
+        'id': account_id,
+        'login': login,
+        'password_hash': str(source.get('password_hash') or ''),
+        'admin': bool(source.get('admin')),
+        'active': source.get('active') is not False,
+        'created_at': source.get('created_at') or now,
+        'updated_at': source.get('updated_at') or source.get('created_at') or now,
+    }
+
+
+def _primary_account():
+    return _normalize_account({
+        'id': PRIMARY_ACCOUNT_ID,
+        'login': 'owner',
+        'password_hash': '',
+        'admin': True,
+        'active': True,
+        'created_at': datetime.now().isoformat(),
+    })
+
+
+def _load_accounts():
+    raw = _load(ACCOUNTS_FILE, [])
+    accounts = []
+    seen_ids = set()
+    seen_logins = set()
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            account = _normalize_account(item)
+            if (
+                not ACCOUNT_LOGIN_RE.fullmatch(account['login'])
+                or account['id'] in seen_ids
+                or account['login'] in seen_logins
+            ):
+                continue
+            seen_ids.add(account['id'])
+            seen_logins.add(account['login'])
+            accounts.append(account)
+
+    if PRIMARY_ACCOUNT_ID not in seen_ids:
+        primary = _primary_account()
+        if primary['login'] in seen_logins:
+            primary['login'] = 'owner'
+        accounts.insert(0, primary)
+    else:
+        for account in accounts:
+            if account['id'] == PRIMARY_ACCOUNT_ID:
+                account['admin'] = True
+                account['active'] = True
+                break
+
+    if accounts != raw:
+        _save(ACCOUNTS_FILE, accounts)
+    return accounts
+
+
+def _save_accounts(accounts):
+    normalized = [_normalize_account(account) for account in accounts]
+    _save_json_strict(ACCOUNTS_FILE, normalized)
+
+
+def _find_account_by_id(account_id):
+    account_id = _safe_account_id(account_id)
+    return next((account for account in _load_accounts() if account['id'] == account_id), None)
+
+
+def _find_account_by_login(login):
+    login = _normalize_account_login(login)
+    return next((account for account in _load_accounts() if account['login'] == login), None)
+
+
+def _verify_account_password(account, password):
+    if not account or account.get('active') is False:
+        return False
+    if account.get('id') == PRIMARY_ACCOUNT_ID and not account.get('password_hash'):
+        return _verify_studio_password(password)
+    stored_hash = account.get('password_hash') or ''
+    if not stored_hash:
+        return False
+    try:
+        return check_password_hash(stored_hash, password)
+    except (TypeError, ValueError):
+        return False
+
+
+def _account_client_record(account):
+    return {
+        key: account.get(key)
+        for key in ('id', 'login', 'admin', 'active', 'created_at', 'updated_at')
+    }
+
+
+_accounts_lock = RLock()
+
+
+def _sync_secondary_account_from_environment():
+    """Provision the Render-managed secondary account at process startup."""
+    password = os.getenv(SECONDARY_ACCOUNT_PASSWORD_ENV) or ''
+    if not password:
+        return None
+    if len(password) < 6:
+        raise RuntimeError(
+            f'{SECONDARY_ACCOUNT_PASSWORD_ENV} must be at least '
+            '6 characters'
+        )
+    if password != password.strip():
+        raise RuntimeError(f'{SECONDARY_ACCOUNT_PASSWORD_ENV} cannot start or end with a space')
+    if _verify_studio_password(password):
+        raise RuntimeError(f'{SECONDARY_ACCOUNT_PASSWORD_ENV} must differ from OWNER_PASSWORD')
+
+    with _accounts_lock:
+        accounts = _load_accounts()
+        account = next((item for item in accounts if item['id'] == SECONDARY_ACCOUNT_ID), None)
+        now = datetime.now().isoformat()
+        if account is None:
+            account = _normalize_account({
+                'id': SECONDARY_ACCOUNT_ID,
+                'login': SECONDARY_ACCOUNT_ID,
+                'password_hash': generate_password_hash(password),
+                'admin': False,
+                'active': True,
+                'created_at': now,
+                'updated_at': now,
+            })
+            accounts.append(account)
+        else:
+            try:
+                password_matches = check_password_hash(account.get('password_hash') or '', password)
+            except (TypeError, ValueError):
+                password_matches = False
+            if not password_matches:
+                account['password_hash'] = generate_password_hash(password)
+                account['updated_at'] = now
+            account['active'] = True
+        # One strict write per server start keeps Supabase authoritative and
+        # makes a changed Render password take effect after the next deploy.
+        _save_accounts(accounts)
+        return _account_client_record(account)
+
+
+_sync_secondary_account_from_environment()
+
+
+def _serialize_account_mutation(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with _accounts_lock:
+            return fn(*args, **kwargs)
+    return wrapped
+
+
+def _current_account():
+    if not has_request_context() or not session.get('studio_authed'):
+        return None
+    return _find_account_by_id(_current_workspace_account_id())
+
+
+_login_attempts = {}
+_login_attempts_lock = RLock()
+LOGIN_ATTEMPT_WINDOW_SECONDS = 10 * 60
+LOGIN_LOCK_SECONDS = 15 * 60
+LOGIN_ATTEMPT_LIMIT = 8
+
+
+def _login_attempt_key(login):
+    return (request.remote_addr or 'unknown', _normalize_account_login(login) or PRIMARY_ACCOUNT_ID)
+
+
+def _login_retry_after(login):
+    key = _login_attempt_key(login)
+    now = time.time()
+    with _login_attempts_lock:
+        attempts = [stamp for stamp in _login_attempts.get(key, []) if now - stamp < LOGIN_LOCK_SECONDS]
+        if attempts:
+            _login_attempts[key] = attempts
+        else:
+            _login_attempts.pop(key, None)
+        recent = [stamp for stamp in attempts if now - stamp < LOGIN_ATTEMPT_WINDOW_SECONDS]
+        if len(recent) < LOGIN_ATTEMPT_LIMIT:
+            return 0
+        return max(1, int(LOGIN_LOCK_SECONDS - (now - attempts[0])))
+
+
+def _record_login_failure(login):
+    key = _login_attempt_key(login)
+    with _login_attempts_lock:
+        _login_attempts.setdefault(key, []).append(time.time())
+
+
+def _clear_login_failures(login):
+    key = _login_attempt_key(login)
+    with _login_attempts_lock:
+        _login_attempts.pop(key, None)
+
+
+def _set_account_session(account):
+    session.clear()
+    session['studio_authed'] = True
+    session['workspace_account_id'] = account['id']
+    session.modified = True
+
+
+def _set_visitor_session(account, visitor_profile=None):
+    session.clear()
+    session['visitor_authed'] = True
+    session['workspace_account_id'] = account['id']
+    if visitor_profile:
+        session['visitor_profile_id'] = visitor_profile['id']
+    session.modified = True
+
+
 def _access_profile_pepper():
     return (os.getenv('S8_ACCESS_PROFILE_PEPPER') or os.getenv('ACCESS_PROFILE_PEPPER') or '').strip()
 
@@ -520,7 +795,9 @@ def _get_workspace():
     if not ws:
         ws = _normalize_workspace({
             'name': 'Station 8',
-            'owner': '',
+            # Preserve the primary workspace's existing first-run behavior.
+            # Secondary accounts stay name-free without frontend changes.
+            'owner': '' if _current_workspace_account_id() == PRIMARY_ACCOUNT_ID else 'Station 8',
             'created_at': datetime.now().isoformat(),
             'folders': [],
         })
@@ -1257,14 +1534,41 @@ def _doc_is_visitor_visible(doc, folders):
 _io_executor = ThreadPoolExecutor(max_workers=12, thread_name_prefix='io')
 
 
+def _call_in_workspace(account_id, fn, *args):
+    """Run one storage operation with an explicit account context.
+
+    Flask request context does not propagate into executor threads. Requiring
+    an explicit context here prevents secondary-account reads from silently
+    falling back to the primary workspace.
+    """
+    account_id = _safe_account_id(account_id) or PRIMARY_ACCOUNT_ID
+    if not has_request_context():
+        with app.app_context():
+            g.workspace_account_id = account_id
+            return fn(*args)
+    missing = object()
+    previous = getattr(g, 'workspace_account_id', missing)
+    g.workspace_account_id = account_id
+    try:
+        return fn(*args)
+    finally:
+        if previous is missing:
+            g.pop('workspace_account_id', None)
+        else:
+            g.workspace_account_id = previous
+
+
 def _visitor_doc_load(doc_id, *, kind, load_index, doc_file_fn, default_payload):
     """Visitor doc fetch: parallel reads of workspace + doc index + payload,
     then a visitor-visibility check. Returns (payload, error) where exactly
     one of the two is None. Caller jsonifies the payload or returns the error.
     """
-    workspace_future = _io_executor.submit(_get_workspace)
-    docs_future = _io_executor.submit(load_index)
-    payload_future = _io_executor.submit(_load, doc_file_fn(doc_id), default_payload)
+    account_id = _current_workspace_account_id()
+    workspace_future = _io_executor.submit(_call_in_workspace, account_id, _get_workspace)
+    docs_future = _io_executor.submit(_call_in_workspace, account_id, load_index)
+    payload_future = _io_executor.submit(
+        _call_in_workspace, account_id, _load, doc_file_fn(doc_id), default_payload
+    )
 
     workspace = workspace_future.result()
     docs = docs_future.result()
@@ -1316,7 +1620,10 @@ def _sanitize_parent_id(parent_id, folders, folder_id=None):
 
 
 def _is_studio_authed():
-    return bool(session.get('studio_authed'))
+    if not session.get('studio_authed'):
+        return False
+    account = _find_account_by_id(_current_workspace_account_id())
+    return bool(account and account.get('active') is not False)
 
 
 def _is_visitor_authed():
@@ -1334,6 +1641,9 @@ def _current_access_level():
 def _profile_visitor_session_is_valid():
     if not _is_visitor_authed():
         return False
+    account = _find_account_by_id(_current_workspace_account_id())
+    if not account or account.get('active') is False:
+        return False
     if not session.get('visitor_profile_id'):
         return True
     return _current_access_profile() is not None
@@ -1342,6 +1652,8 @@ def _profile_visitor_session_is_valid():
 def _clear_visitor_session():
     session.pop('visitor_authed', None)
     session.pop('visitor_profile_id', None)
+    if not session.get('studio_authed'):
+        session.pop('workspace_account_id', None)
     session.modified = True
 
 
@@ -1350,6 +1662,18 @@ def _studio_auth_required(fn):
     def wrapped(*args, **kwargs):
         if not _is_studio_authed():
             return jsonify({'error': 'Studio password required'}), 401
+        return fn(*args, **kwargs)
+    return wrapped
+
+
+def _admin_auth_required(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        if not _is_studio_authed():
+            return jsonify({'error': 'Account login required'}), 401
+        account = _current_account()
+        if not account or not account.get('admin'):
+            return jsonify({'error': 'Administrator access required'}), 403
         return fn(*args, **kwargs)
     return wrapped
 
@@ -1398,50 +1722,57 @@ def _uploads_referenced_by_boards(board_ids=None):
     return names
 
 
+def _uploads_referenced_by_all_accounts():
+    names = set()
+    for account in _load_accounts():
+        names.update(_call_in_workspace(account['id'], _uploads_referenced_by_boards))
+    return names
+
+
 def _delete_upload_artifacts(filenames):
     if not filenames:
         return
 
-    ocr = _load(OCR_FILE, {})
-    updated_ocr = False
     for filename in filenames:
         path = os.path.join(UPLOADS_DIR, filename)
         if os.path.exists(path):
             os.remove(path)
-        if filename in ocr:
-            ocr.pop(filename, None)
-            updated_ocr = True
-    if updated_ocr:
-        _save(OCR_FILE, ocr)
+
+    def remove_current_ocr_entries():
+        ocr = _load(OCR_FILE, {})
+        updated = False
+        for filename in filenames:
+            if filename in ocr:
+                ocr.pop(filename, None)
+                updated = True
+        if updated:
+            _save(OCR_FILE, ocr)
+
+    for account in _load_accounts():
+        _call_in_workspace(account['id'], remove_current_ocr_entries)
 
 
 def _cleanup_unreferenced_uploads(candidate_filenames):
     if not candidate_filenames:
         return
-    still_used = _uploads_referenced_by_boards()
+    still_used = _uploads_referenced_by_all_accounts()
     unused = {filename for filename in candidate_filenames if filename not in still_used}
     _delete_upload_artifacts(unused)
 
 
 def _delete_board_files(board_ids):
     for board_id in board_ids:
-        fp = _board_file(board_id)
-        if os.path.exists(fp):
-            os.remove(fp)
+        _delete_json_blob(_board_file(board_id), strict=False)
 
 
 def _delete_sheet_files(sheet_ids):
     for sheet_id in sheet_ids:
-        fp = _sheet_file(sheet_id)
-        if os.path.exists(fp):
-            os.remove(fp)
+        _delete_json_blob(_sheet_file(sheet_id), strict=False)
 
 
 def _delete_report_files(report_ids):
     for report_id in report_ids:
-        fp = _report_file(report_id)
-        if os.path.exists(fp):
-            os.remove(fp)
+        _delete_json_blob(_report_file(report_id), strict=False)
 
 
 @app.route('/api/auth/status', methods=['GET'])
@@ -1450,6 +1781,11 @@ def auth_status():
     if _is_visitor_authed() and session.get('visitor_profile_id') and not visitor_profile:
         _clear_visitor_session()
     access = _current_access_level()
+    account = None
+    if access == ACCESS_OWNER:
+        account = _current_account()
+    elif access == ACCESS_VISITOR:
+        account = _find_account_by_id(_current_workspace_account_id())
     return jsonify({
         'authenticated': bool(access),
         'access': access,
@@ -1457,6 +1793,8 @@ def auth_status():
         'visitor_authenticated': _is_visitor_authed(),
         'visitor_profile_id': visitor_profile.get('id') if visitor_profile else None,
         'visitor_profile_name': visitor_profile.get('name') if visitor_profile else None,
+        'account': _account_client_record(account) if account else None,
+        'is_admin': bool(account and account.get('admin') and access == ACCESS_OWNER),
         'configured': _auth_configured(),
         'setup_allowed': ALLOW_BROWSER_AUTH_SETUP,
         'requires_setup': _requires_access_setup() and ALLOW_BROWSER_AUTH_SETUP,
@@ -1488,17 +1826,21 @@ def auth_setup():
         auth['visitor_password_hash'] = generate_password_hash(visitor_password)
     auth['configured_at'] = datetime.now().isoformat()
     _save_auth_config(auth)
-    session['studio_authed'] = True
-    session.pop('visitor_authed', None)
-    session.pop('visitor_profile_id', None)
-    session.modified = True
-    return jsonify({'authenticated': True, 'requires_setup': False, 'access': ACCESS_OWNER})
+    account = _find_account_by_id(PRIMARY_ACCOUNT_ID) or _primary_account()
+    _set_account_session(account)
+    return jsonify({
+        'authenticated': True,
+        'requires_setup': False,
+        'access': ACCESS_OWNER,
+        'account': _account_client_record(account),
+    })
 
 
 @app.route('/api/auth/login', methods=['POST'])
 def auth_login():
     data = request.json or {}
     password = data.get('password') or ''
+    attempt_key = 'password-only'
     if _requires_access_setup():
         if ALLOW_BROWSER_AUTH_SETUP:
             return jsonify({'error': 'Access passwords have not been set up yet', 'requires_setup': True, 'setup_allowed': True}), 409
@@ -1508,39 +1850,70 @@ def auth_login():
             'configured': False,
             'setup_allowed': False,
         }), 503
-    if _verify_studio_password(password):
-        session['studio_authed'] = True
-        session.pop('visitor_authed', None)
-        session.pop('visitor_profile_id', None)
-        session.modified = True
-        return jsonify({'authenticated': True, 'access': ACCESS_OWNER})
+    retry_after = _login_retry_after(attempt_key)
+    if retry_after:
+        response = jsonify({'error': 'Too many login attempts. Try again later.'})
+        response.headers['Retry-After'] = str(retry_after)
+        return response, 429
 
-    visitor_profile = _access_profile_for_password(password)
-    if visitor_profile:
-        session['visitor_authed'] = True
-        session['visitor_profile_id'] = visitor_profile['id']
-        session.pop('studio_authed', None)
-        session.modified = True
+    accounts = [account for account in _load_accounts() if account.get('active') is not False]
+    account_matches = [
+        account for account in accounts if _verify_account_password(account, password)
+    ]
+    if len(account_matches) > 1:
+        return jsonify({'error': 'Two accounts use the same password. Change one in Render.'}), 409
+    if account_matches:
+        account = account_matches[0]
+        _clear_login_failures(attempt_key)
+        _set_account_session(account)
+        return jsonify({
+            'authenticated': True,
+            'access': ACCESS_OWNER,
+            'account': _account_client_record(account),
+            'is_admin': bool(account.get('admin')),
+        })
+
+    visitor_matches = []
+    for account in accounts:
+        visitor_profile = _call_in_workspace(
+            account['id'], _access_profile_for_password, password
+        )
+        if visitor_profile:
+            visitor_matches.append((account, visitor_profile))
+    if len(visitor_matches) > 1:
+        return jsonify({'error': 'Two visitor profiles use the same password. Change one password.'}), 409
+    if visitor_matches:
+        account, visitor_profile = visitor_matches[0]
+        _clear_login_failures(attempt_key)
+        _set_visitor_session(account, visitor_profile)
         return jsonify({
             'authenticated': True,
             'access': ACCESS_VISITOR,
             'visitor_profile_id': visitor_profile['id'],
             'visitor_profile_name': visitor_profile['name'],
+            'account': _account_client_record(account),
         })
 
-    if not _verify_visitor_password(password):
+    # Preserve the old universal visitor password only for the primary account
+    # while deployments migrate to named visitor profiles.
+    primary_account = next(
+        (item for item in accounts if item.get('id') == PRIMARY_ACCOUNT_ID), None
+    )
+    if not primary_account or not _verify_visitor_password(password):
+        _record_login_failure(attempt_key)
         return jsonify({'error': 'Wrong password'}), 401
-    session['visitor_authed'] = True
-    session.pop('visitor_profile_id', None)
-    session.pop('studio_authed', None)
-    session.modified = True
-    return jsonify({'authenticated': True, 'access': ACCESS_VISITOR})
+    _clear_login_failures(attempt_key)
+    _set_visitor_session(primary_account)
+    return jsonify({
+        'authenticated': True,
+        'access': ACCESS_VISITOR,
+        'account': _account_client_record(primary_account),
+    })
 
 
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
-    session.pop('studio_authed', None)
-    _clear_visitor_session()
+    session.clear()
     session.modified = True
     return '', 204
 
@@ -1562,6 +1935,11 @@ def _r_token_required(fn):
             return jsonify({'error': 'invalid token'}), 401
         if not isinstance(payload, dict) or payload.get('kind') != 'r-token':
             return jsonify({'error': 'invalid token kind'}), 401
+        account_id = _safe_account_id(payload.get('account_id')) or PRIMARY_ACCOUNT_ID
+        account = _find_account_by_id(account_id)
+        if not account or account.get('active') is False:
+            return jsonify({'error': 'account disabled'}), 401
+        g.workspace_account_id = account_id
         token_id = payload.get('token_id')
         active_ids = {t['id'] for t in _load_r_tokens() if t.get('active', True)}
         if token_id not in active_ids:
@@ -1593,14 +1971,22 @@ def _pdf_original_filename(value):
 
 
 def _pdf_storage_path(ticket):
-    path = f'{ticket}.pdf'
+    account_id = _current_workspace_account_id()
+    path = (
+        f'{ticket}.pdf'
+        if account_id == PRIMARY_ACCOUNT_ID
+        else f'accounts/{account_id}/{ticket}.pdf'
+    )
     return path if _PDF_STORAGE_PATH_RE.fullmatch(path) else None
 
 
 def _local_pdf_path(storage_path):
     if not _PDF_STORAGE_PATH_RE.fullmatch(str(storage_path or '')):
         raise ValueError('invalid PDF storage path')
-    return os.path.join(PDFS_DIR, storage_path)
+    path = os.path.abspath(os.path.join(PDFS_DIR, storage_path))
+    if os.path.commonpath([os.path.abspath(PDFS_DIR), path]) != os.path.abspath(PDFS_DIR):
+        raise ValueError('invalid PDF storage path')
+    return path
 
 
 def _bucket_public_value(bucket):
@@ -1708,14 +2094,15 @@ def _pdf_storage_size(storage_path):
         return os.path.getsize(_local_pdf_path(storage_path))
     _ensure_pdf_bucket()
     bucket = supabase.storage.from_(PDF_BUCKET)
-    listed = bucket.list(None, {
+    prefix, object_name = os.path.split(storage_path)
+    listed = bucket.list(prefix or None, {
         'limit': 2,
         'offset': 0,
         'sortBy': {'column': 'name', 'order': 'asc'},
-        'search': storage_path,
+        'search': object_name,
     }) or []
     item = next(
-        (entry for entry in listed if isinstance(entry, dict) and entry.get('name') == storage_path),
+        (entry for entry in listed if isinstance(entry, dict) and entry.get('name') == object_name),
         None,
     )
     if item is None:
@@ -1779,6 +2166,7 @@ def _pdf_reference_paths_for_prune():
     stale or missing cache must never make a live private object look orphaned.
     """
     sources = []
+    local_path, remote_id = _storage_location(PDFS_FILE)
     local = _load_local_json(PDFS_FILE, None)
     if isinstance(local, list):
         sources.append(local)
@@ -1788,7 +2176,7 @@ def _pdf_reference_paths_for_prune():
             response = (
                 supabase.table(SUPABASE_TABLE)
                 .select('data')
-                .eq('id', os.path.basename(PDFS_FILE))
+                .eq('id', remote_id)
                 .execute()
             )
         except Exception as exc:
@@ -1815,7 +2203,7 @@ def _pdf_reference_paths_for_prune():
             if _PDF_STORAGE_PATH_RE.fullmatch(storage_path):
                 references.add(storage_path)
             pdf_id = str(record.get('id') or '')
-            derived_path = f'{pdf_id}.pdf'
+            derived_path = _pdf_storage_path(pdf_id)
             if _PDF_STORAGE_PATH_RE.fullmatch(derived_path):
                 references.add(derived_path)
     return references
@@ -1823,12 +2211,13 @@ def _pdf_reference_paths_for_prune():
 
 def _authoritative_pdf_index_state(pdf_id):
     """Return present/absent/unknown without Supabase-to-cache fallback."""
+    local_path, remote_id = _storage_location(PDFS_FILE)
     if supabase:
         try:
             response = (
                 supabase.table(SUPABASE_TABLE)
                 .select('data')
-                .eq('id', os.path.basename(PDFS_FILE))
+                .eq('id', remote_id)
                 .execute()
             )
         except Exception as exc:
@@ -1839,7 +2228,7 @@ def _authoritative_pdf_index_state(pdf_id):
             return 'unknown'
         records = rows[0].get('data')
     else:
-        if not os.path.exists(PDFS_FILE):
+        if not os.path.exists(local_path):
             return 'absent'
         records = _load_local_json(PDFS_FILE, None)
     if not isinstance(records, list):
@@ -1879,20 +2268,33 @@ def _prune_stale_pdf_objects(now=None):
     candidates = []
     next_offset = 0
     try:
+        account_id = _current_workspace_account_id()
+        storage_prefix = '' if account_id == PRIMARY_ACCOUNT_ID else f'accounts/{account_id}'
         if supabase:
             _ensure_pdf_bucket()
             bucket = supabase.storage.from_(PDF_BUCKET)
-            candidates = bucket.list(None, {
+            listed = bucket.list(storage_prefix or None, {
                 'limit': MAX_PDF_PRUNE_SCAN,
                 'offset': _pdf_prune_offset,
                 'sortBy': {'column': 'name', 'order': 'asc'},
             }) or []
+            candidates = []
+            for item in listed:
+                if not isinstance(item, dict):
+                    continue
+                candidate = dict(item)
+                name = str(candidate.get('name') or '')
+                candidate['name'] = f'{storage_prefix}/{name}' if storage_prefix else name
+                candidates.append(candidate)
             next_offset = (
                 _pdf_prune_offset + len(candidates)
                 if len(candidates) >= MAX_PDF_PRUNE_SCAN else 0
             )
         else:
-            with os.scandir(PDFS_DIR) as entries:
+            scan_dir = PDFS_DIR if not storage_prefix else os.path.join(PDFS_DIR, storage_prefix)
+            if not os.path.isdir(scan_dir):
+                return 0
+            with os.scandir(scan_dir) as entries:
                 for index, entry in enumerate(entries):
                     if index < _pdf_prune_offset:
                         continue
@@ -1900,7 +2302,7 @@ def _prune_stale_pdf_objects(now=None):
                         break
                     if entry.is_file(follow_symlinks=False):
                         candidates.append({
-                            'name': entry.name,
+                            'name': f'{storage_prefix}/{entry.name}' if storage_prefix else entry.name,
                             'created_at': entry.stat(follow_symlinks=False).st_mtime,
                         })
             next_offset = (
@@ -1929,7 +2331,7 @@ def _prune_stale_pdf_objects(now=None):
 
     removed = 0
     for name in stale:
-        pdf_id = name[:-4]
+        pdf_id = os.path.basename(name)[:-4]
         try:
             if _delete_unreferenced_pdf_artifacts(pdf_id, name, strict=False):
                 removed += 1
@@ -2173,6 +2575,7 @@ def upload_pdf_local(ticket):
 
     storage_path = item['storage_path']
     final_path = _local_pdf_path(storage_path)
+    os.makedirs(os.path.dirname(final_path), exist_ok=True)
     tmp_path = f'{final_path}.tmp-{uuid.uuid4().hex}'
     written = 0
     header = b''
@@ -2595,8 +2998,14 @@ def mint_r_token():
     password = (body.get('password') or '').strip()
     if not password:
         return jsonify({'error': 'password required'}), 400
-    if not _verify_studio_password(password):
-        return jsonify({'error': 'invalid password'}), 401
+    matches = [
+        account for account in _load_accounts()
+        if account.get('active') is not False and _verify_account_password(account, password)
+    ]
+    if len(matches) != 1:
+        return jsonify({'error': 'invalid or duplicate password'}), 401
+    account = matches[0]
+    g.workspace_account_id = account['id']
     token_id = uuid.uuid4().hex
     tokens = _load_r_tokens()
     tokens.append({
@@ -2605,7 +3014,11 @@ def mint_r_token():
         'active': True,
     })
     _save_r_tokens(tokens)
-    token = _r_token_serializer().dumps({'kind': 'r-token', 'token_id': token_id})
+    token = _r_token_serializer().dumps({
+        'kind': 'r-token',
+        'token_id': token_id,
+        'account_id': account['id'],
+    })
     return jsonify({'token': token})
 
 
@@ -2949,6 +3362,126 @@ def patch_workspace():
     return jsonify(ws)
 
 
+# ── Full user accounts ──────────────────────────────────────────────────────
+
+@app.route('/api/account', methods=['GET'])
+@_studio_auth_required
+def get_current_account():
+    return jsonify(_account_client_record(_current_account()))
+
+
+@app.route('/api/account', methods=['PATCH'])
+@_studio_auth_required
+@_serialize_account_mutation
+def patch_current_account():
+    data = request.get_json(silent=True) or {}
+    account_id = _current_workspace_account_id()
+    accounts = _load_accounts()
+    account = next((item for item in accounts if item['id'] == account_id), None)
+    if not account:
+        return jsonify({'error': 'Account not found'}), 404
+
+    new_password = str(data.get('new_password') or '')
+    if new_password:
+        current_password = str(data.get('current_password') or '')
+        if not _verify_account_password(account, current_password):
+            return jsonify({'error': 'Current password is incorrect'}), 401
+        if new_password != new_password.strip():
+            return jsonify({'error': 'Password cannot start or end with a space'}), 400
+        if len(new_password) < ACCOUNT_PASSWORD_MIN_LENGTH:
+            return jsonify({
+                'error': f'New password must be at least {ACCOUNT_PASSWORD_MIN_LENGTH} characters'
+            }), 400
+        account['password_hash'] = generate_password_hash(new_password)
+
+    account['updated_at'] = datetime.now().isoformat()
+    _save_accounts(accounts)
+    return jsonify(_account_client_record(account))
+
+
+@app.route('/api/accounts', methods=['GET'])
+@_admin_auth_required
+def list_accounts():
+    accounts = [_account_client_record(account) for account in _load_accounts()]
+    accounts.sort(key=lambda account: (account['id'] != PRIMARY_ACCOUNT_ID, account['login']))
+    return jsonify(accounts)
+
+
+@app.route('/api/accounts', methods=['POST'])
+@_admin_auth_required
+@_serialize_account_mutation
+def create_account():
+    data = request.get_json(silent=True) or {}
+    login = _normalize_account_login(data.get('login'))
+    password = str(data.get('password') or '')
+    if not ACCOUNT_LOGIN_RE.fullmatch(login):
+        return jsonify({
+            'error': 'Login must be at least 2 characters and use letters, numbers, or . _ + @ -'
+        }), 400
+    if len(password) < ACCOUNT_PASSWORD_MIN_LENGTH:
+        return jsonify({
+            'error': f'Password must be at least {ACCOUNT_PASSWORD_MIN_LENGTH} characters'
+        }), 400
+    if password != password.strip():
+        return jsonify({'error': 'Password cannot start or end with a space'}), 400
+    accounts = _load_accounts()
+    if any(account['login'] == login for account in accounts):
+        return jsonify({'error': 'That login is already in use'}), 409
+    now = datetime.now().isoformat()
+    account = _normalize_account({
+        'id': uuid.uuid4().hex[:12],
+        'login': login,
+        'password_hash': generate_password_hash(password),
+        'admin': False,
+        'active': True,
+        'created_at': now,
+        'updated_at': now,
+    })
+    accounts.append(account)
+    _save_accounts(accounts)
+    return jsonify(_account_client_record(account)), 201
+
+
+@app.route('/api/accounts/<account_id>', methods=['PATCH'])
+@_admin_auth_required
+@_serialize_account_mutation
+def patch_account(account_id):
+    data = request.get_json(silent=True) or {}
+    account_id = _safe_account_id(account_id)
+    accounts = _load_accounts()
+    account = next((item for item in accounts if item['id'] == account_id), None)
+    if not account:
+        return jsonify({'error': 'Account not found'}), 404
+
+    if 'login' in data:
+        login = _normalize_account_login(data.get('login'))
+        if not ACCOUNT_LOGIN_RE.fullmatch(login):
+            return jsonify({'error': 'Invalid login'}), 400
+        if any(item['id'] != account_id and item['login'] == login for item in accounts):
+            return jsonify({'error': 'That login is already in use'}), 409
+        account['login'] = login
+    if 'active' in data:
+        if account_id == PRIMARY_ACCOUNT_ID:
+            return jsonify({'error': 'The primary account cannot be disabled'}), 400
+        account['active'] = data.get('active') is not False
+    password = str(data.get('password') or '')
+    if password:
+        if account_id == _current_workspace_account_id():
+            return jsonify({
+                'error': 'Use the current password to change your own password.'
+            }), 400
+        if password != password.strip():
+            return jsonify({'error': 'Password cannot start or end with a space'}), 400
+        if len(password) < ACCOUNT_PASSWORD_MIN_LENGTH:
+            return jsonify({
+                'error': f'Password must be at least {ACCOUNT_PASSWORD_MIN_LENGTH} characters'
+            }), 400
+        account['password_hash'] = generate_password_hash(password)
+    account['updated_at'] = datetime.now().isoformat()
+    _save_accounts(accounts)
+    return jsonify(_account_client_record(account))
+
+
 @app.route('/api/access-profiles', methods=['GET'])
 @_studio_auth_required
 def list_access_profiles():
@@ -3120,6 +3653,8 @@ def delete_board(board_id):
 @app.route('/api/boards/<board_id>', methods=['GET'])
 @_studio_auth_required
 def get_board(board_id):
+    if not any(board.get('id') == board_id for board in _load_boards()):
+        return jsonify({'error': 'Not found'}), 404
     return jsonify(_board_payload_with_assets(board_id))
 
 
@@ -3138,6 +3673,8 @@ def get_visitor_board(board_id):
 @app.route('/api/boards/<board_id>', methods=['PUT'])
 @_studio_auth_required
 def update_board(board_id):
+    if not any(board.get('id') == board_id for board in _load_boards()):
+        return jsonify({'error': 'Not found'}), 404
     data = request.json or {}
     _save(_board_file(board_id), {'snapshot': data.get('snapshot')})
     return '', 204
@@ -3211,6 +3748,8 @@ def delete_sheet(sheet_id):
 @app.route('/api/sheets/<sheet_id>', methods=['GET'])
 @_studio_auth_required
 def get_sheet(sheet_id):
+    if not any(sheet.get('id') == sheet_id for sheet in _load_sheets()):
+        return jsonify({'error': 'Not found'}), 404
     return jsonify(_load(_sheet_file(sheet_id), {'data': []}))
 
 
@@ -3228,6 +3767,8 @@ def get_visitor_sheet(sheet_id):
 @app.route('/api/sheets/<sheet_id>', methods=['PUT'])
 @_studio_auth_required
 def update_sheet(sheet_id):
+    if not any(sheet.get('id') == sheet_id for sheet in _load_sheets()):
+        return jsonify({'error': 'Not found'}), 404
     data = request.json or {}
     _save(_sheet_file(sheet_id), {'data': data.get('data') or []})
     return '', 204
@@ -4413,7 +4954,10 @@ def list_ocr_images():
     uses this to drive a client-side rescan (OCR in the browser via
     Tesseract.js, result posted back via /api/ocr/save).
     """
-    filenames = _collect_upload_filenames({'.jpg', '.jpeg', '.png', '.gif', '.webp'})
+    filenames = (
+        _collect_upload_filenames({'.jpg', '.jpeg', '.png', '.gif', '.webp'})
+        & _uploads_referenced_by_boards()
+    )
     ocr = _load(OCR_FILE, {})
     items = [
         {'filename': name, 'has_text': bool((ocr.get(name) or '').strip())}
@@ -4482,7 +5026,10 @@ def optimize_existing_images():
     optimizer to shrink images that were uploaded before compression was
     wired in. Opaque PNGs are converted to JPEG (huge size win) and board
     snapshots that reference them are rewritten in place."""
-    filenames = _collect_upload_filenames({'.jpg', '.jpeg', '.png', '.webp'})
+    filenames = (
+        _collect_upload_filenames({'.jpg', '.jpeg', '.png', '.webp'})
+        & _uploads_referenced_by_boards()
+    )
 
     optimized = []
     skipped = []
@@ -4886,13 +5433,14 @@ _corpus_vectors = None
 def _rebuild_tfidf_index(items):
     """Rebuild TF-IDF index from current corpus."""
     global _vectorizer, _corpus_texts, _corpus_vectors
+    _vectorizer = None
+    _corpus_vectors = None
     try:
         from sklearn.feature_extraction.text import TfidfVectorizer
-        from sklearn.metrics.pairwise import cosine_similarity
-        
+
         _corpus_texts = [item['text'] for item in items]
         if not _corpus_texts:
-            return
+            return None, None
         
         _vectorizer = TfidfVectorizer(
             max_features=5000,
@@ -4904,17 +5452,22 @@ def _rebuild_tfidf_index(items):
         print(f'TF-IDF index built: {len(_corpus_texts)} documents', flush=True)
     except Exception as exc:
         print(f'TF-IDF indexing failed: {exc}', flush=True)
+    # The globals remain for compatibility with existing diagnostics, but each
+    # search keeps these returned references so concurrent account searches
+    # cannot score against another workspace's corpus.
+    return _vectorizer, _corpus_vectors
 
 
-def _tfidf_score(query, item_index):
+def _tfidf_score(query, item_index, index_state=None):
     """Compute TF-IDF cosine similarity between query and indexed item."""
     global _vectorizer, _corpus_vectors
     try:
-        from sklearn.metrics.pairwise import cosine_similarity
-        if _vectorizer is None or _corpus_vectors is None:
+        vectorizer, corpus_vectors = index_state or (_vectorizer, _corpus_vectors)
+        if vectorizer is None or corpus_vectors is None:
             return 0.0
-        query_vector = _vectorizer.transform([query])
-        score = cosine_similarity(query_vector, _corpus_vectors[item_index])[0][0]
+        from sklearn.metrics.pairwise import cosine_similarity
+        query_vector = vectorizer.transform([query])
+        score = cosine_similarity(query_vector, corpus_vectors[item_index])[0][0]
         return float(score)
     except Exception as exc:
         return 0.0
@@ -4950,7 +5503,7 @@ def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, reports=
         return {'hits': []}
 
     # Rebuild TF-IDF index on each search (corpus changes frequently)
-    _rebuild_tfidf_index(items)
+    tfidf_index = _rebuild_tfidf_index(items)
 
     def _snippet(text, q, max_len=200):
         pos = text.lower().find(q.lower())
@@ -4964,7 +5517,7 @@ def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, reports=
     hits = []
     for idx, item in enumerate(items):
         keyword_score = _keyword(item['text'], query)
-        tfidf_score = _tfidf_score(query, idx)
+        tfidf_score = _tfidf_score(query, idx, tfidf_index)
 
         # Combine keyword (exact match) and TF-IDF (semantic similarity)
         combined = keyword_score * 2.0 + tfidf_score * 3.0

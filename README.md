@@ -67,7 +67,7 @@ What I needed, and most independent researchers do, too: a workspace that lives 
 
 Search uses TF-IDF, not LLM embeddings. It finds exact matches and statistically related terms based on what's in your corpus -- so "sea creatures" can surface jellyfish content if that's what your boards talk about. It won't make conceptual leaps a language model would, but it's fast, private, runs on tiny hardware, and never sends your data anywhere.
 
-One login, two access levels: the owner password lets you edit everything, and visitor passwords are read-only. Visitor profiles can be scoped to specific folders or documents, so people only see the research you grant them.
+Each full-account password opens its own private workspace. The optional second account is configured privately in Render, so the Station 8 interface stays unchanged and focused on research. Each workspace can also issue read-only visitor access scoped to specific folders or documents.
 
 <br>
 
@@ -146,7 +146,7 @@ When the deploy form appears:
   | Variable | Value |
   |:---|:---|
   | `OWNER_PASSWORD` | The password you'll use to edit your workspace. **Required** — without it you're locked out (the app can't prompt you to create one in production). |
-  | `VISITOR_PASSWORD` | The password you'll share with people who should have read-only access. **Required** — same reason. |
+  | `S8_SECONDARY_PASSWORD` | Optional password for that second account. Set this only in Render. |
   | `SUPABASE_URL` | Your Supabase Project URL from step 2. |
   | `SUPABASE_KEY` | Your server-only legacy Supabase `service_role` JWT from step 2. Never place it in Vercel. |
   | `CORS_ALLOWED_ORIGINS` | Your Vercel URL (you'll get this in step 4 — come back and add it). Example: `https://my-station8.vercel.app`. If you later add a custom domain, add it here too, comma-separated. |
@@ -185,9 +185,9 @@ The frontend is the website your visitors see — the canvas, search, everything
 
 **5. Open your Station 8 and log in.**
 
-Visit your Vercel URL. The backend may take 30–90 seconds to wake up on the first visit (Render free tier cold start). Once it's ready, you'll see the login screen — use the `OWNER_PASSWORD` you set in step 3.
+Visit your Vercel URL. The backend may take 30–90 seconds to wake up on the first visit (Render free tier cold start). Once it's ready, use the `OWNER_PASSWORD` you set in step 3.
 
-Share your Vercel URL + the `VISITOR_PASSWORD` with anyone you want to give read-only access.
+For a second full user, set `S8_SECONDARY_PASSWORD` in **Render → Environment**, then deploy the backend. The password opens that user's isolated workspace and stays private in Render; no personal value belongs in the repository. It must differ from `OWNER_PASSWORD`. To share only selected material, use **Visitor access** inside the relevant workspace.
 
 <details>
 <summary><strong>Adding searchable PDFs to your workspace</strong></summary>
@@ -405,8 +405,7 @@ cd frontend && npm install && cd ..
 | Variable | Local default | Notes |
 |:---|:---|:---|
 | `FLASK_SECRET_KEY` | `station8-dev-secret-change-me` | Fine for local use. |
-| `OWNER_PASSWORD` | `owner` | Password for editor access. |
-| `VISITOR_PASSWORD` | `visitor` | Password for read-only access. |
+| `OWNER_PASSWORD` | `owner` | Password for the primary account. |
 | `SUPABASE_URL` / `SUPABASE_KEY` | — | Optional. Without these, data is stored in local JSON files under `data/`, images under `uploads/`, and PDFs under `pdfs/` — no account needed. |
 
 **3. Start the app.**
@@ -417,7 +416,7 @@ cd frontend && npm install && cd ..
 
 `start.sh` starts the Flask backend on `:5001` and the Vite frontend on `:5173` together — Ctrl+C stops both. It loads your `.env` automatically and activates the venv if one exists. The Vite dev server proxies all `/api` calls to the backend, so no `VITE_API_URL` is needed locally.
 
-Visit `http://127.0.0.1:5173` and log in with your `OWNER_PASSWORD` (default: `owner`).
+Visit `http://127.0.0.1:5173` and log in with `OWNER_PASSWORD` (default: `owner`).
 
 > **Google Docs and Sheets** work locally too. Add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_OAUTH_REDIRECT_URI=http://127.0.0.1:5001/api/google/callback` to your `.env`. Make sure `http://127.0.0.1:5001/api/google/callback` is listed as an authorized redirect URI in your Google Cloud credentials.
 
