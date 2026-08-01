@@ -85,8 +85,6 @@ ACCESS_OWNER = 'owner'
 ACCESS_VISITOR = 'visitor'
 PRIMARY_ACCOUNT_ID = 'primary'
 SECONDARY_ACCOUNT_ID = 'secondary'
-ACCOUNT_LOGIN_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._+@-]{1,127}$')
-ACCOUNT_PASSWORD_MIN_LENGTH = 12
 ACCOUNT_STORAGE_PREFIX = 'account'
 GLOBAL_STORAGE_BASENAMES = frozenset({'auth.json', 'accounts.json'})
 SECONDARY_ACCOUNT_PASSWORD_ENV = 'S8_SECONDARY_PASSWORD'
@@ -190,9 +188,7 @@ def handle_options():
 
 def _safe_account_id(value):
     account_id = str(value or '').strip().lower()
-    if account_id == PRIMARY_ACCOUNT_ID:
-        return account_id
-    return account_id if re.fullmatch(r'[a-z0-9-]{3,64}', account_id) else None
+    return account_id if account_id in {PRIMARY_ACCOUNT_ID, SECONDARY_ACCOUNT_ID} else None
 
 
 def _current_workspace_account_id():
@@ -453,20 +449,15 @@ def _verify_visitor_password(password):
     return check_password_hash(stored_hash, password)
 
 
-def _normalize_account_login(value):
-    return str(value or '').strip().lower()
-
-
 def _normalize_account(source):
     source = dict(source or {})
-    account_id = _safe_account_id(source.get('id')) or uuid.uuid4().hex[:12]
-    login = _normalize_account_login(source.get('login'))
+    account_id = _safe_account_id(source.get('id'))
+    if not account_id:
+        return None
     now = datetime.now().isoformat()
     return {
         'id': account_id,
-        'login': login,
         'password_hash': str(source.get('password_hash') or ''),
-        'admin': bool(source.get('admin')),
         'active': source.get('active') is not False,
         'created_at': source.get('created_at') or now,
         'updated_at': source.get('updated_at') or source.get('created_at') or now,
@@ -476,9 +467,7 @@ def _normalize_account(source):
 def _primary_account():
     return _normalize_account({
         'id': PRIMARY_ACCOUNT_ID,
-        'login': 'owner',
         'password_hash': '',
-        'admin': True,
         'active': True,
         'created_at': datetime.now().isoformat(),
     })
@@ -488,31 +477,21 @@ def _load_accounts():
     raw = _load(ACCOUNTS_FILE, [])
     accounts = []
     seen_ids = set()
-    seen_logins = set()
     if isinstance(raw, list):
         for item in raw:
             if not isinstance(item, dict):
                 continue
             account = _normalize_account(item)
-            if (
-                not ACCOUNT_LOGIN_RE.fullmatch(account['login'])
-                or account['id'] in seen_ids
-                or account['login'] in seen_logins
-            ):
+            if not account or account['id'] in seen_ids:
                 continue
             seen_ids.add(account['id'])
-            seen_logins.add(account['login'])
             accounts.append(account)
 
     if PRIMARY_ACCOUNT_ID not in seen_ids:
-        primary = _primary_account()
-        if primary['login'] in seen_logins:
-            primary['login'] = 'owner'
-        accounts.insert(0, primary)
+        accounts.insert(0, _primary_account())
     else:
         for account in accounts:
             if account['id'] == PRIMARY_ACCOUNT_ID:
-                account['admin'] = True
                 account['active'] = True
                 break
 
@@ -522,18 +501,17 @@ def _load_accounts():
 
 
 def _save_accounts(accounts):
-    normalized = [_normalize_account(account) for account in accounts]
+    normalized = [
+        normalized_account
+        for account in accounts
+        if (normalized_account := _normalize_account(account)) is not None
+    ]
     _save_json_strict(ACCOUNTS_FILE, normalized)
 
 
 def _find_account_by_id(account_id):
     account_id = _safe_account_id(account_id)
     return next((account for account in _load_accounts() if account['id'] == account_id), None)
-
-
-def _find_account_by_login(login):
-    login = _normalize_account_login(login)
-    return next((account for account in _load_accounts() if account['login'] == login), None)
 
 
 def _verify_account_password(account, password):
@@ -551,10 +529,7 @@ def _verify_account_password(account, password):
 
 
 def _account_client_record(account):
-    return {
-        key: account.get(key)
-        for key in ('id', 'login', 'admin', 'active', 'created_at', 'updated_at')
-    }
+    return {'id': account.get('id')} if account else None
 
 
 _accounts_lock = RLock()
@@ -563,28 +538,29 @@ _accounts_lock = RLock()
 def _sync_secondary_account_from_environment():
     """Provision the Render-managed secondary account at process startup."""
     password = os.getenv(SECONDARY_ACCOUNT_PASSWORD_ENV) or ''
-    if not password:
-        return None
-    if len(password) < 6:
-        raise RuntimeError(
-            f'{SECONDARY_ACCOUNT_PASSWORD_ENV} must be at least '
-            '6 characters'
-        )
-    if password != password.strip():
-        raise RuntimeError(f'{SECONDARY_ACCOUNT_PASSWORD_ENV} cannot start or end with a space')
-    if _verify_studio_password(password):
-        raise RuntimeError(f'{SECONDARY_ACCOUNT_PASSWORD_ENV} must differ from OWNER_PASSWORD')
-
     with _accounts_lock:
         accounts = _load_accounts()
         account = next((item for item in accounts if item['id'] == SECONDARY_ACCOUNT_ID), None)
+        if not password:
+            if account and account.get('active') is not False:
+                account['active'] = False
+                account['updated_at'] = datetime.now().isoformat()
+                _save_accounts(accounts)
+            return None
+        if len(password) < 6:
+            raise RuntimeError(
+                f'{SECONDARY_ACCOUNT_PASSWORD_ENV} must be at least 6 characters'
+            )
+        if password != password.strip():
+            raise RuntimeError(f'{SECONDARY_ACCOUNT_PASSWORD_ENV} cannot start or end with a space')
+        if _verify_studio_password(password):
+            raise RuntimeError(f'{SECONDARY_ACCOUNT_PASSWORD_ENV} must differ from OWNER_PASSWORD')
+
         now = datetime.now().isoformat()
         if account is None:
             account = _normalize_account({
                 'id': SECONDARY_ACCOUNT_ID,
-                'login': SECONDARY_ACCOUNT_ID,
                 'password_hash': generate_password_hash(password),
-                'admin': False,
                 'active': True,
                 'created_at': now,
                 'updated_at': now,
@@ -608,14 +584,6 @@ def _sync_secondary_account_from_environment():
 _sync_secondary_account_from_environment()
 
 
-def _serialize_account_mutation(fn):
-    @wraps(fn)
-    def wrapped(*args, **kwargs):
-        with _accounts_lock:
-            return fn(*args, **kwargs)
-    return wrapped
-
-
 def _current_account():
     if not has_request_context() or not session.get('studio_authed'):
         return None
@@ -629,12 +597,12 @@ LOGIN_LOCK_SECONDS = 15 * 60
 LOGIN_ATTEMPT_LIMIT = 8
 
 
-def _login_attempt_key(login):
-    return (request.remote_addr or 'unknown', _normalize_account_login(login) or PRIMARY_ACCOUNT_ID)
+def _login_attempt_key(scope):
+    return (request.remote_addr or 'unknown', str(scope or 'password-only'))
 
 
-def _login_retry_after(login):
-    key = _login_attempt_key(login)
+def _login_retry_after(scope):
+    key = _login_attempt_key(scope)
     now = time.time()
     with _login_attempts_lock:
         attempts = [stamp for stamp in _login_attempts.get(key, []) if now - stamp < LOGIN_LOCK_SECONDS]
@@ -648,14 +616,14 @@ def _login_retry_after(login):
         return max(1, int(LOGIN_LOCK_SECONDS - (now - attempts[0])))
 
 
-def _record_login_failure(login):
-    key = _login_attempt_key(login)
+def _record_login_failure(scope):
+    key = _login_attempt_key(scope)
     with _login_attempts_lock:
         _login_attempts.setdefault(key, []).append(time.time())
 
 
-def _clear_login_failures(login):
-    key = _login_attempt_key(login)
+def _clear_login_failures(scope):
+    key = _login_attempt_key(scope)
     with _login_attempts_lock:
         _login_attempts.pop(key, None)
 
@@ -1666,18 +1634,6 @@ def _studio_auth_required(fn):
     return wrapped
 
 
-def _admin_auth_required(fn):
-    @wraps(fn)
-    def wrapped(*args, **kwargs):
-        if not _is_studio_authed():
-            return jsonify({'error': 'Account login required'}), 401
-        account = _current_account()
-        if not account or not account.get('admin'):
-            return jsonify({'error': 'Administrator access required'}), 403
-        return fn(*args, **kwargs)
-    return wrapped
-
-
 def _viewer_auth_required(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
@@ -1794,7 +1750,6 @@ def auth_status():
         'visitor_profile_id': visitor_profile.get('id') if visitor_profile else None,
         'visitor_profile_name': visitor_profile.get('name') if visitor_profile else None,
         'account': _account_client_record(account) if account else None,
-        'is_admin': bool(account and account.get('admin') and access == ACCESS_OWNER),
         'configured': _auth_configured(),
         'setup_allowed': ALLOW_BROWSER_AUTH_SETUP,
         'requires_setup': _requires_access_setup() and ALLOW_BROWSER_AUTH_SETUP,
@@ -1870,7 +1825,6 @@ def auth_login():
             'authenticated': True,
             'access': ACCESS_OWNER,
             'account': _account_client_record(account),
-            'is_admin': bool(account.get('admin')),
         })
 
     visitor_matches = []
@@ -3360,126 +3314,6 @@ def patch_workspace():
         ws['owner'] = (data['owner'] or '').strip()
     _save(WORKSPACE_FILE, ws)
     return jsonify(ws)
-
-
-# ── Full user accounts ──────────────────────────────────────────────────────
-
-@app.route('/api/account', methods=['GET'])
-@_studio_auth_required
-def get_current_account():
-    return jsonify(_account_client_record(_current_account()))
-
-
-@app.route('/api/account', methods=['PATCH'])
-@_studio_auth_required
-@_serialize_account_mutation
-def patch_current_account():
-    data = request.get_json(silent=True) or {}
-    account_id = _current_workspace_account_id()
-    accounts = _load_accounts()
-    account = next((item for item in accounts if item['id'] == account_id), None)
-    if not account:
-        return jsonify({'error': 'Account not found'}), 404
-
-    new_password = str(data.get('new_password') or '')
-    if new_password:
-        current_password = str(data.get('current_password') or '')
-        if not _verify_account_password(account, current_password):
-            return jsonify({'error': 'Current password is incorrect'}), 401
-        if new_password != new_password.strip():
-            return jsonify({'error': 'Password cannot start or end with a space'}), 400
-        if len(new_password) < ACCOUNT_PASSWORD_MIN_LENGTH:
-            return jsonify({
-                'error': f'New password must be at least {ACCOUNT_PASSWORD_MIN_LENGTH} characters'
-            }), 400
-        account['password_hash'] = generate_password_hash(new_password)
-
-    account['updated_at'] = datetime.now().isoformat()
-    _save_accounts(accounts)
-    return jsonify(_account_client_record(account))
-
-
-@app.route('/api/accounts', methods=['GET'])
-@_admin_auth_required
-def list_accounts():
-    accounts = [_account_client_record(account) for account in _load_accounts()]
-    accounts.sort(key=lambda account: (account['id'] != PRIMARY_ACCOUNT_ID, account['login']))
-    return jsonify(accounts)
-
-
-@app.route('/api/accounts', methods=['POST'])
-@_admin_auth_required
-@_serialize_account_mutation
-def create_account():
-    data = request.get_json(silent=True) or {}
-    login = _normalize_account_login(data.get('login'))
-    password = str(data.get('password') or '')
-    if not ACCOUNT_LOGIN_RE.fullmatch(login):
-        return jsonify({
-            'error': 'Login must be at least 2 characters and use letters, numbers, or . _ + @ -'
-        }), 400
-    if len(password) < ACCOUNT_PASSWORD_MIN_LENGTH:
-        return jsonify({
-            'error': f'Password must be at least {ACCOUNT_PASSWORD_MIN_LENGTH} characters'
-        }), 400
-    if password != password.strip():
-        return jsonify({'error': 'Password cannot start or end with a space'}), 400
-    accounts = _load_accounts()
-    if any(account['login'] == login for account in accounts):
-        return jsonify({'error': 'That login is already in use'}), 409
-    now = datetime.now().isoformat()
-    account = _normalize_account({
-        'id': uuid.uuid4().hex[:12],
-        'login': login,
-        'password_hash': generate_password_hash(password),
-        'admin': False,
-        'active': True,
-        'created_at': now,
-        'updated_at': now,
-    })
-    accounts.append(account)
-    _save_accounts(accounts)
-    return jsonify(_account_client_record(account)), 201
-
-
-@app.route('/api/accounts/<account_id>', methods=['PATCH'])
-@_admin_auth_required
-@_serialize_account_mutation
-def patch_account(account_id):
-    data = request.get_json(silent=True) or {}
-    account_id = _safe_account_id(account_id)
-    accounts = _load_accounts()
-    account = next((item for item in accounts if item['id'] == account_id), None)
-    if not account:
-        return jsonify({'error': 'Account not found'}), 404
-
-    if 'login' in data:
-        login = _normalize_account_login(data.get('login'))
-        if not ACCOUNT_LOGIN_RE.fullmatch(login):
-            return jsonify({'error': 'Invalid login'}), 400
-        if any(item['id'] != account_id and item['login'] == login for item in accounts):
-            return jsonify({'error': 'That login is already in use'}), 409
-        account['login'] = login
-    if 'active' in data:
-        if account_id == PRIMARY_ACCOUNT_ID:
-            return jsonify({'error': 'The primary account cannot be disabled'}), 400
-        account['active'] = data.get('active') is not False
-    password = str(data.get('password') or '')
-    if password:
-        if account_id == _current_workspace_account_id():
-            return jsonify({
-                'error': 'Use the current password to change your own password.'
-            }), 400
-        if password != password.strip():
-            return jsonify({'error': 'Password cannot start or end with a space'}), 400
-        if len(password) < ACCOUNT_PASSWORD_MIN_LENGTH:
-            return jsonify({
-                'error': f'Password must be at least {ACCOUNT_PASSWORD_MIN_LENGTH} characters'
-            }), 400
-        account['password_hash'] = generate_password_hash(password)
-    account['updated_at'] = datetime.now().isoformat()
-    _save_accounts(accounts)
-    return jsonify(_account_client_record(account))
 
 
 @app.route('/api/access-profiles', methods=['GET'])

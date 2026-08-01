@@ -187,7 +187,7 @@ The frontend is the website your visitors see — the canvas, search, everything
 
 Visit your Vercel URL. The backend may take 30–90 seconds to wake up on the first visit (Render free tier cold start). Once it's ready, use the `OWNER_PASSWORD` you set in step 3.
 
-For a second full user, set `S8_SECONDARY_PASSWORD` in **Render → Environment**, then deploy the backend. The password opens that user's isolated workspace and stays private in Render; no personal value belongs in the repository. It must differ from `OWNER_PASSWORD`. To share only selected material, use **Visitor access** inside the relevant workspace.
+For a second full user, set `S8_SECONDARY_PASSWORD` in **Render → Environment**, then deploy the backend. The password opens that user's isolated workspace and stays private in Render; no personal value belongs in the repository. It must differ from `OWNER_PASSWORD`. Removing the variable disables secondary access without deleting that workspace; restoring it re-enables the same data. To share only selected material, use **Visitor access** inside the relevant workspace.
 
 <details>
 <summary><strong>Adding searchable PDFs to your workspace</strong></summary>

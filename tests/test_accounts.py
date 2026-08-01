@@ -63,15 +63,13 @@ class AccountIsolationTest(unittest.TestCase):
     def login(self, password):
         return self.client.post('/api/auth/login', json={'password': password})
 
-    def create_secondary_account(self, login='secondary-user', password='correct horse battery'):
-        response = self.client.post('/api/accounts', json={
-            'login': login,
-            'password': password,
-        })
-        self.assertEqual(response.status_code, 201, response.get_data(as_text=True))
-        return response.get_json()
+    def provision_secondary_account(self, password='correct horse battery'):
+        os.environ[server.SECONDARY_ACCOUNT_PASSWORD_ENV] = password
+        account = server._sync_secondary_account_from_environment()
+        self.assertEqual(account, {'id': server.SECONDARY_ACCOUNT_ID})
+        return account
 
-    def test_new_account_is_a_full_owner_with_isolated_storage(self):
+    def test_secondary_account_is_a_full_owner_with_isolated_storage(self):
         self.assertEqual(self.login('owner').status_code, 200)
         primary_board = self.client.post('/api/boards', json={'name': 'Private primary board'}).get_json()
         shared_asset = 'shared-test-image.png'
@@ -84,7 +82,7 @@ class AccountIsolationTest(unittest.TestCase):
         ).status_code, 204)
         with open(os.path.join(self.upload_dir, shared_asset), 'wb') as asset_file:
             asset_file.write(b'test-image')
-        secondary = self.create_secondary_account()
+        secondary = self.provision_secondary_account()
 
         stored_accounts = server._load_local_json(server.ACCOUNTS_FILE, [])
         stored_secondary = next(item for item in stored_accounts if item['id'] == secondary['id'])
@@ -95,8 +93,8 @@ class AccountIsolationTest(unittest.TestCase):
         secondary_login = self.login('correct horse battery')
         self.assertEqual(secondary_login.status_code, 200, secondary_login.get_data(as_text=True))
         self.assertEqual(secondary_login.get_json()['access'], server.ACCESS_OWNER)
-        self.assertFalse(secondary_login.get_json()['is_admin'])
-        self.assertEqual(self.client.get('/api/accounts').status_code, 403)
+        self.assertEqual(secondary_login.get_json()['account'], {'id': server.SECONDARY_ACCOUNT_ID})
+        self.assertEqual(self.client.get('/api/accounts').status_code, 404)
         workspace = self.client.get('/api/workspace').get_json()
         self.assertEqual(workspace['name'], 'Station 8')
         self.assertEqual(workspace['owner'], 'Station 8')
@@ -136,7 +134,7 @@ class AccountIsolationTest(unittest.TestCase):
 
     def test_visitor_profile_password_opens_its_workspace(self):
         self.assertEqual(self.login('owner').status_code, 200)
-        self.create_secondary_account()
+        self.provision_secondary_account()
         self.client.post('/api/auth/logout')
         self.assertEqual(self.login('correct horse battery').status_code, 200)
         board = self.client.post('/api/boards', json={'name': 'Secondary shared board'}).get_json()
@@ -145,7 +143,7 @@ class AccountIsolationTest(unittest.TestCase):
             f"/api/boards/{board['id']}", json={'snapshot': snapshot}
         ).status_code, 204)
         profile = self.client.post('/api/access-profiles', json={
-            'name': 'Family',
+            'name': 'Shared access',
             'password': 'visitor access phrase',
             'workspace': True,
         })
@@ -161,50 +159,26 @@ class AccountIsolationTest(unittest.TestCase):
         self.assertEqual(detail.status_code, 200, detail.get_data(as_text=True))
         self.assertEqual(detail.get_json()['snapshot'], snapshot)
 
-    def test_admin_can_disable_account_without_deleting_its_data(self):
+    def test_removing_render_password_revokes_secondary_without_deleting_its_data(self):
         self.assertEqual(self.login('owner').status_code, 200)
-        secondary = self.create_secondary_account()
+        secondary = self.provision_secondary_account()
         self.client.post('/api/auth/logout')
         self.assertEqual(self.login('correct horse battery').status_code, 200)
         board = self.client.post('/api/boards', json={'name': 'Preserved'}).get_json()
 
         self.client.post('/api/auth/logout')
-        self.assertEqual(self.login('owner').status_code, 200)
-        disabled = self.client.patch(f"/api/accounts/{secondary['id']}", json={'active': False})
-        self.assertEqual(disabled.status_code, 200)
-        self.assertFalse(disabled.get_json()['active'])
-        self.client.post('/api/auth/logout')
+        os.environ.pop(server.SECONDARY_ACCOUNT_PASSWORD_ENV, None)
+        self.assertIsNone(server._sync_secondary_account_from_environment())
         self.assertEqual(self.login('correct horse battery').status_code, 401)
         tenant_index = os.path.join(self.data_dir, 'accounts', secondary['id'], 'boards.json')
         self.assertTrue(os.path.exists(tenant_index))
         with open(tenant_index, encoding='utf-8') as tenant_file:
             self.assertIn(board['id'], tenant_file.read())
 
-    def test_users_change_their_own_password_with_current_password(self):
-        self.assertEqual(self.login('owner').status_code, 200)
-        secondary = self.create_secondary_account()
-        own_admin_reset = self.client.patch(
-            '/api/accounts/primary', json={'password': 'replacement owner phrase'}
-        )
-        self.assertEqual(own_admin_reset.status_code, 400)
-
-        self.client.post('/api/auth/logout')
+        self.provision_secondary_account()
         self.assertEqual(self.login('correct horse battery').status_code, 200)
-        wrong_current = self.client.patch('/api/account', json={
-            'current_password': 'not the current password',
-            'new_password': 'replacement account phrase',
-        })
-        self.assertEqual(wrong_current.status_code, 401)
-        changed = self.client.patch('/api/account', json={
-            'current_password': 'correct horse battery',
-            'new_password': 'replacement account phrase',
-        })
-        self.assertEqual(changed.status_code, 200, changed.get_data(as_text=True))
-
-        self.client.post('/api/auth/logout')
-        self.assertEqual(self.login('correct horse battery').status_code, 401)
-        self.assertEqual(self.login('replacement account phrase').status_code, 200)
-        self.assertEqual(self.client.get('/api/account').get_json()['id'], secondary['id'])
+        visible = self.client.get('/api/boards').get_json()
+        self.assertEqual([item['id'] for item in visible], [board['id']])
 
     def test_repeated_bad_logins_are_rate_limited(self):
         for _attempt in range(server.LOGIN_ATTEMPT_LIMIT):
@@ -218,11 +192,12 @@ class AccountIsolationTest(unittest.TestCase):
     def test_render_environment_provisions_and_updates_secondary_password(self):
         os.environ[server.SECONDARY_ACCOUNT_PASSWORD_ENV] = 'initial account phrase'
         account = server._sync_secondary_account_from_environment()
-        self.assertEqual(account['id'], server.SECONDARY_ACCOUNT_ID)
-        self.assertFalse(account['admin'])
+        self.assertEqual(account, {'id': server.SECONDARY_ACCOUNT_ID})
 
         stored = server._load_local_json(server.ACCOUNTS_FILE, [])
         self.assertNotIn('initial account phrase', str(stored))
+        self.assertNotIn('login', stored[0])
+        self.assertNotIn('admin', stored[0])
         self.assertEqual(self.login('initial account phrase').status_code, 200)
 
         self.client.post('/api/auth/logout')
@@ -230,6 +205,42 @@ class AccountIsolationTest(unittest.TestCase):
         server._sync_secondary_account_from_environment()
         self.assertEqual(self.login('initial account phrase').status_code, 401)
         self.assertEqual(self.login('replacement account phrase').status_code, 200)
+
+    def test_deployed_account_records_drop_old_login_and_admin_metadata(self):
+        now = '2026-08-01T00:00:00'
+        server._save_json_strict(server.ACCOUNTS_FILE, [
+            {
+                'id': server.PRIMARY_ACCOUNT_ID,
+                'login': 'owner',
+                'password_hash': '',
+                'admin': True,
+                'active': True,
+                'created_at': now,
+                'updated_at': now,
+            },
+            {
+                'id': server.SECONDARY_ACCOUNT_ID,
+                'login': 'secondary',
+                'password_hash': server.generate_password_hash('existing account phrase'),
+                'admin': False,
+                'active': True,
+                'created_at': now,
+                'updated_at': now,
+            },
+        ])
+        os.environ[server.SECONDARY_ACCOUNT_PASSWORD_ENV] = 'existing account phrase'
+
+        server._sync_secondary_account_from_environment()
+
+        stored = server._load_local_json(server.ACCOUNTS_FILE, [])
+        self.assertEqual([item['id'] for item in stored], [
+            server.PRIMARY_ACCOUNT_ID,
+            server.SECONDARY_ACCOUNT_ID,
+        ])
+        for item in stored:
+            self.assertNotIn('login', item)
+            self.assertNotIn('admin', item)
+        self.assertEqual(self.login('existing account phrase').status_code, 200)
 
 
 if __name__ == '__main__':
