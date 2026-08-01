@@ -13,7 +13,7 @@ install.packages("/path/to/r-package/station8", repos = NULL, type = "source")
 station8::configure()
 ```
 
-This prompts for your hub URL (your Render backend URL) and your owner password, then stores a long-lived token at `~/.station8/token`.
+This prompts for your hub URL (your Render backend URL) and Station 8 password, then stores a long-lived account-scoped token at `~/.station8/token`.
 
 Then add this to `~/.Rprofile`:
 

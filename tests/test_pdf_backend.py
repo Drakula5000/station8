@@ -107,6 +107,7 @@ class PdfBackendTest(unittest.TestCase):
         'WORKSPACE_FILE': 'workspace.json',
         'ACCESS_PROFILES_FILE': 'access_profiles.json',
         'AUTH_FILE': 'auth.json',
+        'ACCOUNTS_FILE': 'accounts.json',
         'REPORTS_FILE': 'reports.json',
         'R_TOKENS_FILE': 'r_tokens.json',
         'PDFS_FILE': 'pdfs.json',
