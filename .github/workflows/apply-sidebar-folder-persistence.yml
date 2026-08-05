@@ -1,6 +1,10 @@
 name: Apply sidebar folder persistence
 
 on:
+  push:
+    branches: [fix/sidebar-folder-persistence]
+    paths:
+      - .github/workflows/apply-sidebar-folder-persistence.yml
   pull_request:
     branches: [main]
     paths:
@@ -16,12 +20,12 @@ env:
 
 jobs:
   apply:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: fix/sidebar-folder-persistence
           fetch-depth: 0
 
       - name: Apply the App wiring
@@ -33,6 +37,9 @@ jobs:
           path = Path('frontend/src/App.jsx')
           text = path.read_text()
 
+          def lines(*items):
+              return '\n'.join(items)
+
           def replace_once(old, new, label):
               global text
               count = text.count(old)
@@ -41,67 +48,80 @@ jobs:
               text = text.replace(old, new, 1)
 
           replace_once(
-              "import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'\nimport './styles/index.css'",
-              "import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'\nimport { loadFolderExpansionState, mergeFolderExpansionDefaults, saveFolderExpansionState } from './sidebarFolderState'\nimport './styles/index.css'",
+              lines(
+                  "import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'",
+                  "import './styles/index.css'",
+              ),
+              lines(
+                  "import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'",
+                  "import { loadFolderExpansionState, mergeFolderExpansionDefaults, saveFolderExpansionState } from './sidebarFolderState'",
+                  "import './styles/index.css'",
+              ),
               'sidebar folder-state import',
           )
 
           replace_once(
               "  const [expandedFolders, setExpandedFolders] = useState({})",
-              "  const [expandedFolders, setExpandedFolders] = useState(() => loadFolderExpansionState(\n    typeof window !== 'undefined' ? window.localStorage : null\n  ))",
+              lines(
+                  "  const [expandedFolders, setExpandedFolders] = useState(() => loadFolderExpansionState(",
+                  "    typeof window !== 'undefined' ? window.localStorage : null",
+                  "  ))",
+              ),
               'persistent expandedFolders initializer',
           )
 
           replace_once(
-              """  useEffect(() => {
-              foldersRef.current = folders
-            }, [folders])
-
-            useEffect(() => {
-              try {
-                window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed))
-""",
-              """  useEffect(() => {
-              foldersRef.current = folders
-            }, [folders])
-
-            useEffect(() => {
-              saveFolderExpansionState(
-                typeof window !== 'undefined' ? window.localStorage : null,
-                expandedFolders,
-              )
-            }, [expandedFolders])
-
-            useEffect(() => {
-              try {
-                window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed))
-""",
+              lines(
+                  "  useEffect(() => {",
+                  "    foldersRef.current = folders",
+                  "  }, [folders])",
+                  "",
+                  "  useEffect(() => {",
+                  "    try {",
+                  "      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed))",
+              ),
+              lines(
+                  "  useEffect(() => {",
+                  "    foldersRef.current = folders",
+                  "  }, [folders])",
+                  "",
+                  "  useEffect(() => {",
+                  "    saveFolderExpansionState(",
+                  "      typeof window !== 'undefined' ? window.localStorage : null,",
+                  "      expandedFolders,",
+                  "    )",
+                  "  }, [expandedFolders])",
+                  "",
+                  "  useEffect(() => {",
+                  "    try {",
+                  "      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed))",
+              ),
               'folder-state persistence effect',
           )
 
           replace_once(
-              """      setExpandedFolders((current) => {
-                const next = { ...current }
-                for (const folder of nextFolders) {
-                  if (!(folder.id in next)) next[folder.id] = true
-                }
-                return next
-              })
-""",
-              """      setExpandedFolders((current) => mergeFolderExpansionDefaults(current, nextFolders))
-""",
+              lines(
+                  "      setExpandedFolders((current) => {",
+                  "        const next = { ...current }",
+                  "        for (const folder of nextFolders) {",
+                  "          if (!(folder.id in next)) next[folder.id] = true",
+                  "        }",
+                  "        return next",
+                  "      })",
+              ),
+              "      setExpandedFolders((current) => mergeFolderExpansionDefaults(current, nextFolders))",
               'folder default merge',
           )
 
           replace_once(
-              """      setActiveId(nextActive)
-              if (nextActive) {
-                const item = (nextDocsByKind[nextActive.type] || []).find(d => d.id === nextActive.id)
-                if (item?.folder_id) expandFolderPath(item.folder_id, nextFolders)
-              }
-""",
-              """      setActiveId(nextActive)
-""",
+              lines(
+                  "      setActiveId(nextActive)",
+                  "      if (nextActive) {",
+                  "        const item = (nextDocsByKind[nextActive.type] || []).find(d => d.id === nextActive.id)",
+                  "        if (item?.folder_id) expandFolderPath(item.folder_id, nextFolders)",
+                  "      }",
+              ),
+              "      setActiveId(nextActive)",
               'remove refresh-time forced expansion',
           )
 
@@ -144,4 +164,4 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add frontend/src/App.jsx frontend/src/sidebarFolderState.js frontend/src/sidebarFolderState.test.js .github/workflows
           git commit -m "fix: persist sidebar folder expansion state"
-          git push origin HEAD:${{ github.head_ref }}
+          git push origin HEAD:fix/sidebar-folder-persistence
