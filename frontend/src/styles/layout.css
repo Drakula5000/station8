@@ -535,6 +535,21 @@
 .tree-item-shell.is-dragging {
   opacity: 0.46;
 }
+.tree-item-shell.is-drop-before::before,
+.tree-item-shell.is-drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  height: 0.125rem;
+  border-radius: 999px;
+  background: var(--s8-accent);
+  box-shadow: 0 0 0.375rem var(--s8-accent-dim);
+  pointer-events: none;
+  z-index: 3;
+}
+.tree-item-shell.is-drop-before::before { top: -0.0625rem; }
+.tree-item-shell.is-drop-after::after { bottom: -0.0625rem; }
 .sb-item {
   display: flex; align-items: center; gap: 0.375rem;
   padding: 0.3125rem 0.5rem; border-radius: 0.4375rem; width: 100%;
