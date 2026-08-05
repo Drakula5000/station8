@@ -10,6 +10,7 @@ import PdfUploadPanel from './components/PdfUploadPanel'
 import { needsPdfTextReindex } from './pdf'
 import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'
 import { loadFolderExpansionState, mergeFolderExpansionDefaults, saveFolderExpansionState } from './sidebarFolderState'
+import { appendSidebarDocument, reorderSidebarDocuments, sidebarDocumentKey, sortSidebarDocuments } from './sidebarDocumentOrder'
 import './styles/index.css'
 
 const API = import.meta.env.VITE_API_URL || ''
@@ -498,6 +499,7 @@ export default function App() {
   const [dragItem, setDragItem] = useState(null)
   const dragItemRef = useRef(null)
   const [dropTargetFolderId, setDropTargetFolderId] = useState(null)
+  const [dropTargetDoc, setDropTargetDoc] = useState(null)
   const [externalPdfDragActive, setExternalPdfDragActive] = useState(false)
   const externalDragDepthRef = useRef(0)
   const folderHoverExpandTimerRef = useRef(null)
@@ -619,6 +621,10 @@ export default function App() {
     report: reports,
     pdf: pdfs,
   }), [boards, gdocs, gsheets, reports, pdfs])
+  const allSidebarDocs = useMemo(
+    () => DOC_KINDS.flatMap(kind => (docsByKind[kind] || []).map(item => ({ ...item, type: kind }))),
+    [docsByKind],
+  )
   const activeDoc = activeId
     ? (docsByKind[activeId.type] || []).find(item => item.id === activeId.id) || null
     : null
@@ -1534,6 +1540,18 @@ export default function App() {
     else if (kind === 'pdf') setPdfs(updater)
   }
 
+  const persistSidebarOrder = async (nextOrder, previousOrder) => {
+    setWorkspace(current => ({ ...(current || {}), sidebar_order: nextOrder }))
+    const updated = await fetchJsonPatch(`${API}/api/workspace`, { sidebar_order: nextOrder }, null)
+    if (!updated) {
+      setWorkspace(current => ({ ...(current || {}), sidebar_order: previousOrder }))
+      showError('Could not save the new sidebar order.')
+      return false
+    }
+    setWorkspace(updated)
+    return true
+  }
+
   const startRename = (item, isFolder) => {
     setRenameTarget({ id: item.id, type: isFolder ? 'folder' : item.type })
     setRenameValue(item.name || '')
@@ -1716,6 +1734,10 @@ export default function App() {
     if (!docsByFolder[key]) docsByFolder[key] = []
     docsByFolder[key].push(doc)
   }
+  const sidebarOrder = workspace?.sidebar_order || {}
+  for (const [parentId, items] of Object.entries(docsByFolder)) {
+    docsByFolder[parentId] = sortSidebarDocuments(items, sidebarOrder, parentId)
+  }
 
   const foldersByParent = {}
   for (const folder of [...folders].sort(compareByName)) {
@@ -1735,8 +1757,9 @@ export default function App() {
     const priv = isEffectivelyPrivate(doc, false)
     const isDragging = dragItem?.type === doc.type && dragItem.id === doc.id
     const isRenaming = renameTarget?.id === doc.id && renameTarget.type === doc.type
+    const dropPosition = dropTargetDoc?.key === sidebarDocumentKey(doc) ? dropTargetDoc.position : null
     return (
-      <div key={`${doc.type}-${doc.id}`} className={`tree-item-shell ${active ? 'active' : ''}${isDragging ? ' is-dragging' : ''}${isRenaming ? ' is-renaming' : ''}`}>
+      <div key={`${doc.type}-${doc.id}`} className={`tree-item-shell ${active ? 'active' : ''}${isDragging ? ' is-dragging' : ''}${isRenaming ? ' is-renaming' : ''}${dropPosition ? ` is-drop-${dropPosition}` : ''}`}>
         {isRenaming ? (
           <div
             className={`sb-item sb-item-main tree-row tree-doc ${priv ? 'sb-item-private' : ''}`}
@@ -1761,9 +1784,9 @@ export default function App() {
             style={{ paddingLeft: `${0.625 + depth * 1.125}rem` }}
             draggable={!readOnly}
             onDragEnd={handleItemDragEnd}
-            onDragOver={(event) => handleDocExternalDragOver(event, doc)}
+            onDragOver={(event) => handleDocDragOver(event, doc)}
             onDragStart={(event) => handleItemDragStart(event, doc)}
-            onDrop={(event) => handleDocExternalDrop(event, doc)}
+            onDrop={(event) => handleDocDrop(event, doc)}
             onClick={() => openDocument(doc.type, doc.id, doc.folder_id)}
             type="button"
           >
@@ -1989,6 +2012,7 @@ export default function App() {
     dragItemRef.current = null
     setDragItem(null)
     setDropTargetFolderId(null)
+    setDropTargetDoc(null)
   }
 
   const isExternalFileDrag = (dataTransfer) => Array.from(dataTransfer?.types || []).includes('Files')
@@ -2004,6 +2028,7 @@ export default function App() {
     clearFolderHoverExpand()
     setExternalPdfDragActive(false)
     setDropTargetFolderId(null)
+    setDropTargetDoc(null)
   }
 
   const scheduleFolderHoverExpand = (folderId) => {
@@ -2123,6 +2148,7 @@ export default function App() {
     dragItemRef.current = payload
     setDragItem(payload)
     setDropTargetFolderId(null)
+    setDropTargetDoc(null)
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', `${payload.type}:${payload.id}`)
   }
@@ -2138,46 +2164,62 @@ export default function App() {
       event.dataTransfer.dropEffect = 'copy'
       setExternalPdfDragActive(true)
       scheduleFolderHoverExpand(folderId)
+      setDropTargetDoc(null)
       if (dropTargetFolderId !== folderId) setDropTargetFolderId(folderId)
       return
     }
     const dragged = dragItemRef.current
-    if (!canDropIntoFolder(dragged, folderId)) return
+    const canPlace = dragged?.type === 'folder'
+      ? canDropIntoFolder(dragged, folderId)
+      : Boolean(dragged)
+    if (!canPlace) return
     event.preventDefault()
     event.stopPropagation()
     event.dataTransfer.dropEffect = 'move'
+    setDropTargetDoc(null)
     if (dropTargetFolderId !== folderId) setDropTargetFolderId(folderId)
   }
 
   const moveDraggedItem = async (targetFolderId) => {
     const dragged = dragItemRef.current
-    if (!canDropIntoFolder(dragged, targetFolderId)) {
+    if (!dragged) return
+    if (dragged.type === 'folder' && !canDropIntoFolder(dragged, targetFolderId)) {
       clearDragState()
       return
     }
 
-    const url = dragged.type === 'folder'
-      ? `${API}/api/folders/${dragged.id}`
-      : `${API}/api/${DOC_KIND_API[dragged.type]}/${dragged.id}`
-    const body = dragged.type === 'folder'
-      ? { parent_id: targetFolderId || null }
-      : { folder_id: targetFolderId || null }
+    const normalizedTargetId = targetFolderId || null
+    const sameFolder = dragged.type !== 'folder' && (dragged.folder_id || null) === normalizedTargetId
+    let updated = dragged
 
-    const updated = await fetchJsonPatch(url, body)
-
-    if (!updated) {
-      showError(`Could not move ${dragged.name}.`)
-      clearDragState()
-      return
+    if (dragged.type === 'folder' || !sameFolder) {
+      const url = dragged.type === 'folder'
+        ? `${API}/api/folders/${dragged.id}`
+        : `${API}/api/${DOC_KIND_API[dragged.type]}/${dragged.id}`
+      const body = dragged.type === 'folder'
+        ? { parent_id: normalizedTargetId }
+        : { folder_id: normalizedTargetId }
+      updated = await fetchJsonPatch(url, body)
+      if (!updated) {
+        showError(`Could not move ${dragged.name}.`)
+        clearDragState()
+        return
+      }
     }
 
     if (dragged.type === 'folder') {
       setFolders(current => current.map(folder => folder.id === updated.id ? updated : folder))
     } else {
-      setDocsForKind(dragged.type, items => items.map(i => i.id === updated.id ? updated : i))
+      if (!sameFolder) {
+        setDocsForKind(dragged.type, items => items.map(i => i.id === updated.id ? updated : i))
+      }
+      const previousOrder = workspace?.sidebar_order || {}
+      const nextOrder = appendSidebarDocument(previousOrder, allSidebarDocs, dragged, normalizedTargetId)
+      const saved = await persistSidebarOrder(nextOrder, previousOrder)
+      if (!saved && !sameFolder) await refresh()
     }
 
-    if (targetFolderId) expandFolderPath(targetFolderId)
+    if (normalizedTargetId) expandFolderPath(normalizedTargetId)
     clearDragState()
   }
 
@@ -2191,31 +2233,85 @@ export default function App() {
       return
     }
     const dragged = dragItemRef.current
-    if (!canDropIntoFolder(dragged, folderId)) return
+    const canPlace = dragged?.type === 'folder'
+      ? canDropIntoFolder(dragged, folderId)
+      : Boolean(dragged)
+    if (!canPlace) return
     event.preventDefault()
     event.stopPropagation()
     await moveDraggedItem(folderId)
   }
 
-  const handleDocExternalDragOver = (event, doc) => {
-    if (!isExternalFileDrag(event.dataTransfer)) return
+  const handleDocDragOver = (event, doc) => {
+    if (isExternalFileDrag(event.dataTransfer)) {
+      event.preventDefault()
+      event.stopPropagation()
+      event.dataTransfer.dropEffect = 'copy'
+      setExternalPdfDragActive(true)
+      clearFolderHoverExpand()
+      setDropTargetDoc(null)
+      const targetFolderId = doc.folder_id || ROOT_FOLDER
+      if (dropTargetFolderId !== targetFolderId) setDropTargetFolderId(targetFolderId)
+      return
+    }
+
+    const dragged = dragItemRef.current
+    if (!dragged || dragged.type === 'folder' || sidebarDocumentKey(dragged) === sidebarDocumentKey(doc)) return
     event.preventDefault()
     event.stopPropagation()
-    event.dataTransfer.dropEffect = 'copy'
-    setExternalPdfDragActive(true)
-    clearFolderHoverExpand()
-    const targetFolderId = doc.folder_id || ROOT_FOLDER
-    if (dropTargetFolderId !== targetFolderId) setDropTargetFolderId(targetFolderId)
+    event.dataTransfer.dropEffect = 'move'
+    const rect = event.currentTarget.getBoundingClientRect()
+    const position = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    setDropTargetFolderId(null)
+    setDropTargetDoc({ key: sidebarDocumentKey(doc), position })
   }
 
-  const handleDocExternalDrop = async (event, doc) => {
-    if (!isExternalFileDrag(event.dataTransfer)) return
+  const handleDocDrop = async (event, doc) => {
+    if (isExternalFileDrag(event.dataTransfer)) {
+      event.preventDefault()
+      event.stopPropagation()
+      const files = Array.from(event.dataTransfer.files || [])
+      const targetFolderId = doc.folder_id || null
+      finishExternalPdfDrag()
+      if (files.length) await uploadDroppedPdfs(files, targetFolderId)
+      return
+    }
+
+    const dragged = dragItemRef.current
+    if (!dragged || dragged.type === 'folder' || sidebarDocumentKey(dragged) === sidebarDocumentKey(doc)) {
+      clearDragState()
+      return
+    }
     event.preventDefault()
     event.stopPropagation()
-    const files = Array.from(event.dataTransfer.files || [])
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const fallbackPosition = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    const position = dropTargetDoc?.key === sidebarDocumentKey(doc)
+      ? dropTargetDoc.position
+      : fallbackPosition
     const targetFolderId = doc.folder_id || null
-    finishExternalPdfDrag()
-    if (files.length) await uploadDroppedPdfs(files, targetFolderId)
+    const previousOrder = workspace?.sidebar_order || {}
+    const nextOrder = reorderSidebarDocuments(previousOrder, allSidebarDocs, dragged, doc, position)
+    const movedFolders = (dragged.folder_id || null) !== targetFolderId
+
+    if (movedFolders) {
+      const updated = await fetchJsonPatch(
+        `${API}/api/${DOC_KIND_API[dragged.type]}/${dragged.id}`,
+        { folder_id: targetFolderId },
+        null,
+      )
+      if (!updated) {
+        showError(`Could not move ${dragged.name}.`)
+        clearDragState()
+        return
+      }
+      setDocsForKind(dragged.type, items => items.map(item => item.id === updated.id ? updated : item))
+    }
+
+    const saved = await persistSidebarOrder(nextOrder, previousOrder)
+    if (!saved && movedFolders) await refresh()
+    clearDragState()
   }
 
   const handleWorkspaceDragOver = (event) => {
@@ -2225,13 +2321,18 @@ export default function App() {
       event.dataTransfer.dropEffect = 'copy'
       setExternalPdfDragActive(true)
       clearFolderHoverExpand()
+      setDropTargetDoc(null)
       if (dropTargetFolderId !== ROOT_FOLDER) setDropTargetFolderId(ROOT_FOLDER)
       return
     }
     const dragged = dragItemRef.current
-    if (!canDropIntoFolder(dragged, null)) return
+    const canPlace = dragged?.type === 'folder'
+      ? canDropIntoFolder(dragged, null)
+      : Boolean(dragged)
+    if (!canPlace) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
+    setDropTargetDoc(null)
     if (dropTargetFolderId !== ROOT_FOLDER) setDropTargetFolderId(ROOT_FOLDER)
   }
 
@@ -2245,7 +2346,10 @@ export default function App() {
       return
     }
     const dragged = dragItemRef.current
-    if (!canDropIntoFolder(dragged, null)) return
+    const canPlace = dragged?.type === 'folder'
+      ? canDropIntoFolder(dragged, null)
+      : Boolean(dragged)
+    if (!canPlace) return
     event.preventDefault()
     await moveDraggedItem(null)
   }
@@ -2254,6 +2358,7 @@ export default function App() {
     if (externalPdfDragActive) return
     if (event.currentTarget.contains(event.relatedTarget)) return
     setDropTargetFolderId(null)
+    setDropTargetDoc(null)
   }
 
   const handleDelete = async () => {

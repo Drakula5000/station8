@@ -89,6 +89,8 @@ ACCOUNT_LOGIN_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._+@-]{1,127}$')
 ACCOUNT_PASSWORD_MIN_LENGTH = 12
 ACCOUNT_STORAGE_PREFIX = 'account'
 GLOBAL_STORAGE_BASENAMES = frozenset({'auth.json', 'accounts.json'})
+SIDEBAR_ROOT_KEY = '__root__'
+SIDEBAR_DOC_KEY_RE = re.compile(r'^(?:board|gdoc|gsheet|report|pdf):[A-Za-z0-9_-]{1,128}$')
 SECONDARY_ACCOUNT_PASSWORD_ENV = 'S8_SECONDARY_PASSWORD'
 
 MAX_REPORT_HTML_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -751,6 +753,28 @@ def _normalize_folder_id(folder_id, folders):
     return folder_id if folder_id in folder_ids else None
 
 
+def _normalize_sidebar_order(value, folder_ids):
+    if not isinstance(value, dict):
+        return {}
+    valid_parents = set(folder_ids) | {SIDEBAR_ROOT_KEY}
+    normalized = {}
+    for raw_parent, raw_items in value.items():
+        parent = str(raw_parent or '').strip()
+        if parent not in valid_parents or not isinstance(raw_items, list):
+            continue
+        items = []
+        seen = set()
+        for raw_key in raw_items[:10000]:
+            key = str(raw_key or '').strip()
+            if not SIDEBAR_DOC_KEY_RE.fullmatch(key) or key in seen:
+                continue
+            seen.add(key)
+            items.append(key)
+        if items:
+            normalized[parent] = items
+    return normalized
+
+
 def _normalize_workspace(ws):
     ws = dict(ws or {})
     if not ws.get('name'):
@@ -787,6 +811,7 @@ def _normalize_workspace(ws):
             folder['parent_id'] = None
 
     ws['folders'] = normalized
+    ws['sidebar_order'] = _normalize_sidebar_order(ws.get('sidebar_order'), valid_ids)
     return ws
 
 
@@ -3340,6 +3365,7 @@ def get_visitor_workspace():
     ws = _get_workspace()
     ws = dict(ws)
     ws['folders'] = _visitor_visible_folders(ws)
+    ws.pop('sidebar_order', None)
     profile = _current_access_profile()
     if profile:
         ws['visitor_profile'] = {
@@ -3358,6 +3384,9 @@ def patch_workspace():
         ws['name'] = (data['name'] or '').strip() or ws['name']
     if 'owner' in data:
         ws['owner'] = (data['owner'] or '').strip()
+    if 'sidebar_order' in data:
+        ws['sidebar_order'] = data.get('sidebar_order')
+    ws = _normalize_workspace(ws)
     _save(WORKSPACE_FILE, ws)
     return jsonify(ws)
 
