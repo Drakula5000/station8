@@ -5,11 +5,17 @@ import {
   FONT_FAMILIES,
   TEXT_PROPS,
   RichTextSVG,
+  Vec,
   getColorValue,
   getDefaultColorTheme,
+  isEqual,
   renderHtmlFromRichTextForMeasurement,
 } from 'tldraw'
-import { getStationTextExportMetrics, getStationTextFontSize } from './stationTextSizing'
+import {
+  getStationTextAnchorDelta,
+  getStationTextExportMetrics,
+  getStationTextFontSize,
+} from './stationTextSizing'
 
 const MIN_WIDTH = 16
 
@@ -32,6 +38,56 @@ const MIN_WIDTH = 16
 export class StationTextShapeUtil extends TextShapeUtil {
   getMinDimensions(shape) {
     return computeStationTextSize(this.editor, shape.props)
+  }
+
+  // TextShapeUtil's stock update hook calls a private tldraw measurement
+  // helper that still uses 18/24/36/44px. Because getMinDimensions above uses
+  // Station's compact sizes, centered and right-aligned auto-size text mixed
+  // two different width systems and accumulated a huge position shift on
+  // every keystroke. Reproduce the upstream anchoring behavior using Station
+  // measurements for both the previous and next shape.
+  onBeforeUpdate(prev, next) {
+    if (!next.props.autoSize) return undefined
+
+    const styleDidChange =
+      prev.props.size !== next.props.size ||
+      prev.props.textAlign !== next.props.textAlign ||
+      prev.props.font !== next.props.font ||
+      (prev.props.scale !== 1 && next.props.scale === 1)
+
+    const textDidChange = !isEqual(prev.props.richText, next.props.richText)
+    if (!styleDidChange && !textDidChange) return undefined
+
+    const boundsA = computeStationTextSize(this.editor, prev.props)
+    const boundsB = computeStationTextSize(this.editor, next.props)
+    const prevScale = prev.props.scale || 1
+    const nextScale = next.props.scale || 1
+    const wA = boundsA.width * prevScale
+    const hA = boundsA.height * prevScale
+    const wB = boundsB.width * nextScale
+    const hB = boundsB.height * nextScale
+    const delta = getStationTextAnchorDelta(
+      next.props.textAlign,
+      textDidChange,
+      { width: wA, height: hA },
+      { width: wB, height: hB },
+    )
+
+    if (delta) {
+      const rotatedDelta = new Vec(delta.x, delta.y)
+      rotatedDelta.rot(next.rotation)
+      return {
+        ...next,
+        x: next.x - rotatedDelta.x,
+        y: next.y - rotatedDelta.y,
+        props: { ...next.props, w: wB },
+      }
+    }
+
+    return {
+      ...next,
+      props: { ...next.props, w: wB },
+    }
   }
 
   toSvg(shape, ctx) {
