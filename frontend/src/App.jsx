@@ -9,6 +9,7 @@ import PdfViewer from './components/PdfViewer'
 import PdfUploadPanel from './components/PdfUploadPanel'
 import { needsPdfTextReindex } from './pdf'
 import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'
+import { loadFolderExpansionState, mergeFolderExpansionDefaults, saveFolderExpansionState } from './sidebarFolderState'
 import './styles/index.css'
 
 const API = import.meta.env.VITE_API_URL || ''
@@ -396,7 +397,9 @@ export default function App() {
   const [pdfs, setPdfs] = useState([])
   const [folders, setFolders] = useState([])
   const foldersRef = useRef([])
-  const [expandedFolders, setExpandedFolders] = useState({})
+  const [expandedFolders, setExpandedFolders] = useState(() => loadFolderExpansionState(
+    typeof window !== 'undefined' ? window.localStorage : null
+  ))
   const [route, setRoute] = useState(() => parseRoute())
   // Initialize activeId from URL immediately to avoid flash of database home on refresh
   const [activeId, setActiveId] = useState(() => {
@@ -675,6 +678,13 @@ export default function App() {
   }, [folders])
 
   useEffect(() => {
+    saveFolderExpansionState(
+      typeof window !== 'undefined' ? window.localStorage : null,
+      expandedFolders,
+    )
+  }, [expandedFolders])
+
+  useEffect(() => {
     try {
       window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed))
     } catch {
@@ -801,13 +811,7 @@ export default function App() {
       setReports(nextDocsByKind.report || [])
       setPdfs(nextDocsByKind.pdf || [])
       setFolders(nextFolders)
-      setExpandedFolders((current) => {
-        const next = { ...current }
-        for (const folder of nextFolders) {
-          if (!(folder.id in next)) next[folder.id] = true
-        }
-        return next
-      })
+      setExpandedFolders((current) => mergeFolderExpansionDefaults(current, nextFolders))
       setWorkspace(ws)
       const routedDoc = route.doc && nextDocsByKind[route.doc.type]?.find(item => item.id === route.doc.id)
       const nextActive = routedDoc
@@ -816,10 +820,6 @@ export default function App() {
         ? null
         : pickNextActiveDoc(currentActiveId, nextDocsByKind)
       setActiveId(nextActive)
-      if (nextActive) {
-        const item = (nextDocsByKind[nextActive.type] || []).find(d => d.id === nextActive.id)
-        if (item?.folder_id) expandFolderPath(item.folder_id, nextFolders)
-      }
     }
 
     const prefix = viewerMode === 'visitor' ? 'visitor/' : ''
@@ -841,7 +841,7 @@ export default function App() {
     }
     if (ownerMode && ws && !ws.owner && !ownerPromptDismissed) setOwnerPromptOpen(true)
     applyResult(nextDocsByKind, ws?.folders || [], ws)
-  }, [auth.authenticated, auth.loading, expandFolderPath, ownerDatabaseMode, ownerMode, ownerPromptDismissed, route.doc, viewerMode])
+  }, [auth.authenticated, auth.loading, ownerDatabaseMode, ownerMode, ownerPromptDismissed, route.doc, viewerMode])
 
   useEffect(() => {
     refresh()
