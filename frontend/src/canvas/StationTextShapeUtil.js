@@ -9,18 +9,9 @@ import {
   getDefaultColorTheme,
   renderHtmlFromRichTextForMeasurement,
 } from 'tldraw'
-
-// Station-specific text-shape font sizes — much smaller than tldraw's
-// defaults (s:18, m:24, l:36, xl:44), which feel oversized on a research
-// canvas where text shapes are usually annotation labels next to other
-// content. The 's' default produces a compact ~8px label.
-export const STATION_TEXT_FONT_SIZES = Object.freeze({ s: 8, m: 12, l: 16, xl: 22 })
+import { getStationTextExportMetrics, getStationTextFontSize } from './stationTextSizing'
 
 const MIN_WIDTH = 16
-
-export function getStationTextFontSize(size) {
-  return STATION_TEXT_FONT_SIZES[size] ?? STATION_TEXT_FONT_SIZES.s
-}
 
 // We override `getMinDimensions` so the bounding box is sized for our
 // smaller font; the actual rendered font-size is overridden via CSS in
@@ -44,13 +35,13 @@ export class StationTextShapeUtil extends TextShapeUtil {
   }
 
   toSvg(shape, ctx) {
-    const scale = shape.props.scale || 1
     const bounds = this.editor.getShapeGeometry(shape).bounds
-    const exportBounds = new Box(0, 0, bounds.width / scale, bounds.height / scale)
+    const metrics = getStationTextExportMetrics(shape.props, bounds)
+    const exportBounds = new Box(0, 0, metrics.width, metrics.height)
     const theme = getDefaultColorTheme(ctx)
 
     return createElement(RichTextSVG, {
-      fontSize: getStationTextFontSize(shape.props.size),
+      fontSize: metrics.fontSize,
       font: shape.props.font,
       align: shape.props.textAlign,
       verticalAlign: 'middle',
