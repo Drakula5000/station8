@@ -1,0 +1,76 @@
+name: Apply sidebar document reorder fix
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - frontend/src/sidebarDocumentOrder.js
+      - frontend/src/sidebarDocumentOrder.test.js
+      - tests/test_sidebar_order.py
+      - ops/apply_sidebar_document_reorder.py
+      - .github/workflows/apply-sidebar-document-reorder.yml
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  apply-and-verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply source changes
+        run: python ops/apply_sidebar_document_reorder.py
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      - name: Backend import check
+        run: python -m py_compile server.py
+
+      - name: Backend tests
+        run: python -m unittest discover -s tests -v
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Frontend lint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Frontend tests
+        run: npm test
+        working-directory: frontend
+
+      - name: Frontend production build
+        run: npm run build
+        working-directory: frontend
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          rm .github/workflows/apply-sidebar-document-reorder.yml
+          rm ops/apply_sidebar_document_reorder.py
+          git config user.name "Station 8 Fix Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add server.py frontend/src/App.jsx frontend/src/styles/layout.css frontend/src/sidebarDocumentOrder.js frontend/src/sidebarDocumentOrder.test.js tests/test_sidebar_order.py .github/workflows ops
+          git commit -m "fix: persist manual sidebar document order"
+          git push origin HEAD:${{ github.head_ref }}
