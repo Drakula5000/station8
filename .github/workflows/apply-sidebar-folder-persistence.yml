@@ -1,0 +1,147 @@
+name: Apply sidebar folder persistence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - frontend/src/sidebarFolderState.js
+      - frontend/src/sidebarFolderState.test.js
+      - .github/workflows/apply-sidebar-folder-persistence.yml
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply the App wiring
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/src/App.jsx')
+          text = path.read_text()
+
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'\nimport './styles/index.css'",
+              "import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'\nimport { loadFolderExpansionState, mergeFolderExpansionDefaults, saveFolderExpansionState } from './sidebarFolderState'\nimport './styles/index.css'",
+              'sidebar folder-state import',
+          )
+
+          replace_once(
+              "  const [expandedFolders, setExpandedFolders] = useState({})",
+              "  const [expandedFolders, setExpandedFolders] = useState(() => loadFolderExpansionState(\n    typeof window !== 'undefined' ? window.localStorage : null\n  ))",
+              'persistent expandedFolders initializer',
+          )
+
+          replace_once(
+              """  useEffect(() => {
+              foldersRef.current = folders
+            }, [folders])
+
+            useEffect(() => {
+              try {
+                window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed))
+""",
+              """  useEffect(() => {
+              foldersRef.current = folders
+            }, [folders])
+
+            useEffect(() => {
+              saveFolderExpansionState(
+                typeof window !== 'undefined' ? window.localStorage : null,
+                expandedFolders,
+              )
+            }, [expandedFolders])
+
+            useEffect(() => {
+              try {
+                window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed))
+""",
+              'folder-state persistence effect',
+          )
+
+          replace_once(
+              """      setExpandedFolders((current) => {
+                const next = { ...current }
+                for (const folder of nextFolders) {
+                  if (!(folder.id in next)) next[folder.id] = true
+                }
+                return next
+              })
+""",
+              """      setExpandedFolders((current) => mergeFolderExpansionDefaults(current, nextFolders))
+""",
+              'folder default merge',
+          )
+
+          replace_once(
+              """      setActiveId(nextActive)
+              if (nextActive) {
+                const item = (nextDocsByKind[nextActive.type] || []).find(d => d.id === nextActive.id)
+                if (item?.folder_id) expandFolderPath(item.folder_id, nextFolders)
+              }
+""",
+              """      setActiveId(nextActive)
+""",
+              'remove refresh-time forced expansion',
+          )
+
+          replace_once(
+              "  }, [auth.authenticated, auth.loading, expandFolderPath, ownerDatabaseMode, ownerMode, ownerPromptDismissed, route.doc, viewerMode])",
+              "  }, [auth.authenticated, auth.loading, ownerDatabaseMode, ownerMode, ownerPromptDismissed, route.doc, viewerMode])",
+              'refresh dependencies',
+          )
+
+          path.write_text(text)
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+        working-directory: frontend
+
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Unit tests
+        run: npm test
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          rm .github/workflows/apply-sidebar-folder-persistence.yml
+          git config user.name "Station 8 Fix Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add frontend/src/App.jsx frontend/src/sidebarFolderState.js frontend/src/sidebarFolderState.test.js .github/workflows
+          git commit -m "fix: persist sidebar folder expansion state"
+          git push origin HEAD:${{ github.head_ref }}
