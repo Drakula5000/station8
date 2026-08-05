@@ -14,6 +14,7 @@ import './styles/index.css'
 const API = import.meta.env.VITE_API_URL || ''
 const ROOT_FOLDER = '__root__'
 const SIDEBAR_STORAGE_KEY = 's8.sidebarCollapsed'
+const GOOGLE_RECONNECT_DISMISSED_KEY = 's8.googleReconnectDismissed'
 
 // Aurora is the only theme — ensure data-theme is always absent so Aurora
 // tokens (on html[data-mode]) take effect.
@@ -449,7 +450,8 @@ export default function App() {
   const [newFolderOpen, setNewFolderOpen] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
   const [newFolderParentId, setNewFolderParentId] = useState(ROOT_FOLDER)
-  const [googleAuth, setGoogleAuth] = useState({ loading: true, connected: false, email: null })
+  const [googleAuth, setGoogleAuth] = useState({ loading: true, connected: false, email: null, reconnectRequired: false })
+  const [googleReconnectOpen, setGoogleReconnectOpen] = useState(false)
   const [googleOauthError, setGoogleOauthError] = useState(null)
   const [driveShareState, setDriveShareState] = useState({ busy: false, message: null })
   const driveShareMessageTimer = useRef(null)
@@ -531,6 +533,35 @@ export default function App() {
   const ownerMode = viewerMode === 'owner'
   const readOnly = viewerMode === 'visitor' || ownerDatabaseMode
   const showSidebar = ownerMode && !ownerDatabaseMode
+
+  const dismissGoogleReconnect = useCallback(() => {
+    try { window.sessionStorage.setItem(GOOGLE_RECONNECT_DISMISSED_KEY, 'true') } catch {}
+    setGoogleReconnectOpen(false)
+  }, [])
+
+  const requireGoogleReconnect = useCallback((forceOpen = false) => {
+    setGoogleAuth(current => ({
+      ...current,
+      loading: false,
+      connected: false,
+      reconnectRequired: true,
+    }))
+    let dismissed = false
+    try { dismissed = window.sessionStorage.getItem(GOOGLE_RECONNECT_DISMISSED_KEY) === 'true' } catch {}
+    if (forceOpen || !dismissed) setGoogleReconnectOpen(true)
+  }, [])
+
+  const handleGoogleCreateError = useCallback((error) => {
+    if (error === 'google_reconnect_required') {
+      requireGoogleReconnect(true)
+    } else if (error === 'google_connection_required') {
+      showError('Connect Google or paste an existing Drive URL.')
+    } else if (error === 'google_drive_unavailable') {
+      showError('Google Drive is temporarily unavailable. Try again.')
+    } else {
+      showError('Google Drive could not create this file. Try again.')
+    }
+  }, [requireGoogleReconnect, showError])
 
   useEffect(() => {
     const needsBackendWake = viewerMode === 'visitor'
@@ -838,12 +869,21 @@ export default function App() {
 
   const refreshGoogleAuth = useCallback(async () => {
     const data = await fetchJson(`${API}/api/google/status`, {}, null)
+    if (!data) {
+      setGoogleAuth(current => ({ ...current, loading: false }))
+      return null
+    }
+    const reconnectRequired = Boolean(data.reconnect_required)
     setGoogleAuth({
       loading: false,
-      connected: Boolean(data?.connected),
-      email: data?.email || null,
+      connected: Boolean(data.connected),
+      email: data.email || null,
+      reconnectRequired,
     })
-  }, [])
+    if (reconnectRequired) requireGoogleReconnect(false)
+    else setGoogleReconnectOpen(false)
+    return data
+  }, [requireGoogleReconnect])
 
   const refreshDriveConfig = useCallback(async () => {
     const data = await fetchJson(`${API}/api/google/config`, {}, null)
@@ -873,9 +913,13 @@ export default function App() {
   }, [])
 
   const openDrivePicker = useCallback(() => {
+    if (googleAuth.reconnectRequired) {
+      requireGoogleReconnect(true)
+      return
+    }
     setDrivePickerOpen(true)
     loadDriveFolders(null, [{ id: null, name: 'My Drive' }])
-  }, [loadDriveFolders, setDrivePickerOpen])
+  }, [googleAuth.reconnectRequired, loadDriveFolders, requireGoogleReconnect, setDrivePickerOpen])
 
   const drivePickerEnter = (folder) => {
     loadDriveFolders(folder.id, [...drivePicker.breadcrumb, folder])
@@ -899,6 +943,10 @@ export default function App() {
   }, [setDriveConfig, setDrivePickerOpen])
 
   const toggleDriveMirror = useCallback(async () => {
+    if (googleAuth.reconnectRequired) {
+      requireGoogleReconnect(true)
+      return
+    }
     const next = !driveConfig.mirror_folders
     const data = await fetchJsonPatch(`${API}/api/google/config`, { mirror_folders: next }, null)
     if (data) {
@@ -908,13 +956,18 @@ export default function App() {
         mirror_folders: Boolean(data.mirror_folders),
       })
     }
-  }, [driveConfig.mirror_folders])
+  }, [driveConfig.mirror_folders, googleAuth.reconnectRequired, requireGoogleReconnect])
 
   const [driveSyncOpen, setDriveSyncOpen] = useState(false)
   const [driveSyncBusy, setDriveSyncBusy] = useState(false)
   const [driveSyncResult, setDriveSyncResult] = useState(null)
 
   const runDriveSyncExisting = async () => {
+    if (googleAuth.reconnectRequired) {
+      setDriveSyncOpen(false)
+      requireGoogleReconnect(true)
+      return
+    }
     setDriveSyncBusy(true)
     setDriveSyncResult(null)
     try {
@@ -963,6 +1016,8 @@ export default function App() {
     const flag = params.get('google')
     if (!flag) return
     if (flag === 'connected') {
+      try { window.sessionStorage.removeItem(GOOGLE_RECONNECT_DISMISSED_KEY) } catch {}
+      setGoogleReconnectOpen(false)
       refreshGoogleAuth()
     } else if (flag === 'error') {
       const reason = params.get('reason') || 'unknown'
@@ -1069,6 +1124,10 @@ export default function App() {
   }
 
   const openNewGDocModal = () => {
+    if (googleAuth.reconnectRequired) {
+      requireGoogleReconnect(true)
+      return
+    }
     setNewGDocName('')
     setNewGDocUrl('')
     setNewGDocFolderId(activeDoc?.folder_id || ROOT_FOLDER)
@@ -1076,6 +1135,10 @@ export default function App() {
   }
 
   const openNewGSheetModal = () => {
+    if (googleAuth.reconnectRequired) {
+      requireGoogleReconnect(true)
+      return
+    }
     setNewGSheetName('')
     setNewGSheetUrl('')
     setNewGSheetFolderId(activeDoc?.folder_id || ROOT_FOLDER)
@@ -1142,12 +1205,27 @@ export default function App() {
   const createGdoc = async () => {
     const name = newGDocName.trim()
     if (!name) return
-    const item = await fetchJsonPost(`${API}/api/gdocs`, {
-      name,
-      folder_id: normalizeFolderValue(newGDocFolderId),
-      embed_url: newGDocUrl.trim() || null,
-    })
-    if (!item) return
+    let response
+    try {
+      response = await fetch(`${API}/api/gdocs`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          name,
+          folder_id: normalizeFolderValue(newGDocFolderId),
+          embed_url: newGDocUrl.trim() || null,
+        }),
+      })
+    } catch {
+      handleGoogleCreateError('google_drive_unavailable')
+      return
+    }
+    const item = await response.json().catch(() => null)
+    if (!response.ok || !item) {
+      handleGoogleCreateError(item?.error)
+      return
+    }
     setGdocs(items => [item, ...items])
     if (item.folder_id) expandFolderPath(item.folder_id)
     openDocument('gdoc', item.id, item.folder_id)
@@ -1157,12 +1235,27 @@ export default function App() {
   const createGsheet = async () => {
     const name = newGSheetName.trim()
     if (!name) return
-    const item = await fetchJsonPost(`${API}/api/gsheets`, {
-      name,
-      folder_id: normalizeFolderValue(newGSheetFolderId),
-      embed_url: newGSheetUrl.trim() || null,
-    })
-    if (!item) return
+    let response
+    try {
+      response = await fetch(`${API}/api/gsheets`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          name,
+          folder_id: normalizeFolderValue(newGSheetFolderId),
+          embed_url: newGSheetUrl.trim() || null,
+        }),
+      })
+    } catch {
+      handleGoogleCreateError('google_drive_unavailable')
+      return
+    }
+    const item = await response.json().catch(() => null)
+    if (!response.ok || !item) {
+      handleGoogleCreateError(item?.error)
+      return
+    }
     setGsheets(items => [item, ...items])
     if (item.folder_id) expandFolderPath(item.folder_id)
     openDocument('gsheet', item.id, item.folder_id)
@@ -1183,11 +1276,17 @@ export default function App() {
         loading: false,
         connected: Boolean(data.connected),
         email: data.email || null,
+        reconnectRequired: false,
       })
+      setGoogleReconnectOpen(false)
     }
   }
 
   const shareAllDrive = useCallback(async () => {
+    if (googleAuth.reconnectRequired) {
+      requireGoogleReconnect(true)
+      return
+    }
     if (driveShareState.busy) return
     setDriveShareState({ busy: true, message: null })
     const data = await fetchJsonPost(`${API}/api/google/share-all`, {})
@@ -1208,7 +1307,7 @@ export default function App() {
     driveShareMessageTimer.current = setTimeout(() => {
       setDriveShareState((cur) => (cur.busy ? cur : { busy: false, message: null }))
     }, 4000)
-  }, [driveShareState.busy])
+  }, [driveShareState.busy, googleAuth.reconnectRequired, requireGoogleReconnect])
 
   useEffect(() => () => {
     if (driveShareMessageTimer.current) clearTimeout(driveShareMessageTimer.current)
@@ -2531,12 +2630,15 @@ export default function App() {
               ) : (
                 <button
                   className="sidebar-drive-link-btn"
-                  onClick={openGoogleConnect}
-                  title="Link your account to create Docs and Sheets"
+                  onClick={googleAuth.reconnectRequired ? () => requireGoogleReconnect(true) : openGoogleConnect}
+                  title={googleAuth.reconnectRequired
+                    ? 'Google testing mode requires a weekly reconnect'
+                    : 'Link your account to create Docs and Sheets'}
                   type="button"
                   disabled={googleAuth.loading}
                 >
-                  <PlusIcon /> <span>Link account</span>
+                  {googleAuth.reconnectRequired ? <GoogleLogoIcon /> : <PlusIcon />}
+                  <span>{googleAuth.reconnectRequired ? 'Reconnect Google' : 'Link account'}</span>
                 </button>
               )}
             </div>
@@ -3063,7 +3165,19 @@ export default function App() {
         </Modal>
       )}
 
-      {driveSyncOpen && (
+      {googleReconnectOpen && (
+    <Modal onClose={dismissGoogleReconnect} title="Google’s weekly reconnect is due">
+      <p className="modal-copy">
+        Station 8 uses Google’s testing mode, which requires each connected Google account to reconnect every 7 days. This is expected. Reconnect to keep using Docs and Sheets.
+      </p>
+      <div className="modal-footer">
+        <button className="btn-ghost" onClick={dismissGoogleReconnect} type="button">Later</button>
+        <button className="btn-primary" onClick={openGoogleConnect} type="button">Reconnect Google</button>
+      </div>
+    </Modal>
+  )}
+
+  {driveSyncOpen && (
         <Modal
           onClose={() => { if (!driveSyncBusy) { setDriveSyncOpen(false); setDriveSyncResult(null) } }}
           title={driveSyncResult ? (driveSyncResult.error ? "Move couldn't run" : 'Move complete') : 'Move existing files into folders?'}
