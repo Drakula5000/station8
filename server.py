@@ -3817,11 +3817,22 @@ def _frontend_origin():
     return 'http://127.0.0.1:5173'
 
 
-def _google_auth_state():
+def _google_auth_state(*, verify=False):
     state = _load(GOOGLE_AUTH_FILE, {}) or {}
+    saved_connected = bool(state.get('connected'))
+    reconnect_required = bool(state.get('reconnect_required'))
+    if verify and saved_connected:
+        access_token = _get_google_access_token()
+        state = _load_google_token_record()
+        reconnect_required = bool(state.get('reconnect_required'))
+        if access_token:
+            reconnect_required = False
+        elif not state.get('refresh_token'):
+            reconnect_required = True
     return {
-        'connected': bool(state.get('connected')),
+        'connected': saved_connected and not reconnect_required,
         'email': state.get('email') or None,
+        'reconnect_required': reconnect_required,
     }
 
 
@@ -3866,10 +3877,23 @@ def _refresh_google_access_token(record):
         )
         with _urllib_request.urlopen(req, timeout=15) as resp:
             payload = json.loads(resp.read().decode('utf-8'))
-    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError) as exc:
+    except _urllib_error.HTTPError as exc:
+        error_code = None
+        try:
+            error_payload = json.loads(exc.read().decode('utf-8'))
+            error_code = error_payload.get('error') if isinstance(error_payload, dict) else None
+        except (OSError, ValueError):
+            pass
+        if error_code == 'invalid_grant' or exc.code in (400, 401):
+            record['reconnect_required'] = True
+            _save_google_token_record(record)
+        print(f'Google token refresh failed: {exc}', flush=True)
+        return None
+    except (_urllib_error.URLError, OSError, ValueError) as exc:
         print(f'Google token refresh failed: {exc}', flush=True)
         return None
     record['access_token'] = payload['access_token']
+    record.pop('reconnect_required', None)
     expires_in = int(payload.get('expires_in', 3600))
     record['token_expires_at'] = (datetime.now() + _timedelta(seconds=expires_in)).isoformat()
     _save_google_token_record(record)
@@ -3879,9 +3903,9 @@ def _refresh_google_access_token(record):
 def _get_google_access_token():
     """Return a valid access token, refreshing if needed. None if disconnected."""
     record = _load_google_token_record()
-    if not record.get('connected') or not record.get('access_token'):
+    if not record.get('connected'):
         return None
-    if _google_token_expired(record):
+    if not record.get('access_token') or _google_token_expired(record):
         record = _refresh_google_access_token(record)
         if not record:
             return None
@@ -3894,7 +3918,7 @@ def google_status():
     # Owner-only — visitors must not learn the connected email or even whether
     # Google is wired up. Their view goes through the cached gdrive_contents
     # blob; nothing about the owner's auth leaks into the visitor surface.
-    return jsonify(_google_auth_state())
+    return jsonify(_google_auth_state(verify=True))
 
 
 @app.route('/api/google/auth', methods=['GET'])
@@ -4577,18 +4601,28 @@ def _create_gdrive_doc(load_fn, save_fn, request_data, kind):
     drive_file_id = (request_data.get('drive_file_id') or '').strip() or None
     embed_url = pasted_url
 
-    # No URL pasted → create the file in Drive automatically (when connected)
-    # and share it publicly so visitors can view the embed without a manual
-    # share-all run.
-    access_token = _get_google_access_token()
-    if not embed_url and access_token:
+    # No URL pasted → create the file in Drive automatically. Never save
+    # a Station 8 record unless the underlying Google file was created.
+    if not embed_url:
+        access_token = _get_google_access_token()
+        if not access_token:
+            record = _load_google_token_record()
+            if not record.get('connected'):
+                return None, 'google_connection_required'
+            if record.get('reconnect_required') or not record.get('refresh_token'):
+                return None, 'google_reconnect_required'
+            return None, 'google_drive_unavailable'
         s8_folder_id = _normalize_folder_id(request_data.get('folder_id'), folders)
         parent_drive_id = _drive_resolve_parent_for_doc(s8_folder_id, access_token)
         new_id, new_url = _create_drive_file(kind, name, parent_id=parent_drive_id)
-        if new_id and new_url:
-            drive_file_id = new_id
-            embed_url = new_url
-            _share_drive_file_publicly(new_id)
+        if not new_id or not new_url:
+            record = _load_google_token_record()
+            if record.get('reconnect_required'):
+                return None, 'google_reconnect_required'
+            return None, 'google_drive_create_failed'
+        drive_file_id = new_id
+        embed_url = new_url
+        _share_drive_file_publicly(new_id)
 
     item = {
         'id': str(uuid.uuid4())[:8],
@@ -4602,7 +4636,7 @@ def _create_gdrive_doc(load_fn, save_fn, request_data, kind):
     items = load_fn()
     items.append(item)
     save_fn(items)
-    return item
+    return item, None
 
 
 def _patch_gdrive_doc(load_fn, save_fn, item_id, data):
@@ -4643,7 +4677,10 @@ def list_visitor_gdocs():
 @app.route('/api/gdocs', methods=['POST'])
 @_studio_auth_required
 def create_gdoc():
-    item = _create_gdrive_doc(_load_gdocs, _save_gdocs, request.json or {}, 'gdoc')
+    item, error = _create_gdrive_doc(_load_gdocs, _save_gdocs, request.json or {}, 'gdoc')
+    if error:
+        status = 409 if error in {'google_connection_required', 'google_reconnect_required'} else 502
+        return jsonify({'error': error}), status
     _maybe_sync_one(item, 'gdoc')
     return jsonify(item), 201
 
@@ -4709,7 +4746,10 @@ def list_visitor_gsheets():
 @app.route('/api/gsheets', methods=['POST'])
 @_studio_auth_required
 def create_gsheet():
-    item = _create_gdrive_doc(_load_gsheets, _save_gsheets, request.json or {}, 'gsheet')
+    item, error = _create_gdrive_doc(_load_gsheets, _save_gsheets, request.json or {}, 'gsheet')
+    if error:
+        status = 409 if error in {'google_connection_required', 'google_reconnect_required'} else 502
+        return jsonify({'error': error}), status
     _maybe_sync_one(item, 'gsheet')
     return jsonify(item), 201
 
