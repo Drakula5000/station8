@@ -1,3 +1,5 @@
+// Pure ordering helpers shared by drag/drop and sidebar rendering. The stored
+// map is workspace data, so manual document order survives reloads and devices.
 export const SIDEBAR_ROOT_PARENT = '__root__'
 
 const DOC_TYPE_ORDER = {
