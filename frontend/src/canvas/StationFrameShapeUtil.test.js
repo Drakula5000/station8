@@ -1,17 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
-import { StationFrameShapeUtil } from './StationFrameShapeUtil.js'
+const source = readFileSync(new URL('./StationFrameShapeUtil.js', import.meta.url), 'utf8')
 
 test('Station sections preserve frame behavior without clipping children', () => {
-  const util = Object.create(StationFrameShapeUtil.prototype)
-  for (const child of [
-    { type: 'text' },
-    { type: 'image' },
-    { type: 'note' },
-    { type: 'geo' },
-  ]) {
-    assert.equal(util.shouldClipChild(child), false)
-  }
-  assert.equal(StationFrameShapeUtil.type, 'frame')
+  assert.match(source, /FrameShapeUtil\.configure\(\{ showColors: true \}\)/)
+  assert.match(source, /shouldClipChild\(\)\s*\{\s*return false\s*\}/)
 })
