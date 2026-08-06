@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Tldraw, FrameShapeUtil, getSvgAsImage } from 'tldraw'
+import { Tldraw, getSvgAsImage } from 'tldraw'
 import { patchSvgExports, hasCustomFill } from './canvas/magicFill'
 import 'tldraw/tldraw.css'
 import { ShapeInspector } from './components/ShapeInspector'
 import { ImageLightbox } from './components/ImageLightbox'
 import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
+import { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'
 import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'
 import { StationTextShapeUtil } from './canvas/StationTextShapeUtil'
 import { FrameCornerStyles, GeoCornerStyles, ImageShapeStyles, ListStyles } from './canvas/ShapeStyles'
@@ -89,7 +90,7 @@ const FRAME_DROPPED_IMAGE_INSET = 32
 // StationTextShapeUtil sizes text shapes with our smaller font table; the
 // rendered font-size is overridden via CSS to match — see StationTextShapeUtil.js.
 const STATION_SHAPE_UTILS = [
-  FrameShapeUtil.configure({ showColors: true }),
+  StationFrameShapeUtil,
   StationNoteShapeUtil,
   StationTextShapeUtil,
 ]
