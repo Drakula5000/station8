@@ -1,0 +1,93 @@
+name: Apply Station section clipping fix
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - frontend/src/TldrawCanvas.jsx
+      - frontend/src/canvas/StationFrameShapeUtil.js
+      - frontend/src/canvas/StationFrameShapeUtil.test.js
+      - .github/workflows/apply-station-section-clipping.yml
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  apply-and-verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Wire the Station frame utility
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/src/TldrawCanvas.jsx')
+          text = path.read_text()
+
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "import { Tldraw, FrameShapeUtil, getSvgAsImage } from 'tldraw'",
+              "import { Tldraw, getSvgAsImage } from 'tldraw'",
+              'remove default FrameShapeUtil import',
+          )
+          replace_once(
+              "import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'\nimport { StationTextShapeUtil } from './canvas/StationTextShapeUtil'",
+              "import { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'\nimport { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'\nimport { StationTextShapeUtil } from './canvas/StationTextShapeUtil'",
+              'add StationFrameShapeUtil import',
+          )
+          replace_once(
+              "  FrameShapeUtil.configure({ showColors: true }),",
+              "  StationFrameShapeUtil,",
+              'use non-clipping Station frame utility',
+          )
+
+          path.write_text(text)
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+        working-directory: frontend
+
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Unit tests
+        run: npm test
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          rm .github/workflows/apply-station-section-clipping.yml
+          git config user.name "Station 8 Fix Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add frontend/src/TldrawCanvas.jsx frontend/src/canvas/StationFrameShapeUtil.js frontend/src/canvas/StationFrameShapeUtil.test.js .github/workflows
+          git commit -m "fix(canvas): stop sections clipping pasted content"
+          git push origin HEAD:${{ github.head_ref }}
