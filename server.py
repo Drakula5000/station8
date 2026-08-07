@@ -52,6 +52,7 @@ BOARDS_FILE = os.path.join(DATA_DIR, 'boards.json')
 SHEETS_FILE = os.path.join(DATA_DIR, 'sheets.json')
 GDOCS_FILE = os.path.join(DATA_DIR, 'gdocs.json')
 GSHEETS_FILE = os.path.join(DATA_DIR, 'gsheets.json')
+GSLIDES_FILE = os.path.join(DATA_DIR, 'gslides.json')
 GOOGLE_AUTH_FILE = os.path.join(DATA_DIR, 'google_auth.json')
 GDRIVE_CONTENTS_FILE = os.path.join(DATA_DIR, 'gdrive_contents.json')
 OCR_FILE = os.path.join(DATA_DIR, 'ocr.json')
@@ -90,11 +91,12 @@ ACCOUNT_PASSWORD_MIN_LENGTH = 12
 ACCOUNT_STORAGE_PREFIX = 'account'
 GLOBAL_STORAGE_BASENAMES = frozenset({'auth.json', 'accounts.json'})
 SIDEBAR_ROOT_KEY = '__root__'
-SIDEBAR_DOC_KEY_RE = re.compile(r'^(?:board|gdoc|gsheet|report|pdf):[A-Za-z0-9_-]{1,128}$')
+SIDEBAR_DOC_KEY_RE = re.compile(r'^(?:board|gdoc|gsheet|gslide|report|pdf):[A-Za-z0-9_-]{1,128}$')
 SECONDARY_ACCOUNT_PASSWORD_ENV = 'S8_SECONDARY_PASSWORD'
 
 MAX_REPORT_HTML_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_PDF_BYTES = 25 * 1024 * 1024
+MAX_OFFICE_IMPORT_BYTES = 25 * 1024 * 1024
 MAX_PDF_COMPLETION_BYTES = 12 * 1024 * 1024
 MAX_PDF_TEXT_CHARS = 2_000_000
 MAX_PDF_PAGE_TEXT_CHARS = 100_000
@@ -928,6 +930,21 @@ def _save_gsheets_strict(gsheets):
     _save_json_strict(GSHEETS_FILE, [_normalize_gdrive_doc(d, folders) for d in gsheets])
 
 
+def _load_gslides():
+    folders = _get_workspace().get('folders', [])
+    return [_normalize_gdrive_doc(d, folders) for d in _load(GSLIDES_FILE, [])]
+
+
+def _save_gslides(gslides):
+    folders = _get_workspace().get('folders', [])
+    _save(GSLIDES_FILE, [_normalize_gdrive_doc(d, folders) for d in gslides])
+
+
+def _save_gslides_strict(gslides):
+    folders = _get_workspace().get('folders', [])
+    _save_json_strict(GSLIDES_FILE, [_normalize_gdrive_doc(d, folders) for d in gslides])
+
+
 def _load_reports():
     return _load(REPORTS_FILE, [])
 
@@ -1036,6 +1053,7 @@ def _doc_index_handlers():
         'sheet': (_load_sheets, _save_sheets, _save_sheets_strict),
         'gdoc': (_load_gdocs, _save_gdocs, _save_gdocs_strict),
         'gsheet': (_load_gsheets, _save_gsheets, _save_gsheets_strict),
+        'gslide': (_load_gslides, _save_gslides, _save_gslides_strict),
         'report': (_load_reports, _save_reports, _save_reports_strict),
         'pdf': (_load_pdfs, _save_pdfs, _save_pdfs_strict),
     }
@@ -1344,12 +1362,20 @@ import urllib.error as _urllib_error
 
 _DRIVE_DOC_ID_RE = _re.compile(r'/document/d/([a-zA-Z0-9_-]+)')
 _DRIVE_SHEET_ID_RE = _re.compile(r'/spreadsheets/d/([a-zA-Z0-9_-]+)')
+_DRIVE_SLIDE_ID_RE = _re.compile(r'/presentation/d/([a-zA-Z0-9_-]+)')
 
 
 def _extract_drive_file_id(url, kind):
     if not url:
         return None
-    pattern = _DRIVE_DOC_ID_RE if kind == 'gdoc' else _DRIVE_SHEET_ID_RE
+    patterns = {
+        'gdoc': _DRIVE_DOC_ID_RE,
+        'gsheet': _DRIVE_SHEET_ID_RE,
+        'gslide': _DRIVE_SLIDE_ID_RE,
+    }
+    pattern = patterns.get(kind)
+    if not pattern:
+        return None
     match = pattern.search(url)
     return match.group(1) if match else None
 
@@ -1437,7 +1463,7 @@ def _fetch_gdrive_text(file_id, kind, timeout=15):
             if text:
                 return text
             # Fall through to the Drive CSV export below as a tab-1 snapshot.
-        mime = 'text/plain' if kind == 'gdoc' else 'text/csv' if kind == 'gsheet' else None
+        mime = 'text/plain' if kind in {'gdoc', 'gslide'} else 'text/csv' if kind == 'gsheet' else None
         if not mime:
             return None
         url = f'https://www.googleapis.com/drive/v3/files/{file_id}/export?mimeType={mime}'
@@ -1460,6 +1486,8 @@ def _fetch_gdrive_text(file_id, kind, timeout=15):
         url = f'https://docs.google.com/document/d/{file_id}/export?format=txt'
     elif kind == 'gsheet':
         url = f'https://docs.google.com/spreadsheets/d/{file_id}/export?format=csv'
+    elif kind == 'gslide':
+        url = f'https://docs.google.com/presentation/d/{file_id}/export/txt'
     else:
         return None
     try:
@@ -4183,6 +4211,7 @@ def google_drive_sync_existing():
     items = (
         [(item, 'gdoc') for item in _load_gdocs()]
         + [(item, 'gsheet') for item in _load_gsheets()]
+        + [(item, 'gslide') for item in _load_gslides()]
     )
     moved = []
     skipped_no_drive_file = []
@@ -4272,6 +4301,7 @@ def google_share_all():
     items = (
         [(item, 'gdoc') for item in _load_gdocs()]
         + [(item, 'gsheet') for item in _load_gsheets()]
+        + [(item, 'gslide') for item in _load_gslides()]
     )
     shared = 0
     failed = 0
@@ -4330,6 +4360,10 @@ def _sync_missing_only():
             if not (contents.get(f'gsheet-{item["id"]}') or {}).get('text'):
                 if _sync_one_gdrive_doc(item, 'gsheet', contents):
                     changed = True
+        for item in _load_gslides():
+            if not (contents.get(f'gslide-{item["id"]}') or {}).get('text'):
+                if _sync_one_gdrive_doc(item, 'gslide', contents):
+                    changed = True
         if changed:
             _save_gdrive_contents(contents)
     except Exception:
@@ -4339,11 +4373,13 @@ def _sync_missing_only():
 _DRIVE_MIME = {
     'gdoc': 'application/vnd.google-apps.document',
     'gsheet': 'application/vnd.google-apps.spreadsheet',
+    'gslide': 'application/vnd.google-apps.presentation',
 }
 _DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'
 _DRIVE_EDIT_URL = {
     'gdoc': 'https://docs.google.com/document/d/{id}/edit',
     'gsheet': 'https://docs.google.com/spreadsheets/d/{id}/edit',
+    'gslide': 'https://docs.google.com/presentation/d/{id}/edit',
 }
 
 
@@ -4523,6 +4559,144 @@ def _create_drive_file(kind, name, parent_id=None, timeout=15):
     if not file_id:
         return None, None
     return file_id, _DRIVE_EDIT_URL[kind].format(id=file_id)
+
+_OFFICE_IMPORTS = {
+    '.docx': {
+        'kind': 'gdoc',
+        'source_mime': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    },
+    '.pptx': {
+        'kind': 'gslide',
+        'source_mime': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    },
+}
+
+
+def _drive_import_office_file(filename, blob, source_mime, target_kind, parent_id=None, access_token=None, timeout=30):
+    """Upload an OOXML file and ask Drive to convert it to a Google-native type."""
+    access_token = access_token or _get_google_access_token()
+    target_mime = _DRIVE_MIME.get(target_kind)
+    if not access_token or not target_mime or not blob:
+        return None, None
+
+    display_name = os.path.splitext(os.path.basename(filename or 'Untitled'))[0].strip() or 'Untitled'
+    metadata = {'name': display_name, 'mimeType': target_mime}
+    if parent_id:
+        metadata['parents'] = [parent_id]
+
+    boundary = f'station8-{uuid.uuid4().hex}'
+    prefix = (
+        f'--{boundary}\\r\
+'
+        'Content-Type: application/json; charset=UTF-8\\r\
+\\r\
+'
+        f'{json.dumps(metadata)}\\r\
+'
+        f'--{boundary}\\r\
+'
+        f'Content-Type: {source_mime}\\r\
+\\r\
+'
+    ).encode('utf-8')
+    suffix = f'\\r\
+--{boundary}--\\r\
+'.encode('utf-8')
+    body = prefix + blob + suffix
+    url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType'
+    try:
+        req = _urllib_request.Request(
+            url, data=body, method='POST',
+            headers={
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': f'multipart/related; boundary={boundary}',
+            },
+        )
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode('utf-8'))
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError) as exc:
+        print(f'Drive Office import failed for {filename}: {exc}', flush=True)
+        return None, None
+    file_id = payload.get('id')
+    if not file_id:
+        return None, None
+    return file_id, _DRIVE_EDIT_URL[target_kind].format(id=file_id)
+
+
+def _google_connection_error_code():
+    record = _load_google_token_record()
+    if not record.get('connected'):
+        return 'google_connection_required'
+    if record.get('reconnect_required') or not record.get('refresh_token'):
+        return 'google_reconnect_required'
+    return 'google_drive_unavailable'
+
+
+@app.route('/api/google/import-office', methods=['POST'])
+@_studio_auth_required
+def google_import_office():
+    upload = request.files.get('file')
+    if not upload or not upload.filename:
+        return jsonify({'error': 'office_file_required'}), 400
+
+    filename = os.path.basename(upload.filename)
+    extension = os.path.splitext(filename)[1].lower()
+    spec = _OFFICE_IMPORTS.get(extension)
+    if not spec:
+        return jsonify({'error': 'unsupported_office_type'}), 415
+
+    blob = upload.read(MAX_OFFICE_IMPORT_BYTES + 1)
+    if not blob:
+        return jsonify({'error': 'empty_office_file'}), 400
+    if len(blob) > MAX_OFFICE_IMPORT_BYTES:
+        return jsonify({'error': 'office_file_too_large'}), 413
+    # DOCX/PPTX are ZIP-based OOXML containers. Reject a renamed arbitrary file
+    # before sending it to Drive.
+    if not blob.startswith(b'PK'):
+        return jsonify({'error': 'invalid_office_file'}), 400
+
+    access_token = _get_google_access_token()
+    if not access_token:
+        code = _google_connection_error_code()
+        return jsonify({'error': code}), 409 if code != 'google_drive_unavailable' else 502
+
+    folders = _get_workspace().get('folders', [])
+    folder_id = _normalize_folder_id(request.form.get('folder_id'), folders)
+    parent_drive_id = _drive_resolve_parent_for_doc(folder_id, access_token)
+    kind = spec['kind']
+    file_id, embed_url = _drive_import_office_file(
+        filename, blob, spec['source_mime'], kind,
+        parent_id=parent_drive_id, access_token=access_token,
+    )
+    if not file_id or not embed_url:
+        code = _google_connection_error_code()
+        if code in {'google_connection_required', 'google_reconnect_required'}:
+            return jsonify({'error': code}), 409
+        return jsonify({'error': 'google_drive_import_failed'}), 502
+
+    item = {
+        'id': str(uuid.uuid4())[:8],
+        'name': os.path.splitext(filename)[0].strip() or 'Untitled',
+        'tags': [],
+        'folder_id': folder_id,
+        'created_at': datetime.now().isoformat(),
+        'drive_file_id': file_id,
+        'embed_url': embed_url,
+    }
+    load_fn, save_fn = (
+        (_load_gdocs, _save_gdocs) if kind == 'gdoc' else (_load_gslides, _save_gslides)
+    )
+    try:
+        items = load_fn()
+        items.append(item)
+        save_fn(items)
+    except Exception:
+        _delete_drive_file(file_id)
+        raise
+
+    _share_drive_file_publicly(file_id)
+    _maybe_sync_one(item, kind)
+    return jsonify({'kind': kind, 'item': item}), 201
 
 
 def _create_drive_file_verbose(kind, name, parent_id=None, timeout=15):
@@ -4825,6 +4999,75 @@ def get_gsheet(gsheet_id):
 def get_visitor_gsheet(gsheet_id):
     for d in _visitor_visible_docs('gsheet', _load_gsheets()):
         if d['id'] == gsheet_id:
+            return jsonify(d)
+    return jsonify({'error': 'Not found'}), 404
+
+
+@app.route('/api/gslides', methods=['GET'])
+@_studio_auth_required
+def list_gslides():
+    return jsonify(_list_docs_sorted(_load_gslides()))
+
+
+@app.route('/api/visitor/gslides', methods=['GET'])
+@_viewer_auth_required
+def list_visitor_gslides():
+    return jsonify(_list_docs_sorted(_load_gslides(), visitor=True, kind='gslide'))
+
+
+@app.route('/api/gslides', methods=['POST'])
+@_studio_auth_required
+def create_gslide():
+    item, error = _create_gdrive_doc(_load_gslides, _save_gslides, request.json or {}, 'gslide')
+    if error:
+        status = 409 if error in {'google_connection_required', 'google_reconnect_required'} else 502
+        return jsonify({'error': error}), status
+    _maybe_sync_one(item, 'gslide')
+    return jsonify(item), 201
+
+
+@app.route('/api/gslides/<gslide_id>', methods=['PATCH'])
+@_studio_auth_required
+def patch_gslide(gslide_id):
+    body = request.json or {}
+    item = _patch_gdrive_doc(_load_gslides, _save_gslides, gslide_id, body)
+    if item is None:
+        return jsonify({'error': 'Not found'}), 404
+    if 'embed_url' in body:
+        _maybe_sync_one(item, 'gslide')
+    return jsonify(item)
+
+
+@app.route('/api/gslides/<gslide_id>', methods=['DELETE'])
+@_studio_auth_required
+def delete_gslide(gslide_id):
+    if request.args.get('drive') in ('1', 'true'):
+        for d in _load_gslides():
+            if d['id'] == gslide_id:
+                file_id = _extract_drive_file_id(d.get('embed_url'), 'gslide')
+                if file_id:
+                    _delete_drive_file(file_id)
+                break
+    items = [d for d in _load_gslides() if d['id'] != gslide_id]
+    _save_gslides(items)
+    _drop_gdrive_content('gslide', gslide_id)
+    return '', 204
+
+
+@app.route('/api/gslides/<gslide_id>', methods=['GET'])
+@_studio_auth_required
+def get_gslide(gslide_id):
+    for d in _load_gslides():
+        if d['id'] == gslide_id:
+            return jsonify(d)
+    return jsonify({'error': 'Not found'}), 404
+
+
+@app.route('/api/visitor/gslides/<gslide_id>', methods=['GET'])
+@_viewer_auth_required
+def get_visitor_gslide(gslide_id):
+    for d in _visitor_visible_docs('gslide', _load_gslides()):
+        if d['id'] == gslide_id:
             return jsonify(d)
     return jsonify({'error': 'Not found'}), 404
 
@@ -5376,11 +5619,12 @@ def _text_from_sheet(data):
     return out
 
 
-def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None, pdfs=None):
+def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None, gslides=None, reports=None, pdfs=None):
     board_items = boards if boards is not None else _load_boards()
     sheet_items = sheets if sheets is not None else _load_sheets()
     gdoc_items = gdocs if gdocs is not None else _load_gdocs()
     gsheet_items = gsheets if gsheets is not None else _load_gsheets()
+    gslide_items = gslides if gslides is not None else _load_gslides()
     report_items = reports if reports is not None else _load_reports()
     pdf_items = pdfs if pdfs is not None else _load_pdfs()
     drive_contents = _load_gdrive_contents()
@@ -5390,6 +5634,7 @@ def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None,
     for doc_type, items in (
         ('board', board_items), ('sheet', sheet_items),
         ('gdoc', gdoc_items),   ('gsheet', gsheet_items),
+        ('gslide', gslide_items),
         ('report', report_items),
         ('pdf', pdf_items),
     ):
@@ -5460,6 +5705,18 @@ def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None,
                 'kind': 'gsheet',
                 'text': cell,
             }
+    for gslide in gslide_items:
+        cached = drive_contents.get(f'gslide-{gslide["id"]}') or {}
+        text = (cached.get('text') or '').strip()
+        if not text:
+            continue
+        yield {
+            'doc_type': 'gslide',
+            'doc_id': gslide['id'],
+            'doc_name': gslide['name'],
+            'kind': 'gslide',
+            'text': text,
+        }
     for report in report_items:
         blob = _load(_report_file(report['id']), {}) or {}
         text = (blob.get('text') or '').strip()
@@ -5554,7 +5811,7 @@ def _keyword(text, query):
     return score
 
 
-def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None, pdfs=None):
+def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, gslides=None, reports=None, pdfs=None):
     body = request.json or {}
     query = (body.get('query') or '').strip()
     if not query:
@@ -5565,6 +5822,7 @@ def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, reports=
         sheets=sheets,
         gdocs=gdocs,
         gsheets=gsheets,
+        gslides=gslides,
         reports=reports,
         pdfs=pdfs,
     ))
@@ -5606,6 +5864,7 @@ def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, reports=
                     'sheet': 'spreadsheet cell',
                     'gdoc': 'Doc',
                     'gsheet': 'Sheet',
+                    'gslide': 'Slides',
                     'report': 'Report',
                     'pdf': 'PDF page',
                 }.get(item['kind'], item['kind']),
@@ -5634,6 +5893,7 @@ def visitor_search():
         'sheet': _load_sheets(),
         'gdoc': _load_gdocs(),
         'gsheet': _load_gsheets(),
+        'gslide': _load_gslides(),
         'report': _load_reports(),
         'pdf': _load_pdfs(),
     }
@@ -5641,6 +5901,7 @@ def visitor_search():
     sheets = _visitor_visible_docs('sheet', docs_by_kind['sheet'], workspace=workspace, docs_by_kind=docs_by_kind)
     gdocs = _visitor_visible_docs('gdoc', docs_by_kind['gdoc'], workspace=workspace, docs_by_kind=docs_by_kind)
     gsheets = _visitor_visible_docs('gsheet', docs_by_kind['gsheet'], workspace=workspace, docs_by_kind=docs_by_kind)
+    gslides = _visitor_visible_docs('gslide', docs_by_kind['gslide'], workspace=workspace, docs_by_kind=docs_by_kind)
     reports = _visitor_visible_docs('report', docs_by_kind['report'], workspace=workspace, docs_by_kind=docs_by_kind)
     pdfs = _visitor_visible_docs('pdf', docs_by_kind['pdf'], workspace=workspace, docs_by_kind=docs_by_kind)
     return jsonify(_search_payload(
@@ -5648,6 +5909,7 @@ def visitor_search():
         sheets=sheets,
         gdocs=gdocs,
         gsheets=gsheets,
+        gslides=gslides,
         reports=reports,
         pdfs=pdfs,
     ))

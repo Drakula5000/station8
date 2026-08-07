@@ -6,8 +6,9 @@ const DOC_TYPE_ORDER = {
   board: 0,
   gdoc: 1,
   gsheet: 2,
-  report: 3,
-  pdf: 4,
+  gslide: 3,
+  report: 4,
+  pdf: 5,
 }
 
 export function sidebarParentKey(folderId) {
