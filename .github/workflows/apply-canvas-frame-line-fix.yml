@@ -1,0 +1,132 @@
+name: Apply canvas frame and line fix
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - frontend/src/canvas/StationFrameShapeUtil.js
+      - frontend/src/canvas/StationFrameShapeUtil.test.js
+      - frontend/src/components/ShapeInspector.jsx
+      - .github/workflows/apply-canvas-frame-line-fix.yml
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  apply-and-verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply stronger section unclipping and line curve UI
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              text = path.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              path.write_text(text.replace(old, new, 1))
+
+          frame = Path('frontend/src/canvas/StationFrameShapeUtil.js')
+          replace_once(
+              frame,
+              "export class StationFrameShapeUtil extends ColoredFrameShapeUtil {\n  shouldClipChild() {\n    return false\n  }\n}\n",
+              "export class StationFrameShapeUtil extends ColoredFrameShapeUtil {\n  // Removing the clip path entirely is stronger than shouldClipChild(false):\n  // it also prevents selection/indicator layers from being cut at a section\n  // edge in tldraw 4.x. Station sections organize content; they never crop it.\n  getClipPath() {\n    return undefined\n  }\n\n  shouldClipChild() {\n    return false\n  }\n}\n",
+              'strengthen Station frame unclipping',
+          )
+
+          frame_test = Path('frontend/src/canvas/StationFrameShapeUtil.test.js')
+          replace_once(
+              frame_test,
+              "  assert.match(source, /shouldClipChild\\(\\)\\s*\\{\\s*return false\\s*\\}/)\n",
+              "  assert.match(source, /getClipPath\\(\\)\\s*\\{\\s*return undefined\\s*\\}/)\n  assert.match(source, /shouldClipChild\\(\\)\\s*\\{\\s*return false\\s*\\}/)\n",
+              'test clip path removal',
+          )
+
+          inspector = Path('frontend/src/components/ShapeInspector.jsx')
+          replace_once(
+              inspector,
+              "const STROKE_TOGGLE_OPTIONS = [\n  { id: 'on',  label: 'On',  title: 'Border on' },\n  { id: 'off', label: 'Off', title: 'No border' },\n]\n\nconst IMAGE_BORDER_OPTIONS = [",
+              "const STROKE_TOGGLE_OPTIONS = [\n  { id: 'on',  label: 'On',  title: 'Border on' },\n  { id: 'off', label: 'Off', title: 'No border' },\n]\n\nconst LINE_SPLINE_OPTIONS = [\n  { id: 'line', label: 'Straight', title: 'Straight segments' },\n  { id: 'cubic', label: 'Curve', title: 'Smooth curve through every line point' },\n]\n\nconst IMAGE_BORDER_OPTIONS = [",
+              'add line spline options',
+          )
+          replace_once(
+              inspector,
+              "const SHAPES_WITH_ARROWHEADS = new Set(['arrow'])\n// Shapes where \"no border\" is meaningful:",
+              "const SHAPES_WITH_ARROWHEADS = new Set(['arrow'])\nconst SHAPES_WITH_LINE_SPLINE = new Set(['line'])\n// Shapes where \"no border\" is meaningful:",
+              'add line spline shape set',
+          )
+          replace_once(
+              inspector,
+              "  const showStrokeStyle = allShapesMatch(shapes, SHAPES_WITH_STROKE_STYLE)\n  const showStrokeToggle = allShapesMatch(shapes, SHAPES_WITH_STROKE_TOGGLE)\n",
+              "  const showStrokeStyle = allShapesMatch(shapes, SHAPES_WITH_STROKE_STYLE)\n  const showStrokeToggle = allShapesMatch(shapes, SHAPES_WITH_STROKE_TOGGLE)\n  const showLineSpline = allShapesMatch(shapes, SHAPES_WITH_LINE_SPLINE)\n",
+              'show line spline row',
+          )
+          replace_once(
+              inspector,
+              "    || showStrokeStyle\n    || showStrokeToggle\n  )) {",
+              "    || showStrokeStyle\n    || showStrokeToggle\n    || showLineSpline\n  )) {",
+              'keep inspector for line spline',
+          )
+          replace_once(
+              inspector,
+              "  const activeStrokeStyle = showStrokeStyle ? sharedStyle(editor, DefaultDashStyle) : undefined\n  const activeArrowheadStart = showArrowheads ? sharedStyle(editor, ArrowShapeArrowheadStartStyle) : undefined\n",
+              "  const activeStrokeStyle = showStrokeStyle ? sharedStyle(editor, DefaultDashStyle) : undefined\n  const activeLineSpline = showLineSpline && shapes.every(\n    (shape) => shape.props?.spline === shapes[0].props?.spline\n  ) ? shapes[0].props?.spline : undefined\n  const activeArrowheadStart = showArrowheads ? sharedStyle(editor, ArrowShapeArrowheadStartStyle) : undefined\n",
+              'read line spline state',
+          )
+          replace_once(
+              inspector,
+              "  const applyImageBorderColorAuto = () => updateMeta('imageBorderColor', AUTO_IMAGE_BORDER)\n  const applyArrowheadStart = (id) => editor.setStyleForSelectedShapes(ArrowShapeArrowheadStartStyle, id)\n",
+              "  const applyImageBorderColorAuto = () => updateMeta('imageBorderColor', AUTO_IMAGE_BORDER)\n  const applyLineSpline = (id) => editor.updateShapes(\n    shapes.map((shape) => ({ id: shape.id, type: shape.type, props: { spline: id } }))\n  )\n  const applyArrowheadStart = (id) => editor.setStyleForSelectedShapes(ArrowShapeArrowheadStartStyle, id)\n",
+              'apply line spline state',
+          )
+          replace_once(
+              inspector,
+              "      {showFont && (\n        <div className=\"insp-row\">",
+              "      {showLineSpline && (\n        <div className=\"insp-row\">\n          <div className=\"insp-label\">Path</div>\n          <div className=\"insp-body\">\n            {LINE_SPLINE_OPTIONS.map((option) => (\n              <button\n                key={option.id}\n                className={`insp-btn ${activeLineSpline === option.id ? 'active' : ''}`}\n                onClick={() => applyLineSpline(option.id)}\n                title={option.title}\n                type=\"button\"\n              >{option.label}</button>\n            ))}\n          </div>\n        </div>\n      )}\n\n      {showFont && (\n        <div className=\"insp-row\">",
+              'render line path controls',
+          )
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+        working-directory: frontend
+
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Unit tests
+        run: npm test
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          rm .github/workflows/apply-canvas-frame-line-fix.yml
+          git config user.name "Station 8 Fix Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add frontend/src/canvas/StationFrameShapeUtil.js frontend/src/canvas/StationFrameShapeUtil.test.js frontend/src/components/ShapeInspector.jsx .github/workflows
+          git commit -m "fix(canvas): remove section clipping and expose line curves"
+          git push origin HEAD:${{ github.head_ref }}
