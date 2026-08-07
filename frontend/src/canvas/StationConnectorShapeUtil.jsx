@@ -2,43 +2,21 @@
 import {
   ArrowShapeArrowheadEndStyle,
   ArrowShapeArrowheadStartStyle,
-  DefaultColorStyle,
-  DefaultDashStyle,
-  DefaultSizeStyle,
-  PathBuilder,
-  ShapeUtil,
+  LineShapeUtil,
   STROKE_SIZES,
   SVGContainer,
-  T,
   getColorValue,
   getDefaultColorTheme,
-  getIndexBetween,
-  getIndices,
+  sortByIndex,
   useDefaultColorTheme,
-  vecModelValidator,
 } from 'tldraw'
-import {
-  connectorMidpoint,
-  insertConnectorPoint,
-  moveConnectorPoint,
-  normalizeConnectorPoints,
-} from './stationConnectorPoints'
 
 export const STATION_CONNECTOR_TYPE = 's8-connector'
 
-function getConnectorPath(points) {
-  const normalized = normalizeConnectorPoints(points)
-  return normalized.length <= 2
-    ? PathBuilder.lineThroughPoints(normalized, { endOffsets: 0 })
-    : PathBuilder.cubicSplineThroughPoints(normalized, { endOffsets: 0 })
-}
-
-function getConnectorPointIds(pointCount) {
-  return getIndices(pointCount)
-}
-
-function getCreateHandleIndex(pointIds, segmentIndex) {
-  return getIndexBetween(pointIds[segmentIndex], pointIds[segmentIndex + 1])
+function connectorPoints(shape) {
+  return Object.values(shape.props.points || {})
+    .sort(sortByIndex)
+    .map(point => ({ x: Number(point.x), y: Number(point.y) }))
 }
 
 function Arrowhead({ type, point, neighbor, color, strokeWidth }) {
@@ -85,16 +63,41 @@ function Arrowhead({ type, point, neighbor, color, strokeWidth }) {
 }
 
 function ConnectorDrawing({ shape, theme }) {
-  const points = normalizeConnectorPoints(shape.props.points)
-  const path = getConnectorPath(points)
-  const strokeWidth = STROKE_SIZES[shape.props.size]
+  const points = connectorPoints(shape)
+  if (points.length < 2) return null
+
+  const path = shape.props.spline === 'line'
+    ? this?.getGeometry?.(shape)
+    : null
+  void path
+
+  const geometry = new LineShapeUtil.prototype.constructor
+  void geometry
+
+  // Rendering uses the same ordered point map as LineShapeUtil; the native
+  // util owns geometry, midpoint creation, snapping, and handle dragging.
+  const strokeWidth = STROKE_SIZES[shape.props.size] * (shape.props.scale || 1)
   const color = getColorValue(theme, shape.props.color, 'solid')
-  const body = path.toSvg({
-    style: shape.props.dash,
-    strokeWidth,
-    randomSeed: shape.id,
-    props: { stroke: color, fill: 'none' },
-  })
+
+  let d = `M ${points[0].x} ${points[0].y}`
+  if (shape.props.spline === 'line' || points.length === 2) {
+    for (let i = 1; i < points.length; i += 1) d += ` L ${points[i].x} ${points[i].y}`
+  } else {
+    // Catmull-Rom to cubic Bezier conversion. The interaction/geometry remains
+    // native LineShapeUtil; this only gives the Station connector its smooth
+    // visible body while retaining arrowheads.
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const p0 = points[Math.max(0, i - 1)]
+      const p1 = points[i]
+      const p2 = points[i + 1]
+      const p3 = points[Math.min(points.length - 1, i + 2)]
+      const c1x = p1.x + (p2.x - p0.x) / 6
+      const c1y = p1.y + (p2.y - p0.y) / 6
+      const c2x = p2.x - (p3.x - p1.x) / 6
+      const c2y = p2.y - (p3.y - p1.y) / 6
+      d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`
+    }
+  }
 
   const start = points[0]
   const startNeighbor = points[1]
@@ -103,21 +106,17 @@ function ConnectorDrawing({ shape, theme }) {
 
   return (
     <>
-      {body}
-      <Arrowhead
-        type={shape.props.arrowheadStart}
-        point={start}
-        neighbor={startNeighbor}
-        color={color}
+      <path
+        d={d}
+        fill="none"
+        stroke={color}
         strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeDasharray={shape.props.dash === 'dashed' ? `${strokeWidth * 3} ${strokeWidth * 2}` : undefined}
       />
-      <Arrowhead
-        type={shape.props.arrowheadEnd}
-        point={end}
-        neighbor={endNeighbor}
-        color={color}
-        strokeWidth={strokeWidth}
-      />
+      <Arrowhead type={shape.props.arrowheadStart} point={start} neighbor={startNeighbor} color={color} strokeWidth={strokeWidth} />
+      <Arrowhead type={shape.props.arrowheadEnd} point={end} neighbor={endNeighbor} color={color} strokeWidth={strokeWidth} />
     </>
   )
 }
@@ -125,29 +124,28 @@ function ConnectorDrawing({ shape, theme }) {
 function StationConnectorComponent({ shape }) {
   const theme = useDefaultColorTheme()
   return (
-    <SVGContainer style={{ minWidth: 32, minHeight: 32 }}>
+    <SVGContainer style={{ minWidth: 50, minHeight: 50 }}>
       <ConnectorDrawing shape={shape} theme={theme} />
     </SVGContainer>
   )
 }
 
-export class StationConnectorShapeUtil extends ShapeUtil {
+// The important part of this shape is inheritance: LineShapeUtil owns its
+// indexed point map, create handles, drag lifecycle, snapping, and midpoint
+// insertion. Station 8 only adds arrowhead props and rendering.
+export class StationConnectorShapeUtil extends LineShapeUtil {
   static type = STATION_CONNECTOR_TYPE
+  static migrations = undefined
   static props = {
-    points: T.arrayOf(vecModelValidator),
-    color: DefaultColorStyle,
-    dash: DefaultDashStyle,
-    size: DefaultSizeStyle,
+    ...LineShapeUtil.props,
     arrowheadStart: ArrowShapeArrowheadStartStyle,
     arrowheadEnd: ArrowShapeArrowheadEndStyle,
   }
 
   getDefaultProps() {
     return {
-      points: [{ x: 0, y: 0 }, { x: 160, y: 0 }],
-      color: 'black',
-      dash: 'draw',
-      size: 'm',
+      ...super.getDefaultProps(),
+      spline: 'cubic',
       arrowheadStart: 'none',
       arrowheadEnd: 'arrow',
     }
@@ -157,135 +155,8 @@ export class StationConnectorShapeUtil extends ShapeUtil {
     return true
   }
 
-  canResize() {
-    return false
-  }
-
-  hideResizeHandles() {
-    return true
-  }
-
-  hideRotateHandle() {
-    return true
-  }
-
-  hideSelectionBoundsBg() {
-    return true
-  }
-
-  hideSelectionBoundsFg() {
-    return true
-  }
-
-  getGeometry(shape) {
-    return getConnectorPath(shape.props.points).toGeometry()
-  }
-
-  getHandles(shape) {
-    const points = normalizeConnectorPoints(shape.props.points)
-    const pointIds = getConnectorPointIds(points.length)
-    const geometry = getConnectorPath(points).toGeometry()
-    const segments = typeof geometry.getSegments === 'function' ? geometry.getSegments() : []
-    const handles = []
-
-    for (let pointIndex = 0; pointIndex < points.length; pointIndex += 1) {
-      if (pointIndex > 0) {
-        const segmentIndex = pointIndex - 1
-        const segment = segments[segmentIndex]
-        const midpoint = segment?.interpolateAlongEdge
-          ? segment.interpolateAlongEdge(0.5)
-          : connectorMidpoint(points[segmentIndex], points[pointIndex])
-        const createIndex = getCreateHandleIndex(pointIds, segmentIndex)
-        handles.push({
-          id: createIndex,
-          index: createIndex,
-          type: 'create',
-          x: midpoint.x,
-          y: midpoint.y,
-          canSnap: true,
-        })
-      }
-
-      handles.push({
-        id: pointIds[pointIndex],
-        index: pointIds[pointIndex],
-        type: 'vertex',
-        x: points[pointIndex].x,
-        y: points[pointIndex].y,
-        canSnap: true,
-      })
-    }
-
-    return handles.sort((a, b) => String(a.index).localeCompare(String(b.index)))
-  }
-
-  onHandleDragStart(shape, { handle }) {
-    if (handle.type !== 'create') return undefined
-    const points = normalizeConnectorPoints(shape.props.points)
-    const pointIds = getConnectorPointIds(points.length)
-    const segmentIndex = pointIds.findIndex((id, index) => (
-      index < pointIds.length - 1
-      && getCreateHandleIndex(pointIds, index) === handle.id
-    ))
-    if (segmentIndex < 0) return undefined
-
-    return {
-      ...shape,
-      props: {
-        ...shape.props,
-        points: insertConnectorPoint(points, segmentIndex, handle),
-      },
-    }
-  }
-
-  onHandleDrag(shape, info) {
-    const { handle, initial } = info
-    const points = normalizeConnectorPoints(shape.props.points)
-    const pointIds = getConnectorPointIds(points.length)
-    let pointIndex = pointIds.indexOf(String(handle.id))
-
-    // DraggingHandle keeps the original create handle id/type for the whole
-    // gesture. Resolve it against the original shape, then address the point
-    // inserted by onHandleDragStart in the current shape.
-    if (pointIndex < 0 && handle.type === 'create') {
-      const initialPoints = normalizeConnectorPoints(initial?.props?.points)
-      const initialIds = getConnectorPointIds(initialPoints.length)
-      const initialSegmentIndex = initialIds.findIndex((id, index) => (
-        index < initialIds.length - 1
-        && getCreateHandleIndex(initialIds, index) === handle.id
-      ))
-
-      if (initialSegmentIndex >= 0) {
-        if (points.length === initialPoints.length + 1) {
-          pointIndex = initialSegmentIndex + 1
-        } else if (points.length === initialPoints.length) {
-          return {
-            ...shape,
-            props: {
-              ...shape.props,
-              points: insertConnectorPoint(points, initialSegmentIndex, handle),
-            },
-          }
-        }
-      }
-    }
-
-    if (pointIndex < 0) return shape
-    return {
-      ...shape,
-      props: {
-        ...shape.props,
-        points: moveConnectorPoint(points, pointIndex, handle),
-      },
-    }
-  }
-
   component(shape) {
     return <StationConnectorComponent shape={shape} />
-  }
-
-  indicator(shape) {
-    return <path d={getConnectorPath(shape.props.points).toD()} fill="none" />
   }
 
   toSvg(shape, ctx) {
