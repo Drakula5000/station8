@@ -1,8 +1,9 @@
 name: Run native connector feature fix
 
 on:
-  push:
-    branches: [fix/native-line-connector-canvas-office-drop]
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
@@ -12,6 +13,7 @@ permissions:
 
 jobs:
   apply-and-verify:
+    if: github.event.pull_request.head.ref == 'fix/native-line-connector-canvas-office-drop' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
