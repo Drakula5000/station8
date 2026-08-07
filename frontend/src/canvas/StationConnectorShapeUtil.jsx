@@ -8,15 +8,19 @@ import {
   SVGContainer,
   getColorValue,
   getDefaultColorTheme,
+  getIndexBetween,
   sortByIndex,
   useDefaultColorTheme,
 } from 'tldraw'
 
 export const STATION_CONNECTOR_TYPE = 's8-connector'
 
+function connectorPointRecords(shape) {
+  return Object.values(shape.props.points || {}).sort(sortByIndex)
+}
+
 function connectorPoints(shape) {
-  return Object.values(shape.props.points || {})
-    .sort(sortByIndex)
+  return connectorPointRecords(shape)
     .map(point => ({ x: Number(point.x), y: Number(point.y) }))
 }
 
@@ -107,8 +111,10 @@ function StationConnectorComponent({ shape }) {
   )
 }
 
-// LineShapeUtil owns the indexed point map, create handles, drag lifecycle,
-// snapping, and midpoint insertion. Station 8 only adds arrowheads/rendering.
+// LineShapeUtil owns the point insertion / drag lifecycle. Station 8 keeps a
+// fresh handle list instead of LineShapeUtil's WeakCache so a midpoint that is
+// created by a drag is hit-testable on the very next hover, not one interaction
+// later. Create handles remain visually hidden until hover (native tldraw UX).
 export class StationConnectorShapeUtil extends LineShapeUtil {
   static type = STATION_CONNECTOR_TYPE
   static migrations = undefined
@@ -129,6 +135,37 @@ export class StationConnectorShapeUtil extends LineShapeUtil {
 
   canEdit() {
     return true
+  }
+
+  getHandles(shape) {
+    const points = connectorPointRecords(shape)
+    if (points.length < 2) return []
+
+    const geometry = this.getGeometry(shape)
+    const segments = typeof geometry?.getSegments === 'function' ? geometry.getSegments() : []
+    const handles = points.map(point => ({
+      ...point,
+      id: point.id,
+      type: 'vertex',
+      canSnap: true,
+    }))
+
+    for (let index = 0; index < points.length - 1; index += 1) {
+      const segment = segments[index]
+      if (!segment?.interpolateAlongEdge) continue
+      const handleIndex = getIndexBetween(points[index].index, points[index + 1].index)
+      const midpoint = segment.interpolateAlongEdge(0.5)
+      handles.push({
+        id: handleIndex,
+        type: 'create',
+        index: handleIndex,
+        x: midpoint.x,
+        y: midpoint.y,
+        canSnap: true,
+      })
+    }
+
+    return handles.sort(sortByIndex)
   }
 
   component(shape) {
