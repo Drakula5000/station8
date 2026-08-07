@@ -48,6 +48,17 @@ const compareByName = (a, b) => (a.name || '').localeCompare(b.name || '', undef
 const normalizeFolderValue = (value) => value === ROOT_FOLDER ? null : (value || null)
 const folderKey = (folderId) => folderId || ROOT_FOLDER
 
+function droppedFileProgressLabel(progress) {
+  if (!progress) return ''
+  if (progress.phase !== 'office') return pdfProgressLabel(progress)
+  const total = Number(progress.total) || 1
+  const index = Number(progress.index) || 0
+  const queue = total > 1 ? `${index + 1} of ${total} · ` : ''
+  const remaining = Math.max(0, total - index - 1)
+  const queued = remaining ? ` · ${remaining} more queued` : ''
+  return `${queue}Converting to ${progress.officeLabel || 'Google'}…${queued}`
+}
+
 function buildFolderMap(folders) {
   const map = {}
   for (const folder of folders) map[folder.id] = folder
@@ -1545,6 +1556,7 @@ export default function App() {
     if (kind === 'board') setBoards(updater)
     else if (kind === 'gdoc') setGdocs(updater)
     else if (kind === 'gsheet') setGsheets(updater)
+    else if (kind === 'gslide') setGslides(updater)
     else if (kind === 'report') setReports(updater)
     else if (kind === 'pdf') setPdfs(updater)
   }
@@ -2092,14 +2104,21 @@ export default function App() {
       showError('Another file import is already in progress.')
       return
     }
+
     const classified = files.map(file => ({ file, route: classifyDroppedFile(file) }))
-    const unsupported = classified.filter(item => item.route.type === 'unsupported')
-    if (unsupported.length) {
-      const first = unsupported[0].file?.name || 'That file'
-      showError(`${first}: Station 8 accepts PDF, Word (.docx), and PowerPoint (.pptx) drops.`)
-    }
     const accepted = classified.filter(item => item.route.type !== 'unsupported')
-    if (!accepted.length) return
+    const unsupported = classified.filter(item => item.route.type === 'unsupported')
+    if (!accepted.length) {
+      const first = unsupported[0]?.file?.name || 'That file'
+      showError(`${first}: Station 8 accepts PDF, Word (.docx), and PowerPoint (.pptx) drops.`)
+      return
+    }
+
+    // Supported Office files are never sent through PDF validation. Clear any
+    // previous drop error before beginning a valid batch; unsupported members
+    // of a mixed batch are reported only after the accepted imports finish.
+    setErrorVisible(false)
+    setErrorMessage('')
 
     const destination = targetFolderId
       ? buildFolderPath(targetFolderId, folderById) || 'Workspace root'
@@ -2109,43 +2128,53 @@ export default function App() {
     const controller = new AbortController()
     pdfDropAbortRef.current = controller
     const importedOffice = []
-    try {
-      const officeItems = accepted.filter(item => item.route.type === 'office')
-      for (let index = 0; index < officeItems.length; index += 1) {
-        const { file, route } = officeItems[index]
-        setPdfDropProgress({
-          phase: 'office', file, index, total: accepted.length, destination,
-          officeLabel: route.label,
-        })
-        try {
-          const imported = await importOfficeFile(file, targetFolderId)
-          importedOffice.push(imported)
-          if (imported.kind === 'gdoc') setGdocs(items => [imported.item, ...items])
-          if (imported.kind === 'gslide') setGslides(items => [imported.item, ...items])
-          if (imported.item.folder_id) expandFolderPath(imported.item.folder_id)
-        } catch (error) {
-          if (error?.code === 'google_reconnect_required') {
-            requireGoogleReconnect(true)
-          } else if (error?.code === 'google_connection_required') {
-            showError('Connect Google first so Station 8 can convert Word and PowerPoint files.')
-          } else {
-            showError(`${file.name}: ${error?.message || 'Could not import this Office file.'}`)
-          }
-        }
-      }
 
-      const pdfFiles = accepted.filter(item => item.route.type === 'pdf').map(item => item.file)
-      if (pdfFiles.length) {
-        const result = await uploadPdfFiles(pdfFiles, targetFolderId, progress => {
-          setPdfDropProgress({ ...progress, destination })
-        }, { signal: controller.signal })
-        if (result.uploaded.length) {
-          addUploadedPdfRecords(result.uploaded, { openSingle: accepted.length === 1 && result.uploaded.length === 1 })
+    try {
+      for (let index = 0; index < accepted.length; index += 1) {
+        const { file, route } = accepted[index]
+
+        if (route.type === 'office') {
+          setPdfDropProgress({
+            phase: 'office', file, index, total: accepted.length, destination,
+            officeLabel: route.label,
+          })
+          try {
+            const imported = await importOfficeFile(file, targetFolderId)
+            importedOffice.push(imported)
+            if (imported.kind === 'gdoc') setGdocs(items => [imported.item, ...items])
+            if (imported.kind === 'gslide') setGslides(items => [imported.item, ...items])
+            if (imported.item.folder_id) expandFolderPath(imported.item.folder_id)
+          } catch (error) {
+            if (error?.code === 'google_reconnect_required') {
+              requireGoogleReconnect(true)
+            } else if (error?.code === 'google_connection_required') {
+              showError('Connect Google first so Station 8 can convert Word and PowerPoint files.')
+            } else {
+              showError(`${file.name}: ${error?.message || 'Could not import this Office file.'}`)
+            }
+          }
+          continue
         }
-        if (result.failed.length) {
-          const first = result.failed[0]
-          const suffix = result.failed.length > 1 ? ` (+${result.failed.length - 1} more)` : ''
-          showError(`${first.file?.name || 'PDF'}: ${first.error}${suffix}`)
+
+        if (route.type === 'pdf') {
+          const result = await uploadPdfFiles([file], targetFolderId, progress => {
+            setPdfDropProgress({
+              ...progress,
+              file,
+              index,
+              total: accepted.length,
+              destination,
+            })
+          }, { signal: controller.signal })
+          if (result.uploaded.length) {
+            addUploadedPdfRecords(result.uploaded, {
+              openSingle: accepted.length === 1 && result.uploaded.length === 1,
+            })
+          }
+          if (result.failed.length) {
+            const first = result.failed[0]
+            showError(`${first.file?.name || 'PDF'}: ${first.error}`)
+          }
         }
       }
 
@@ -2153,10 +2182,18 @@ export default function App() {
         const imported = importedOffice[0]
         openDocument(imported.kind, imported.item.id, imported.item.folder_id)
       }
+
+      if (unsupported.length) {
+        const first = unsupported[0].file?.name || 'That file'
+        const suffix = unsupported.length > 1 ? ` (+${unsupported.length - 1} more)` : ''
+        showError(`${first}: unsupported file type${suffix}. Station 8 accepts PDF, Word (.docx), and PowerPoint (.pptx) drops.`)
+      }
     } catch (error) {
       if (error?.name === 'AbortError') {
         if (error.uploaded?.length) {
-          addUploadedPdfRecords(error.uploaded, { openSingle: accepted.length === 1 && error.uploaded.length === 1 })
+          addUploadedPdfRecords(error.uploaded, {
+            openSingle: accepted.length === 1 && error.uploaded.length === 1,
+          })
         }
       } else {
         showError(error?.message || 'File import failed.')
@@ -3544,7 +3581,7 @@ export default function App() {
           <span className="pdf-drop-progress-dot" />
           {pdfDropProgress?.file?.name || 'Adding file…'}
           {pdfDropProgress?.destination ? ` to ${pdfDropProgress.destination}` : ''}
-          {pdfDropProgress ? ` · ${pdfDropProgress.phase === 'office' ? `Converting to ${pdfDropProgress.officeLabel}…` : pdfProgressLabel(pdfDropProgress)}` : ''}
+          {pdfDropProgress ? ` · ${droppedFileProgressLabel(pdfDropProgress)}` : ''}
           {!pdfDropProgress?.stopping && ['opening', 'reading', 'ocr'].includes(pdfDropProgress?.phase) && (
             <button
               className="pdf-drop-progress-stop"
