@@ -1,6 +1,7 @@
 import { track, useEditor } from 'tldraw'
 import { AURORA_SWATCHES } from '../colors'
 import { RECT_CLASS_GEOS } from './styleOptions'
+import { AUTO_IMAGE_BORDER, normalizeImageBorderColor } from './imageBorder'
 
 // Reactive components that inject per-shape CSS based on tldraw shape state.
 // React 19 hoists <style> tags into <head> automatically, so each component
@@ -105,7 +106,10 @@ export const ImageShapeStyles = track(function ImageShapeStyles() {
     const id = image.id
     const radius = image.props.crop?.isCircle ? '50%' : `${Number(image.meta?.imageCornerRadius ?? 0)}px`
     const borderWidth = Number(image.meta?.imageBorderWidth ?? 0)
-    const borderColor = image.meta?.imageBorderColor || 'var(--s8-accent)'
+    const storedBorderColor = normalizeImageBorderColor(image.meta?.imageBorderColor)
+    const borderColor = storedBorderColor === AUTO_IMAGE_BORDER
+      ? 'var(--s8-auto-contrast)'
+      : storedBorderColor
     const outlineStyle = borderWidth > 0
       ? `outline: ${borderWidth}px solid ${borderColor}; outline-offset: 0; will-change: transform;`
       : 'outline: none;'

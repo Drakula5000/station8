@@ -20,6 +20,7 @@ import {
   RECT_CLASS_GEOS,
 } from '../canvas/styleOptions'
 import { MAGIC_FILL } from '../canvas/magicFill'
+import { AUTO_IMAGE_BORDER, normalizeImageBorderColor } from '../canvas/imageBorder'
 
 const DEFAULT_FILL_OPACITY = 0.4
 
@@ -439,8 +440,9 @@ export const ShapeInspector = track(function ShapeInspector() {
     s => Number(s.meta?.imageBorderWidth ?? 0) === Number(shapes[0].meta?.imageBorderWidth ?? 0)
   ) ? Number(shapes[0].meta?.imageBorderWidth ?? 0) : undefined
   const activeImageBorderColor = showImageStyling && shapes.every(
-    s => String(s.meta?.imageBorderColor ?? COLOR_SWATCHES[5].bg) === String(shapes[0].meta?.imageBorderColor ?? COLOR_SWATCHES[5].bg)
-  ) ? String(shapes[0].meta?.imageBorderColor ?? COLOR_SWATCHES[5].bg) : undefined
+    s => normalizeImageBorderColor(s.meta?.imageBorderColor) === normalizeImageBorderColor(shapes[0].meta?.imageBorderColor)
+  ) ? normalizeImageBorderColor(shapes[0].meta?.imageBorderColor) : undefined
+  const isImageBorderAuto = showImageStyling && activeImageBorderColor === AUTO_IMAGE_BORDER
   const activeFillColor = showFill && shapes.every(
     (s) => String(getGeoFillColor(s)) === String(getGeoFillColor(shapes[0]))
   ) ? getGeoFillColor(shapes[0]) ?? undefined : undefined
@@ -600,6 +602,7 @@ export const ShapeInspector = track(function ShapeInspector() {
   const applyImageCorner = (rx) => updateMeta('imageCornerRadius', rx)
   const applyImageBorder = (width) => updateMeta('imageBorderWidth', width)
   const applyImageBorderColor = (color) => updateMeta('imageBorderColor', color)
+  const applyImageBorderColorAuto = () => updateMeta('imageBorderColor', AUTO_IMAGE_BORDER)
   const applyArrowheadStart = (id) => editor.setStyleForSelectedShapes(ArrowShapeArrowheadStartStyle, id)
   const applyArrowheadEnd   = (id) => editor.setStyleForSelectedShapes(ArrowShapeArrowheadEndStyle, id)
   const applyStrokeNone = (none) => updateMeta('strokeNone', none)
@@ -662,11 +665,11 @@ export const ShapeInspector = track(function ShapeInspector() {
                 "auto-flip with mode" intent. The active class fires when
                 every selected shape carries meta.autoColor — that's the
                 source of truth for "this shape is in magic mode". */}
-            {isAutoEligible && (
+            {(isAutoEligible || showImageStyling) && (
               <button
                 key="auto"
-                className={`insp-swatch ${isAllAutoColor ? 'active' : ''}`}
-                onClick={applyColorAuto}
+                className={`insp-swatch ${(showImageStyling ? isImageBorderAuto : isAllAutoColor) ? 'active' : ''}`}
+                onClick={showImageStyling ? applyImageBorderColorAuto : applyColorAuto}
                 title="Auto (follows canvas mode — flips with light/dark toggle)"
                 type="button"
                 data-swatch-id="auto"
