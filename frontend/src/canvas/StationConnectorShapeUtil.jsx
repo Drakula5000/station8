@@ -157,6 +157,10 @@ export class StationConnectorShapeUtil extends ShapeUtil {
     }
   }
 
+  canEdit() {
+    return true
+  }
+
   canResize() {
     return false
   }
