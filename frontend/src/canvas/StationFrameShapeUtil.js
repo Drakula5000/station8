@@ -7,6 +7,13 @@ import { FrameShapeUtil } from 'tldraw'
 const ColoredFrameShapeUtil = FrameShapeUtil.configure({ showColors: true })
 
 export class StationFrameShapeUtil extends ColoredFrameShapeUtil {
+  // Removing the clip path entirely is stronger than shouldClipChild(false):
+  // it also prevents selection/indicator layers from being cut at a section
+  // edge in tldraw 4.x. Station sections organize content; they never crop it.
+  getClipPath() {
+    return undefined
+  }
+
   shouldClipChild() {
     return false
   }
