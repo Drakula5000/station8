@@ -6,8 +6,8 @@ import { ShapeInspector } from './components/ShapeInspector'
 import { ImageLightbox } from './components/ImageLightbox'
 import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
+import { StationArrowShapeUtil } from './canvas/StationArrowShapeUtil'
 import { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'
-import { StationLineShapeUtil } from './canvas/StationLineShapeUtil'
 import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'
 import { StationTextShapeUtil } from './canvas/StationTextShapeUtil'
 import { FrameCornerStyles, GeoCornerStyles, ImageShapeStyles, ListStyles } from './canvas/ShapeStyles'
@@ -91,8 +91,8 @@ const FRAME_DROPPED_IMAGE_INSET = 32
 // StationTextShapeUtil sizes text shapes with our smaller font table; the
 // rendered font-size is overridden via CSS to match — see StationTextShapeUtil.js.
 const STATION_SHAPE_UTILS = [
+  StationArrowShapeUtil,
   StationFrameShapeUtil,
-  StationLineShapeUtil,
   StationNoteShapeUtil,
   StationTextShapeUtil,
 ]
