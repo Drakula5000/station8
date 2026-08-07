@@ -1,10 +1,40 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { connectorPointsFromArrowInfo, upgradeLoadedLegacyConnectors } from './legacyConnectorUpgrade.js'
+import {
+  connectorPointMap,
+  connectorPointsFromArrowInfo,
+  migrateStoredStationConnectors,
+  upgradeLoadedLegacyConnectors,
+} from './legacyConnectorUpgrade.js'
 
 const legacyArrow = (overrides = {}) => ({
   typeName: 'shape', id: 'shape:red', type: 'arrow', x: 10, y: 20, rotation: 0, index: 'a1', parentId: 'page:page', opacity: 1, isLocked: false, meta: {},
   props: { kind: 'arc', scale: 1, color: 'red', dash: 'dashed', size: 'm', arrowheadStart: 'arrow', arrowheadEnd: 'bar', richText: { type: 'doc', content: [] }, ...overrides },
+})
+
+test('connector point maps use stable tldraw Line ids and indexes', () => {
+  const mapped = connectorPointMap([{ x: 0, y: 0 }, { x: 50, y: 20 }, { x: 100, y: 0 }])
+  const points = Object.values(mapped)
+  assert.equal(points.length, 3)
+  for (const point of points) {
+    assert.equal(point.id, point.index)
+    assert.equal(typeof point.index, 'string')
+  }
+})
+
+test('stored array-based Station connectors migrate before tldraw validates them', () => {
+  const snapshot = { store: {
+    'shape:one': {
+      typeName: 'shape', id: 'shape:one', type: 's8-connector',
+      props: { points: [{ x: 0, y: 0 }, { x: 100, y: 0 }], color: 'black', dash: 'draw', size: 'm' },
+    },
+  } }
+  const migrated = migrateStoredStationConnectors(snapshot)
+  const props = migrated.store['shape:one'].props
+  assert.equal(Array.isArray(props.points), false)
+  assert.equal(Object.keys(props.points).length, 2)
+  assert.equal(props.spline, 'cubic')
+  assert.equal(props.scale, 1)
 })
 
 test('rendered native arc geometry becomes Station connector points', () => {
@@ -13,7 +43,7 @@ test('rendered native arc geometry becomes Station connector points', () => {
   }), [{ x: 1, y: 2 }, { x: 50, y: 30 }, { x: 100, y: 4 }])
 })
 
-test('bound/simple old arrows can upgrade after tldraw resolves their rendered geometry', () => {
+test('bound/simple old arrows upgrade to native point-map Station connectors', () => {
   const deleted = []
   const created = []
   const editor = {
@@ -33,7 +63,9 @@ test('bound/simple old arrows can upgrade after tldraw resolves their rendered g
   assert.equal(created[0].props.color, 'red')
   assert.equal(created[0].props.arrowheadStart, 'arrow')
   assert.equal(created[0].props.arrowheadEnd, 'bar')
-  assert.deepEqual(created[0].props.points, [{ x: 2, y: 3 }, { x: 40, y: 25 }, { x: 90, y: 5 }])
+  assert.equal(Array.isArray(created[0].props.points), false)
+  assert.equal(Object.keys(created[0].props.points).length, 3)
+  assert.equal(created[0].props.spline, 'cubic')
 })
 
 test('labeled and elbow arrows remain native', () => {
