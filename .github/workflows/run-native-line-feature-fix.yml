@@ -22,23 +22,61 @@ jobs:
           ref: fix/native-line-connector-canvas-office-drop
           fetch-depth: 0
 
-      - name: Execute staged source patch
+      - name: Patch canvas drop routing and stored connector migration
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          raw = Path('.github/workflows/native-line-connector-canvas-drop-fix.yml').read_text()
-          start = "          python - <<'PY'\n"
-          end = "\n          PY\n\n      - uses: actions/setup-node@v4"
-          if start not in raw or end not in raw:
-              raise SystemExit('staged Python patch anchors missing')
-          raw_body = raw.split(start, 1)[1].split(end, 1)[0]
-          body = '\n'.join(
-              line[10:] if line.startswith('          ') else line
-              for line in raw_body.splitlines()
-          )
-          exec(compile(body, 'native-line-connector-patch', 'exec'), {})
+          canvas_path = Path('frontend/src/TldrawCanvas.jsx')
+          canvas = canvas_path.read_text()
+
+          old_import = "import { upgradeLoadedLegacyConnectors } from './canvas/legacyConnectorUpgrade'"
+          new_import = "import { migrateStoredStationConnectors, upgradeLoadedLegacyConnectors } from './canvas/legacyConnectorUpgrade'"
+          if old_import in canvas:
+              canvas = canvas.replace(old_import, new_import, 1)
+          elif new_import not in canvas:
+              raise SystemExit('legacy connector import anchor missing')
+
+          old_sig = "export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveState, colorMode, findQuery, onFindDismiss, findBoards, onNavigateBoard, findShapeIds }) {"
+          new_sig = "export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveState, colorMode, findQuery, onFindDismiss, findBoards, onNavigateBoard, findShapeIds, onExternalFilesDrop }) {"
+          if old_sig in canvas:
+              canvas = canvas.replace(old_sig, new_sig, 1)
+          elif new_sig not in canvas:
+              raise SystemExit('TldrawCanvas signature anchor missing')
+
+          old_load = "          editor.store.loadStoreSnapshot(data.snapshot)\n          upgradeLoadedLegacyConnectors(editor, { getArrowInfo, createShapeId })"
+          new_load = "          editor.store.loadStoreSnapshot(migrateStoredStationConnectors(data.snapshot))\n          upgradeLoadedLegacyConnectors(editor, { getArrowInfo, createShapeId })"
+          if old_load in canvas:
+              canvas = canvas.replace(old_load, new_load, 1)
+          elif new_load not in canvas:
+              raise SystemExit('snapshot migration anchor missing')
+
+          handler_anchor = "  const ghostPx = ghost && editorRef.current\n"
+          handler = """  const handleDocumentDropCapture = useCallback((event) => {\n    if (readOnlyRef.current || typeof onExternalFilesDrop !== 'function') return\n    const files = Array.from(event.dataTransfer?.files || [])\n    const stationFiles = files.filter(file => /\\.(?:pdf|docx|pptx)$/i.test(String(file?.name || '')))\n    if (!stationFiles.length) return\n\n    // Station document types belong to Station 8's import queue, not tldraw's\n    // image/media asset importer. Stop the event here so tldraw cannot emit its\n    // generic \"File type is not allowed\" toast for a supported DOCX/PPTX/PDF.\n    event.preventDefault()\n    event.stopPropagation()\n    void onExternalFilesDrop(stationFiles)\n  }, [onExternalFilesDrop])\n\n"""
+          if 'const handleDocumentDropCapture = useCallback' not in canvas:
+              if handler_anchor not in canvas:
+                  raise SystemExit('canvas drop handler insertion anchor missing')
+              canvas = canvas.replace(handler_anchor, handler + handler_anchor, 1)
+
+          wrapper_anchor = "      onWheelCapture={handleWheelCapture}\n"
+          wrapper_drop = "      onDropCapture={handleDocumentDropCapture}\n"
+          if wrapper_drop not in canvas:
+              if wrapper_anchor not in canvas:
+                  raise SystemExit('canvas wrapper event anchor missing')
+              canvas = canvas.replace(wrapper_anchor, wrapper_anchor + wrapper_drop, 1)
+
+          canvas_path.write_text(canvas)
+
+          app_path = Path('frontend/src/App.jsx')
+          app = app_path.read_text()
+          nav_anchor = "                    onNavigateBoard={(boardId) => {\n"
+          drop_prop = "                    onExternalFilesDrop={(files) => uploadDroppedFiles(files, activeDoc?.folder_id || null)}\n"
+          if drop_prop not in app:
+              if nav_anchor not in app:
+                  raise SystemExit('App board canvas prop anchor missing')
+              app = app.replace(nav_anchor, drop_prop + nav_anchor, 1)
+          app_path.write_text(app)
           PY
 
       - uses: actions/setup-node@v4
@@ -67,5 +105,9 @@ jobs:
           git config user.name "Station 8 Fix Bot"
           git config user.email "actions@users.noreply.github.com"
           git add -A
-          git commit -m "fix: use native line handles and capture canvas document drops"
+          if git diff --cached --quiet; then
+            echo "Feature source already patched."
+            exit 0
+          fi
+          git commit -m "fix: route canvas document drops through Station 8"
           git push origin HEAD:fix/native-line-connector-canvas-office-drop
