@@ -6,18 +6,27 @@ function richTextPlainText(node) {
   return (node.content || []).map(richTextPlainText).join('')
 }
 
-function isSimpleLegacyArrow(shape) {
+function hasVisibleArrowLabel(shape) {
+  // Old tldraw snapshots can contain zero-width formatting characters even
+  // when the arrow has no visible label. Do not let those block migration.
+  return richTextPlainText(shape?.props?.richText)
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+    .trim().length > 0
+}
+
+function isLegacyArrowCandidate(shape) {
   const props = shape?.props || {}
   if (shape?.typeName !== 'shape' || shape?.type !== 'arrow') return false
   if (props.kind && props.kind !== 'arc') return false
-  if (Math.abs(Number(props.scale || 1) - 1) > 0.0001) return false
-  if (richTextPlainText(props.richText).trim()) return false
+  // A visible label is the one native-arrow feature Station Connector cannot
+  // preserve yet. Everything else from the old Connector tool can migrate.
+  if (hasVisibleArrowLabel(shape)) return false
   return true
 }
 
 export function connectorPointMap(points) {
   const normalized = (points || [])
-    .filter(point => point && Number.isFinite(point.x) && Number.isFinite(point.y))
+    .filter(point => point && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y)))
     .map(point => ({ x: Number(point.x), y: Number(point.y) }))
   if (normalized.length < 2) return null
 
@@ -28,9 +37,30 @@ export function connectorPointMap(points) {
   }))
 }
 
-// Station connectors saved by the first implementation stored points as an
-// array. Convert them to LineShapeUtil's native indexed point map before the
-// snapshot enters tldraw's store validator.
+function normalizeStoredPointMap(points) {
+  if (Array.isArray(points)) return connectorPointMap(points)
+  if (!points || typeof points !== 'object') return null
+
+  const entries = []
+  for (const [key, point] of Object.entries(points)) {
+    if (!point || !Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) continue
+    const id = String(point.id || key)
+    const index = String(point.index || key)
+    entries.push([id, {
+      ...point,
+      id,
+      index,
+      x: Number(point.x),
+      y: Number(point.y),
+    }])
+  }
+  return entries.length >= 2 ? Object.fromEntries(entries) : null
+}
+
+// Normalize every historical Station Connector snapshot, not only the first
+// array-based version. Several intermediate builds already stored a point map
+// but did not carry LineShapeUtil's spline/scale fields, which left those old
+// connectors looking fine while missing the new midpoint editing behavior.
 export function migrateStoredStationConnectors(snapshot) {
   const store = snapshot?.store
   if (!store || typeof store !== 'object') return snapshot
@@ -39,17 +69,17 @@ export function migrateStoredStationConnectors(snapshot) {
   const nextStore = { ...store }
   for (const [key, record] of Object.entries(store)) {
     if (record?.typeName !== 'shape' || record?.type !== 's8-connector') continue
-    if (!Array.isArray(record.props?.points)) continue
 
-    const points = connectorPointMap(record.props.points)
+    const points = normalizeStoredPointMap(record.props?.points)
     if (!points) continue
+    const rawScale = Number(record.props?.scale)
     nextStore[key] = {
       ...record,
       props: {
         ...record.props,
         points,
         spline: record.props?.spline || 'cubic',
-        scale: Number.isFinite(record.props?.scale) ? record.props.scale : 1,
+        scale: Number.isFinite(rawScale) ? rawScale : 1,
       },
     }
     changed = true
@@ -67,12 +97,13 @@ export function connectorPointsFromArrowInfo(info) {
   return points.map(point => ({ x: Number(point.x), y: Number(point.y) }))
 }
 
-// Upgrade after the native snapshot is loaded so tldraw resolves bound arrow
-// endpoints first. The replacement preserves the visible geometry but uses the
-// native Line point map, so it gets native midpoint interaction immediately.
+// Upgrade native arrows left behind by the pre-Station Connector toolbar after
+// tldraw resolves their rendered endpoints. This preserves visible geometry,
+// styling and scale, then gives the old connector the same native midpoint
+// interaction as a connector created today.
 export function upgradeLoadedLegacyConnectors(editor, { getArrowInfo, createShapeId }) {
   if (!editor || typeof getArrowInfo !== 'function' || typeof createShapeId !== 'function') return 0
-  const arrows = editor.getCurrentPageShapes().filter(isSimpleLegacyArrow)
+  const arrows = editor.getCurrentPageShapes().filter(isLegacyArrowCandidate)
   let upgraded = 0
 
   for (const arrow of arrows) {
@@ -86,6 +117,7 @@ export function upgradeLoadedLegacyConnectors(editor, { getArrowInfo, createShap
     const points = connectorPointMap(connectorPointsFromArrowInfo(info))
     if (!points) continue
 
+    const rawScale = Number(arrow.props?.scale)
     const replacement = {
       id: createShapeId(),
       type: 's8-connector',
@@ -104,7 +136,7 @@ export function upgradeLoadedLegacyConnectors(editor, { getArrowInfo, createShap
       props: {
         points,
         spline: 'cubic',
-        scale: 1,
+        scale: Number.isFinite(rawScale) ? rawScale : 1,
         color: arrow.props?.color || 'black',
         dash: arrow.props?.dash || 'draw',
         size: arrow.props?.size || 'm',
