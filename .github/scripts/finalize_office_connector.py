@@ -1,0 +1,187 @@
+from pathlib import Path
+
+server_path = Path('server.py')
+text = server_path.read_text()
+office_start = text.find('_OFFICE_IMPORTS = {')
+office_end = text.find('\ndef _create_drive_file_verbose', office_start)
+if office_start < 0 or office_end < 0:
+    raise SystemExit('Office import block anchors missing')
+
+block = r'''_OFFICE_IMPORTS = {
+    '.docx': {
+        'kind': 'gdoc',
+        'source_mime': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    },
+    '.pptx': {
+        'kind': 'gslide',
+        'source_mime': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    },
+}
+
+
+def _drive_import_office_file(filename, blob, source_mime, target_kind, parent_id=None, access_token=None, timeout=30):
+    """Upload an OOXML file and ask Drive to convert it to a Google-native type."""
+    access_token = access_token or _get_google_access_token()
+    target_mime = _DRIVE_MIME.get(target_kind)
+    if not access_token or not target_mime or not blob:
+        return None, None
+
+    display_name = os.path.splitext(os.path.basename(filename or 'Untitled'))[0].strip() or 'Untitled'
+    metadata = {'name': display_name, 'mimeType': target_mime}
+    if parent_id:
+        metadata['parents'] = [parent_id]
+
+    boundary = f'station8-{uuid.uuid4().hex}'
+    prefix = (
+        f'--{boundary}\r\n'
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n'
+        f'{json.dumps(metadata)}\r\n'
+        f'--{boundary}\r\n'
+        f'Content-Type: {source_mime}\r\n\r\n'
+    ).encode('utf-8')
+    suffix = f'\r\n--{boundary}--\r\n'.encode('utf-8')
+    body = prefix + blob + suffix
+    url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType'
+    try:
+        req = _urllib_request.Request(
+            url, data=body, method='POST',
+            headers={
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': f'multipart/related; boundary={boundary}',
+            },
+        )
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode('utf-8'))
+    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError) as exc:
+        print(f'Drive Office import failed for {filename}: {exc}', flush=True)
+        return None, None
+    file_id = payload.get('id')
+    if not file_id:
+        return None, None
+    return file_id, _DRIVE_EDIT_URL[target_kind].format(id=file_id)
+
+
+def _google_connection_error_code():
+    record = _load_google_token_record()
+    if not record.get('connected'):
+        return 'google_connection_required'
+    if record.get('reconnect_required') or not record.get('refresh_token'):
+        return 'google_reconnect_required'
+    return 'google_drive_unavailable'
+
+
+@app.route('/api/google/import-office', methods=['POST'])
+@_studio_auth_required
+def google_import_office():
+    upload = request.files.get('file')
+    if not upload or not upload.filename:
+        return jsonify({'error': 'office_file_required'}), 400
+
+    filename = os.path.basename(upload.filename)
+    extension = os.path.splitext(filename)[1].lower()
+    spec = _OFFICE_IMPORTS.get(extension)
+    if not spec:
+        return jsonify({'error': 'unsupported_office_type'}), 415
+
+    blob = upload.read(MAX_OFFICE_IMPORT_BYTES + 1)
+    if not blob:
+        return jsonify({'error': 'empty_office_file'}), 400
+    if len(blob) > MAX_OFFICE_IMPORT_BYTES:
+        return jsonify({'error': 'office_file_too_large'}), 413
+    if not blob.startswith(b'PK'):
+        return jsonify({'error': 'invalid_office_file'}), 400
+
+    access_token = _get_google_access_token()
+    if not access_token:
+        code = _google_connection_error_code()
+        return jsonify({'error': code}), 409 if code != 'google_drive_unavailable' else 502
+
+    folders = _get_workspace().get('folders', [])
+    folder_id = _normalize_folder_id(request.form.get('folder_id'), folders)
+    parent_drive_id = _drive_resolve_parent_for_doc(folder_id, access_token)
+    kind = spec['kind']
+    file_id, embed_url = _drive_import_office_file(
+        filename, blob, spec['source_mime'], kind,
+        parent_id=parent_drive_id, access_token=access_token,
+    )
+    if not file_id or not embed_url:
+        code = _google_connection_error_code()
+        if code in {'google_connection_required', 'google_reconnect_required'}:
+            return jsonify({'error': code}), 409
+        return jsonify({'error': 'google_drive_import_failed'}), 502
+
+    item = {
+        'id': str(uuid.uuid4())[:8],
+        'name': os.path.splitext(filename)[0].strip() or 'Untitled',
+        'tags': [],
+        'folder_id': folder_id,
+        'created_at': datetime.now().isoformat(),
+        'drive_file_id': file_id,
+        'embed_url': embed_url,
+    }
+    load_fn, save_fn = (
+        (_load_gdocs, _save_gdocs) if kind == 'gdoc' else (_load_gslides, _save_gslides)
+    )
+    try:
+        items = load_fn()
+        items.append(item)
+        save_fn(items)
+    except Exception:
+        _delete_drive_file(file_id)
+        raise
+
+    _share_drive_file_publicly(file_id)
+    _maybe_sync_one(item, kind)
+    return jsonify({'kind': kind, 'item': item}), 201
+
+'''
+server_path.write_text(text[:office_start] + block + text[office_end:])
+
+test_path = Path('tests/test_office_import.py')
+test_text = test_path.read_text()
+marker = "\n\nif __name__ == '__main__':\n"
+if 'test_drive_office_import_uses_crlf_multipart_body' not in test_text:
+    method = r'''
+    def test_drive_office_import_uses_crlf_multipart_body(self):
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+            def read(self):
+                return b'{"id":"doc-id"}'
+
+        def fake_urlopen(request, timeout=30):
+            captured['body'] = request.data
+            captured['content_type'] = request.get_header('Content-type')
+            return FakeResponse()
+
+        with patch.object(server._urllib_request, 'urlopen', side_effect=fake_urlopen):
+            file_id, url = server._drive_import_office_file(
+                'Exercises.docx',
+                b'PK\x03\x04office-data',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'gdoc',
+                parent_id='drive-folder',
+                access_token='token',
+            )
+
+        self.assertEqual(file_id, 'doc-id')
+        self.assertEqual(url, 'https://docs.google.com/document/d/doc-id/edit')
+        content_type = captured['content_type']
+        self.assertTrue(content_type.startswith('multipart/related; boundary='))
+        boundary = content_type.split('boundary=', 1)[1]
+        body = captured['body']
+        self.assertTrue(body.startswith(f'--{boundary}\r\n'.encode()))
+        self.assertIn(b'Content-Type: application/json; charset=UTF-8\r\n\r\n', body)
+        self.assertIn(
+            b'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\nPK\x03\x04office-data',
+            body,
+        )
+        self.assertTrue(body.endswith(f'\r\n--{boundary}--\r\n'.encode()))
+'''
+    if marker not in test_text:
+        raise SystemExit('Office test insertion anchor missing')
+    test_path.write_text(test_text.replace(marker, method + marker, 1))
