@@ -1,0 +1,446 @@
+name: Apply office drop and connector UX fixes
+
+on:
+  push:
+    branches:
+      - fix/office-drop-and-connector-ux
+  workflow_dispatch: {}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/office-drop-and-connector-ux
+          fetch-depth: 0
+
+      - name: Apply bounded source changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'anchor not found: {label}')
+              return text.replace(old, new, 1)
+
+          # ── Backend: first-class Google Slides + Office import ───────────
+          path = Path('server.py')
+          text = path.read_text()
+
+          text = replace_once(
+              text,
+              "GSHEETS_FILE = os.path.join(DATA_DIR, 'gsheets.json')\nGOOGLE_AUTH_FILE",
+              "GSHEETS_FILE = os.path.join(DATA_DIR, 'gsheets.json')\nGSLIDES_FILE = os.path.join(DATA_DIR, 'gslides.json')\nGOOGLE_AUTH_FILE",
+              'GSLIDES_FILE',
+          )
+          text = replace_once(
+              text,
+              "SIDEBAR_DOC_KEY_RE = re.compile(r'^(?:board|gdoc|gsheet|report|pdf):[A-Za-z0-9_-]{1,128}$')",
+              "SIDEBAR_DOC_KEY_RE = re.compile(r'^(?:board|gdoc|gsheet|gslide|report|pdf):[A-Za-z0-9_-]{1,128}$')",
+              'sidebar gslide key',
+          )
+          text = replace_once(
+              text,
+              "MAX_PDF_BYTES = 25 * 1024 * 1024\n",
+              "MAX_PDF_BYTES = 25 * 1024 * 1024\nMAX_OFFICE_IMPORT_BYTES = 25 * 1024 * 1024\n",
+              'office size limit',
+          )
+
+          gslide_loaders = '''\n\ndef _load_gslides():\n    folders = _get_workspace().get('folders', [])\n    return [_normalize_gdrive_doc(d, folders) for d in _load(GSLIDES_FILE, [])]\n\n\ndef _save_gslides(gslides):\n    folders = _get_workspace().get('folders', [])\n    _save(GSLIDES_FILE, [_normalize_gdrive_doc(d, folders) for d in gslides])\n\n\ndef _save_gslides_strict(gslides):\n    folders = _get_workspace().get('folders', [])\n    _save_json_strict(GSLIDES_FILE, [_normalize_gdrive_doc(d, folders) for d in gslides])\n'''
+          text = replace_once(
+              text,
+              "def _save_gsheets_strict(gsheets):\n    folders = _get_workspace().get('folders', [])\n    _save_json_strict(GSHEETS_FILE, [_normalize_gdrive_doc(d, folders) for d in gsheets])\n\n\ndef _load_reports():",
+              "def _save_gsheets_strict(gsheets):\n    folders = _get_workspace().get('folders', [])\n    _save_json_strict(GSHEETS_FILE, [_normalize_gdrive_doc(d, folders) for d in gsheets])\n" + gslide_loaders + "\n\ndef _load_reports():",
+              'gslide loaders',
+          )
+          text = replace_once(
+              text,
+              "        'gsheet': (_load_gsheets, _save_gsheets, _save_gsheets_strict),\n        'report':",
+              "        'gsheet': (_load_gsheets, _save_gsheets, _save_gsheets_strict),\n        'gslide': (_load_gslides, _save_gslides, _save_gslides_strict),\n        'report':",
+              'doc registry gslide',
+          )
+
+          old_ids = """_DRIVE_DOC_ID_RE = _re.compile(r'/document/d/([a-zA-Z0-9_-]+)')\n_DRIVE_SHEET_ID_RE = _re.compile(r'/spreadsheets/d/([a-zA-Z0-9_-]+)')\n\n\ndef _extract_drive_file_id(url, kind):\n    if not url:\n        return None\n    pattern = _DRIVE_DOC_ID_RE if kind == 'gdoc' else _DRIVE_SHEET_ID_RE\n    match = pattern.search(url)\n    return match.group(1) if match else None\n"""
+          new_ids = """_DRIVE_DOC_ID_RE = _re.compile(r'/document/d/([a-zA-Z0-9_-]+)')\n_DRIVE_SHEET_ID_RE = _re.compile(r'/spreadsheets/d/([a-zA-Z0-9_-]+)')\n_DRIVE_SLIDE_ID_RE = _re.compile(r'/presentation/d/([a-zA-Z0-9_-]+)')\n\n\ndef _extract_drive_file_id(url, kind):\n    if not url:\n        return None\n    patterns = {\n        'gdoc': _DRIVE_DOC_ID_RE,\n        'gsheet': _DRIVE_SHEET_ID_RE,\n        'gslide': _DRIVE_SLIDE_ID_RE,\n    }\n    pattern = patterns.get(kind)\n    if not pattern:\n        return None\n    match = pattern.search(url)\n    return match.group(1) if match else None\n"""
+          text = replace_once(text, old_ids, new_ids, 'slide id extraction')
+          text = replace_once(
+              text,
+              "        mime = 'text/plain' if kind == 'gdoc' else 'text/csv' if kind == 'gsheet' else None",
+              "        mime = 'text/plain' if kind in {'gdoc', 'gslide'} else 'text/csv' if kind == 'gsheet' else None",
+              'slide authenticated export',
+          )
+          text = replace_once(
+              text,
+              "    elif kind == 'gsheet':\n        url = f'https://docs.google.com/spreadsheets/d/{file_id}/export?format=csv'\n    else:\n        return None",
+              "    elif kind == 'gsheet':\n        url = f'https://docs.google.com/spreadsheets/d/{file_id}/export?format=csv'\n    elif kind == 'gslide':\n        url = f'https://docs.google.com/presentation/d/{file_id}/export/txt'\n    else:\n        return None",
+              'slide public export',
+          )
+          text = replace_once(
+              text,
+              "        for item in _load_gsheets():\n            if not (contents.get(f'gsheet-{item[\"id\"]}') or {}).get('text'):\n                if _sync_one_gdrive_doc(item, 'gsheet', contents):\n                    changed = True\n        if changed:",
+              "        for item in _load_gsheets():\n            if not (contents.get(f'gsheet-{item[\"id\"]}') or {}).get('text'):\n                if _sync_one_gdrive_doc(item, 'gsheet', contents):\n                    changed = True\n        for item in _load_gslides():\n            if not (contents.get(f'gslide-{item[\"id\"]}') or {}).get('text'):\n                if _sync_one_gdrive_doc(item, 'gslide', contents):\n                    changed = True\n        if changed:",
+              'sync missing slides',
+          )
+
+          text = replace_once(
+              text,
+              "_DRIVE_MIME = {\n    'gdoc': 'application/vnd.google-apps.document',\n    'gsheet': 'application/vnd.google-apps.spreadsheet',\n}",
+              "_DRIVE_MIME = {\n    'gdoc': 'application/vnd.google-apps.document',\n    'gsheet': 'application/vnd.google-apps.spreadsheet',\n    'gslide': 'application/vnd.google-apps.presentation',\n}",
+              'drive slide mime',
+          )
+          text = replace_once(
+              text,
+              "_DRIVE_EDIT_URL = {\n    'gdoc': 'https://docs.google.com/document/d/{id}/edit',\n    'gsheet': 'https://docs.google.com/spreadsheets/d/{id}/edit',\n}",
+              "_DRIVE_EDIT_URL = {\n    'gdoc': 'https://docs.google.com/document/d/{id}/edit',\n    'gsheet': 'https://docs.google.com/spreadsheets/d/{id}/edit',\n    'gslide': 'https://docs.google.com/presentation/d/{id}/edit',\n}",
+              'drive slide edit url',
+          )
+          text = text.replace(
+              "        + [(item, 'gsheet') for item in _load_gsheets()]\n    )",
+              "        + [(item, 'gsheet') for item in _load_gsheets()]\n        + [(item, 'gslide') for item in _load_gslides()]\n    )",
+          )
+
+          office_block = r'''\n\n_OFFICE_IMPORTS = {\n    '.docx': {\n        'kind': 'gdoc',\n        'source_mime': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',\n    },\n    '.pptx': {\n        'kind': 'gslide',\n        'source_mime': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',\n    },\n}\n\n\ndef _drive_import_office_file(filename, blob, source_mime, target_kind, parent_id=None, access_token=None, timeout=30):\n    \"\"\"Upload an OOXML file and ask Drive to convert it to a Google-native type.\"\"\"\n    access_token = access_token or _get_google_access_token()\n    target_mime = _DRIVE_MIME.get(target_kind)\n    if not access_token or not target_mime or not blob:\n        return None, None\n\n    display_name = os.path.splitext(os.path.basename(filename or 'Untitled'))[0].strip() or 'Untitled'\n    metadata = {'name': display_name, 'mimeType': target_mime}\n    if parent_id:\n        metadata['parents'] = [parent_id]\n\n    boundary = f'station8-{uuid.uuid4().hex}'\n    prefix = (\n        f'--{boundary}\\r\\n'\n        'Content-Type: application/json; charset=UTF-8\\r\\n\\r\\n'\n        f'{json.dumps(metadata)}\\r\\n'\n        f'--{boundary}\\r\\n'\n        f'Content-Type: {source_mime}\\r\\n\\r\\n'\n    ).encode('utf-8')\n    suffix = f'\\r\\n--{boundary}--\\r\\n'.encode('utf-8')\n    body = prefix + blob + suffix\n    url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType'\n    try:\n        req = _urllib_request.Request(\n            url, data=body, method='POST',\n            headers={\n                'Authorization': f'Bearer {access_token}',\n                'Content-Type': f'multipart/related; boundary={boundary}',\n            },\n        )\n        with _urllib_request.urlopen(req, timeout=timeout) as resp:\n            payload = json.loads(resp.read().decode('utf-8'))\n    except (_urllib_error.URLError, _urllib_error.HTTPError, OSError, ValueError) as exc:\n        print(f'Drive Office import failed for {filename}: {exc}', flush=True)\n        return None, None\n    file_id = payload.get('id')\n    if not file_id:\n        return None, None\n    return file_id, _DRIVE_EDIT_URL[target_kind].format(id=file_id)\n\n\ndef _google_connection_error_code():\n    record = _load_google_token_record()\n    if not record.get('connected'):\n        return 'google_connection_required'\n    if record.get('reconnect_required') or not record.get('refresh_token'):\n        return 'google_reconnect_required'\n    return 'google_drive_unavailable'\n\n\n@app.route('/api/google/import-office', methods=['POST'])\n@_studio_auth_required\ndef google_import_office():\n    upload = request.files.get('file')\n    if not upload or not upload.filename:\n        return jsonify({'error': 'office_file_required'}), 400\n\n    filename = os.path.basename(upload.filename)\n    extension = os.path.splitext(filename)[1].lower()\n    spec = _OFFICE_IMPORTS.get(extension)\n    if not spec:\n        return jsonify({'error': 'unsupported_office_type'}), 415\n\n    blob = upload.read(MAX_OFFICE_IMPORT_BYTES + 1)\n    if not blob:\n        return jsonify({'error': 'empty_office_file'}), 400\n    if len(blob) > MAX_OFFICE_IMPORT_BYTES:\n        return jsonify({'error': 'office_file_too_large'}), 413\n    # DOCX/PPTX are ZIP-based OOXML containers. Reject a renamed arbitrary file\n    # before sending it to Drive.\n    if not blob.startswith(b'PK'):\n        return jsonify({'error': 'invalid_office_file'}), 400\n\n    access_token = _get_google_access_token()\n    if not access_token:\n        code = _google_connection_error_code()\n        return jsonify({'error': code}), 409 if code != 'google_drive_unavailable' else 502\n\n    folders = _get_workspace().get('folders', [])\n    folder_id = _normalize_folder_id(request.form.get('folder_id'), folders)\n    parent_drive_id = _drive_resolve_parent_for_doc(folder_id, access_token)\n    kind = spec['kind']\n    file_id, embed_url = _drive_import_office_file(\n        filename, blob, spec['source_mime'], kind,\n        parent_id=parent_drive_id, access_token=access_token,\n    )\n    if not file_id or not embed_url:\n        code = _google_connection_error_code()\n        if code in {'google_connection_required', 'google_reconnect_required'}:\n            return jsonify({'error': code}), 409\n        return jsonify({'error': 'google_drive_import_failed'}), 502\n\n    item = {\n        'id': str(uuid.uuid4())[:8],\n        'name': os.path.splitext(filename)[0].strip() or 'Untitled',\n        'tags': [],\n        'folder_id': folder_id,\n        'created_at': datetime.now().isoformat(),\n        'drive_file_id': file_id,\n        'embed_url': embed_url,\n    }\n    load_fn, save_fn = (\n        (_load_gdocs, _save_gdocs) if kind == 'gdoc' else (_load_gslides, _save_gslides)\n    )\n    try:\n        items = load_fn()\n        items.append(item)\n        save_fn(items)\n    except Exception:\n        _delete_drive_file(file_id)\n        raise\n\n    _share_drive_file_publicly(file_id)\n    _maybe_sync_one(item, kind)\n    return jsonify({'kind': kind, 'item': item}), 201\n'''.replace('\\n', '\n')
+
+          text = replace_once(
+              text,
+              "    return file_id, _DRIVE_EDIT_URL[kind].format(id=file_id)\n\n\ndef _create_drive_file_verbose",
+              "    return file_id, _DRIVE_EDIT_URL[kind].format(id=file_id)" + office_block + "\n\ndef _create_drive_file_verbose",
+              'office import endpoint',
+          )
+
+          gslide_endpoints = r'''\n\n@app.route('/api/gslides', methods=['GET'])\n@_studio_auth_required\ndef list_gslides():\n    return jsonify(_list_docs_sorted(_load_gslides()))\n\n\n@app.route('/api/visitor/gslides', methods=['GET'])\n@_viewer_auth_required\ndef list_visitor_gslides():\n    return jsonify(_list_docs_sorted(_load_gslides(), visitor=True, kind='gslide'))\n\n\n@app.route('/api/gslides', methods=['POST'])\n@_studio_auth_required\ndef create_gslide():\n    item, error = _create_gdrive_doc(_load_gslides, _save_gslides, request.json or {}, 'gslide')\n    if error:\n        status = 409 if error in {'google_connection_required', 'google_reconnect_required'} else 502\n        return jsonify({'error': error}), status\n    _maybe_sync_one(item, 'gslide')\n    return jsonify(item), 201\n\n\n@app.route('/api/gslides/<gslide_id>', methods=['PATCH'])\n@_studio_auth_required\ndef patch_gslide(gslide_id):\n    body = request.json or {}\n    item = _patch_gdrive_doc(_load_gslides, _save_gslides, gslide_id, body)\n    if item is None:\n        return jsonify({'error': 'Not found'}), 404\n    if 'embed_url' in body:\n        _maybe_sync_one(item, 'gslide')\n    return jsonify(item)\n\n\n@app.route('/api/gslides/<gslide_id>', methods=['DELETE'])\n@_studio_auth_required\ndef delete_gslide(gslide_id):\n    if request.args.get('drive') in ('1', 'true'):\n        for d in _load_gslides():\n            if d['id'] == gslide_id:\n                file_id = _extract_drive_file_id(d.get('embed_url'), 'gslide')\n                if file_id:\n                    _delete_drive_file(file_id)\n                break\n    items = [d for d in _load_gslides() if d['id'] != gslide_id]\n    _save_gslides(items)\n    _drop_gdrive_content('gslide', gslide_id)\n    return '', 204\n\n\n@app.route('/api/gslides/<gslide_id>', methods=['GET'])\n@_studio_auth_required\ndef get_gslide(gslide_id):\n    for d in _load_gslides():\n        if d['id'] == gslide_id:\n            return jsonify(d)\n    return jsonify({'error': 'Not found'}), 404\n\n\n@app.route('/api/visitor/gslides/<gslide_id>', methods=['GET'])\n@_viewer_auth_required\ndef get_visitor_gslide(gslide_id):\n    for d in _visitor_visible_docs('gslide', _load_gslides()):\n        if d['id'] == gslide_id:\n            return jsonify(d)\n    return jsonify({'error': 'Not found'}), 404\n'''.replace('\\n', '\n')
+          text = replace_once(
+              text,
+              "\n\n@app.route('/api/reports', methods=['GET'])",
+              gslide_endpoints + "\n\n@app.route('/api/reports', methods=['GET'])",
+              'gslide endpoints',
+          )
+
+          # Search/index: Slides are plain-text Drive exports, like Docs.
+          text = replace_once(
+              text,
+              "def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None, pdfs=None):",
+              "def _all_items(boards=None, sheets=None, gdocs=None, gsheets=None, gslides=None, reports=None, pdfs=None):",
+              'all items signature',
+          )
+          text = replace_once(
+              text,
+              "    gsheet_items = gsheets if gsheets is not None else _load_gsheets()\n    report_items",
+              "    gsheet_items = gsheets if gsheets is not None else _load_gsheets()\n    gslide_items = gslides if gslides is not None else _load_gslides()\n    report_items",
+              'gslide search items',
+          )
+          text = replace_once(
+              text,
+              "        ('gdoc', gdoc_items),   ('gsheet', gsheet_items),\n        ('report', report_items),",
+              "        ('gdoc', gdoc_items),   ('gsheet', gsheet_items),\n        ('gslide', gslide_items),\n        ('report', report_items),",
+              'gslide title index',
+          )
+          text = replace_once(
+              text,
+              "    for report in report_items:\n",
+              "    for gslide in gslide_items:\n        cached = drive_contents.get(f'gslide-{gslide[\"id\"]}') or {}\n        text = (cached.get('text') or '').strip()\n        if not text:\n            continue\n        yield {\n            'doc_type': 'gslide',\n            'doc_id': gslide['id'],\n            'doc_name': gslide['name'],\n            'kind': 'gslide',\n            'text': text,\n        }\n    for report in report_items:\n",
+              'gslide body index',
+          )
+          text = replace_once(
+              text,
+              "def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, reports=None, pdfs=None):",
+              "def _search_payload(boards=None, sheets=None, gdocs=None, gsheets=None, gslides=None, reports=None, pdfs=None):",
+              'search payload signature',
+          )
+          text = replace_once(
+              text,
+              "        gsheets=gsheets,\n        reports=reports,",
+              "        gsheets=gsheets,\n        gslides=gslides,\n        reports=reports,",
+              'search call slides',
+          )
+          text = replace_once(
+              text,
+              "                    'gsheet': 'Sheet',\n                    'report':",
+              "                    'gsheet': 'Sheet',\n                    'gslide': 'Slides',\n                    'report':",
+              'search source label slides',
+          )
+          text = replace_once(
+              text,
+              "        'gsheet': _load_gsheets(),\n        'report':",
+              "        'gsheet': _load_gsheets(),\n        'gslide': _load_gslides(),\n        'report':",
+              'visitor docs slides',
+          )
+          text = replace_once(
+              text,
+              "    gsheets = _visitor_visible_docs('gsheet', docs_by_kind['gsheet'], workspace=workspace, docs_by_kind=docs_by_kind)\n    reports =",
+              "    gsheets = _visitor_visible_docs('gsheet', docs_by_kind['gsheet'], workspace=workspace, docs_by_kind=docs_by_kind)\n    gslides = _visitor_visible_docs('gslide', docs_by_kind['gslide'], workspace=workspace, docs_by_kind=docs_by_kind)\n    reports =",
+              'visitor slides variable',
+          )
+          # The earlier generic replacement touches owner search call first; this targets visitor return if still needed.
+          visitor_needle = "        gsheets=gsheets,\n        reports=reports,\n        pdfs=pdfs,\n    ))"
+          if visitor_needle in text:
+              text = text.replace(visitor_needle, "        gsheets=gsheets,\n        gslides=gslides,\n        reports=reports,\n        pdfs=pdfs,\n    ))", 1)
+
+          path.write_text(text)
+
+          # ── Frontend: classify drag/drop files + first-class Slides ──────
+          office_import = '''const API = import.meta.env?.VITE_API_URL || ''\n\nexport function classifyDroppedFile(file) {\n  const name = String(file?.name || '').toLowerCase()\n  if (name.endsWith('.pdf')) return { type: 'pdf' }\n  if (name.endsWith('.docx')) return { type: 'office', kind: 'gdoc', label: 'Google Doc' }\n  if (name.endsWith('.pptx')) return { type: 'office', kind: 'gslide', label: 'Google Slides' }\n  return { type: 'unsupported' }\n}\n\nexport async function importOfficeFile(file, folderId) {\n  const form = new FormData()\n  form.append('file', file)\n  if (folderId) form.append('folder_id', folderId)\n  const response = await fetch(`${API}/api/google/import-office`, {\n    method: 'POST',\n    credentials: 'include',\n    body: form,\n  })\n  const data = await response.json().catch(() => null)\n  if (!response.ok || !data?.item || !data?.kind) {\n    const error = new Error(data?.error || 'Office import failed.')\n    error.code = data?.error || 'office_import_failed'\n    throw error\n  }\n  return data\n}\n'''
+          Path('frontend/src/officeImport.js').write_text(office_import)
+          Path('frontend/src/officeImport.test.js').write_text('''import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { classifyDroppedFile } from './officeImport.js'\n\ntest('drop classifier routes PDF, Word, and PowerPoint without confusing Office files for PDFs', () => {\n  assert.deepEqual(classifyDroppedFile({ name: 'paper.PDF' }), { type: 'pdf' })\n  assert.deepEqual(classifyDroppedFile({ name: 'notes.docx' }), { type: 'office', kind: 'gdoc', label: 'Google Doc' })\n  assert.deepEqual(classifyDroppedFile({ name: 'deck.PPTX' }), { type: 'office', kind: 'gslide', label: 'Google Slides' })\n  assert.deepEqual(classifyDroppedFile({ name: 'data.xlsx' }), { type: 'unsupported' })\n})\n''')
+
+          path = Path('frontend/src/App.jsx')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'\n",
+              "import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'\nimport { classifyDroppedFile, importOfficeFile } from './officeImport'\n",
+              'office import frontend import',
+          )
+          text = replace_once(
+              text,
+              "  gsheet: { api: 'gsheets', label: 'Sheet', order: 2 },\n  report: { api: 'reports', label: 'Report', order: 3 },\n  pdf: { api: 'pdfs', label: 'PDF', order: 4 },",
+              "  gsheet: { api: 'gsheets', label: 'Sheet', order: 2 },\n  gslide: { api: 'gslides', label: 'Slides', order: 3 },\n  report: { api: 'reports', label: 'Report', order: 4 },\n  pdf: { api: 'pdfs', label: 'PDF', order: 5 },",
+              'frontend doc registry slides',
+          )
+          text = replace_once(
+              text,
+              "  if (type === 'gsheet') return <SheetIcon />\n  if (type === 'report')",
+              "  if (type === 'gsheet') return <SheetIcon />\n  if (type === 'gslide') return <DocIcon />\n  if (type === 'report')",
+              'slide icon',
+          )
+          text = replace_once(
+              text,
+              "  gsheet: 'SHEET',\n  report:",
+              "  gsheet: 'SHEET',\n  gslide: 'SLIDES',\n  report:",
+              'slide search pill',
+          )
+          text = replace_once(
+              text,
+              "  const [gsheets, setGsheets] = useState([])\n  const [reports",
+              "  const [gsheets, setGsheets] = useState([])\n  const [gslides, setGslides] = useState([])\n  const [reports",
+              'gslides state',
+          )
+          text = replace_once(
+              text,
+              "    gsheet: gsheets,\n    report: reports,",
+              "    gsheet: gsheets,\n    gslide: gslides,\n    report: reports,",
+              'docsByKind slides',
+          )
+          text = replace_once(
+              text,
+              "  }), [boards, gdocs, gsheets, reports, pdfs])",
+              "  }), [boards, gdocs, gsheets, gslides, reports, pdfs])",
+              'docsByKind deps slides',
+          )
+          text = replace_once(
+              text,
+              "      setGsheets(nextDocsByKind.gsheet || [])\n      setReports",
+              "      setGsheets(nextDocsByKind.gsheet || [])\n      setGslides(nextDocsByKind.gslide || [])\n      setReports",
+              'refresh state slides',
+          )
+          text = replace_once(
+              text,
+              "    const [bs, gd, gs, rp, pd, ws] = await Promise.all([\n      fetchJson(`${API}/api/${prefix}boards`, {}, []),\n      fetchJson(`${API}/api/${prefix}gdocs`, {}, []),\n      fetchJson(`${API}/api/${prefix}gsheets`, {}, []),\n      fetchJson(`${API}/api/${prefix}reports`, {}, []),\n      fetchJson(`${API}/api/${prefix}pdfs`, {}, []),\n      fetchJson(`${API}/api/${prefix}workspace`, {}, null),\n    ])",
+              "    const [bs, gd, gs, gl, rp, pd, ws] = await Promise.all([\n      fetchJson(`${API}/api/${prefix}boards`, {}, []),\n      fetchJson(`${API}/api/${prefix}gdocs`, {}, []),\n      fetchJson(`${API}/api/${prefix}gsheets`, {}, []),\n      fetchJson(`${API}/api/${prefix}gslides`, {}, []),\n      fetchJson(`${API}/api/${prefix}reports`, {}, []),\n      fetchJson(`${API}/api/${prefix}pdfs`, {}, []),\n      fetchJson(`${API}/api/${prefix}workspace`, {}, null),\n    ])",
+              'refresh fetch slides',
+          )
+          text = replace_once(
+              text,
+              "      gsheet: Array.isArray(gs) ? gs : [],\n      report:",
+              "      gsheet: Array.isArray(gs) ? gs : [],\n      gslide: Array.isArray(gl) ? gl : [],\n      report:",
+              'refresh result slides',
+          )
+
+          old_drop = """  const uploadDroppedPdfs = async (files, targetFolderId) => {\n    if (pdfUploadBusyRef.current) {\n      showError('Another PDF upload is already in progress.')\n      return\n    }\n    const destination = targetFolderId\n      ? buildFolderPath(targetFolderId, folderById) || 'Workspace root'\n      : 'Workspace root'\n    pdfUploadBusyRef.current = true\n    setPdfDropBusy(true)\n    setPdfDropProgress({ phase: 'preparing', index: 0, total: files.length, destination })\n    const controller = new AbortController()\n    pdfDropAbortRef.current = controller\n    try {\n      const result = await uploadPdfFiles(files, targetFolderId, progress => {\n        setPdfDropProgress({ ...progress, destination })\n      }, { signal: controller.signal })\n      if (result.uploaded.length) addUploadedPdfRecords(result.uploaded, { openSingle: result.uploaded.length === 1 })\n      if (result.failed.length) {\n        const first = result.failed[0]\n        const suffix = result.failed.length > 1 ? ` (+${result.failed.length - 1} more)` : ''\n        showError(`${first.file?.name || 'PDF'}: ${first.error}${suffix}`)\n      }\n    } catch (error) {\n      if (error?.name === 'AbortError') {\n        if (error.uploaded?.length) {\n          addUploadedPdfRecords(error.uploaded, { openSingle: error.uploaded.length === 1 })\n        }\n      } else {\n        showError(error?.message || 'PDF upload failed.')\n      }\n    } finally {\n      pdfDropAbortRef.current = null\n      pdfUploadBusyRef.current = false\n      setPdfDropBusy(false)\n      setPdfDropProgress(null)\n    }\n  }\n"""
+          new_drop = """  const uploadDroppedFiles = async (files, targetFolderId) => {\n    if (pdfUploadBusyRef.current) {\n      showError('Another file import is already in progress.')\n      return\n    }\n    const classified = files.map(file => ({ file, route: classifyDroppedFile(file) }))\n    const unsupported = classified.filter(item => item.route.type === 'unsupported')\n    if (unsupported.length) {\n      const first = unsupported[0].file?.name || 'That file'\n      showError(`${first}: Station 8 accepts PDF, Word (.docx), and PowerPoint (.pptx) drops.`)\n    }\n    const accepted = classified.filter(item => item.route.type !== 'unsupported')\n    if (!accepted.length) return\n\n    const destination = targetFolderId\n      ? buildFolderPath(targetFolderId, folderById) || 'Workspace root'\n      : 'Workspace root'\n    pdfUploadBusyRef.current = true\n    setPdfDropBusy(true)\n    const controller = new AbortController()\n    pdfDropAbortRef.current = controller\n    const importedOffice = []\n    try {\n      const officeItems = accepted.filter(item => item.route.type === 'office')\n      for (let index = 0; index < officeItems.length; index += 1) {\n        const { file, route } = officeItems[index]\n        setPdfDropProgress({\n          phase: 'office', file, index, total: accepted.length, destination,\n          officeLabel: route.label,\n        })\n        try {\n          const imported = await importOfficeFile(file, targetFolderId)\n          importedOffice.push(imported)\n          if (imported.kind === 'gdoc') setGdocs(items => [imported.item, ...items])\n          if (imported.kind === 'gslide') setGslides(items => [imported.item, ...items])\n          if (imported.item.folder_id) expandFolderPath(imported.item.folder_id)\n        } catch (error) {\n          if (error?.code === 'google_reconnect_required') {\n            requireGoogleReconnect(true)\n          } else if (error?.code === 'google_connection_required') {\n            showError('Connect Google first so Station 8 can convert Word and PowerPoint files.')\n          } else {\n            showError(`${file.name}: ${error?.message || 'Could not import this Office file.'}`)\n          }\n        }\n      }\n\n      const pdfFiles = accepted.filter(item => item.route.type === 'pdf').map(item => item.file)\n      if (pdfFiles.length) {\n        const result = await uploadPdfFiles(pdfFiles, targetFolderId, progress => {\n          setPdfDropProgress({ ...progress, destination })\n        }, { signal: controller.signal })\n        if (result.uploaded.length) {\n          addUploadedPdfRecords(result.uploaded, { openSingle: accepted.length === 1 && result.uploaded.length === 1 })\n        }\n        if (result.failed.length) {\n          const first = result.failed[0]\n          const suffix = result.failed.length > 1 ? ` (+${result.failed.length - 1} more)` : ''\n          showError(`${first.file?.name || 'PDF'}: ${first.error}${suffix}`)\n        }\n      }\n\n      if (accepted.length === 1 && importedOffice.length === 1) {\n        const imported = importedOffice[0]\n        openDocument(imported.kind, imported.item.id, imported.item.folder_id)\n      }\n    } catch (error) {\n      if (error?.name === 'AbortError') {\n        if (error.uploaded?.length) {\n          addUploadedPdfRecords(error.uploaded, { openSingle: accepted.length === 1 && error.uploaded.length === 1 })\n        }\n      } else {\n        showError(error?.message || 'File import failed.')\n      }\n    } finally {\n      pdfDropAbortRef.current = null\n      pdfUploadBusyRef.current = false\n      setPdfDropBusy(false)\n      setPdfDropProgress(null)\n    }\n  }\n"""
+          text = replace_once(text, old_drop, new_drop, 'generic drop importer')
+          text = text.replace('await uploadDroppedPdfs(files, null)', 'await uploadDroppedFiles(files, null)')
+          text = text.replace('await uploadDroppedPdfs(files, folderId)', 'await uploadDroppedFiles(files, folderId)')
+          text = text.replace('await uploadDroppedPdfs(files, targetFolderId)', 'await uploadDroppedFiles(files, targetFolderId)')
+
+          text = replace_once(
+              text,
+              "                aria-label={`PDF destination: ${externalDropDestination}`}\n",
+              "                aria-label={`File destination: ${externalDropDestination}`}\n",
+              'drop destination aria',
+          )
+          text = replace_once(text, '<span>PDF →</span>', '<span>DROP →</span>', 'drop destination copy')
+          text = replace_once(
+              text,
+              "                    {(gdocs.length > 0 || gsheets.length > 0) && (",
+              "                    {(gdocs.length > 0 || gsheets.length > 0 || gslides.length > 0) && (",
+              'drive share slides count',
+          )
+          text = text.replace("title=\"Set every linked Doc and Sheet to 'anyone with link → reader' so visitors can view them\"", "title=\"Set every linked Doc, Sheet, and Slides file to 'anyone with link → reader' so visitors can view them\"")
+          text = text.replace('New Docs and Sheets will be saved to', 'New Docs, Sheets, and Slides will be saved to')
+          text = text.replace('Only applies to <strong>new</strong> Docs and Sheets.', 'Only applies to <strong>new</strong> Docs, Sheets, and Slides.')
+          text = text.replace('Move every linked Doc and Sheet into its mirrored Drive folder', 'Move every linked Doc, Sheet, and Slides file into its mirrored Drive folder')
+          text = text.replace('Link your account to create Docs and Sheets', 'Link your account to create Docs, Sheets, and Slides')
+          text = text.replace('Wait for the PDF upload to finish', 'Wait for the file import to finish')
+          text = text.replace('Reconnect to keep using Docs and Sheets.', 'Reconnect to keep using Docs, Sheets, and Slides.')
+
+          text = replace_once(
+              text,
+              "              {(activeId?.type === 'gdoc' || activeId?.type === 'gsheet') && activeDoc && (",
+              "              {(activeId?.type === 'gdoc' || activeId?.type === 'gsheet' || activeId?.type === 'gslide') && activeDoc && (",
+              'render gslide embed',
+          )
+          text = replace_once(
+              text,
+              "        const isDriveKind = deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet'",
+              "        const isDriveKind = deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet' || deleteTarget.type === 'gslide'",
+              'delete slide drive kind',
+          )
+          text = text.replace("(deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet')", "(deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet' || deleteTarget.type === 'gslide')")
+          text = replace_once(
+              text,
+              "    const kindLabel = kind === 'gdoc' ? 'Google Doc' : 'Google Sheet'",
+              "    const kindLabel = kind === 'gdoc' ? 'Google Doc' : kind === 'gslide' ? 'Google Slides' : 'Google Sheet'",
+              'GoogleEmbed slide label',
+          )
+          text = text.replace('boards, docs, sheets, and PDFs', 'boards, docs, sheets, slides, and PDFs')
+          text = replace_once(
+              text,
+              "          {pdfDropProgress?.file?.name || 'Adding PDF…'}",
+              "          {pdfDropProgress?.file?.name || 'Adding file…'}",
+              'generic progress file',
+          )
+          text = replace_once(
+              text,
+              "          {pdfDropProgress ? ` · ${pdfProgressLabel(pdfDropProgress)}` : ''}",
+              "          {pdfDropProgress ? ` · ${pdfDropProgress.phase === 'office' ? `Converting to ${pdfDropProgress.officeLabel}…` : pdfProgressLabel(pdfDropProgress)}` : ''}",
+              'office progress label',
+          )
+          path.write_text(text)
+
+          path = Path('frontend/src/sidebarDocumentOrder.js')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "  gsheet: 2,\n  report: 3,\n  pdf: 4,",
+              "  gsheet: 2,\n  gslide: 3,\n  report: 4,\n  pdf: 5,",
+              'sidebar order slides',
+          )
+          path.write_text(text)
+
+          # ── Connector UX: stable create-handle identity ──────────────────
+          path = Path('frontend/src/canvas/StationConnectorShapeUtil.jsx')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "  ZERO_INDEX_KEY,\n  getColorValue,\n  getDefaultColorTheme,\n  getIndicesAbove,",
+              "  getColorValue,\n  getDefaultColorTheme,\n  getIndexBetween,\n  getIndices,",
+              'connector index imports',
+          )
+          text = replace_once(
+              text,
+              "function parsePointHandleId(id, pointCount) {\n  if (id === 'start') return 0\n  if (id === 'end') return pointCount - 1\n  const match = /^point:(\\d+)$/.exec(String(id))\n  return match ? Number(match[1]) : null\n}\n\nfunction parseInsertHandleId(id) {\n  const match = /^insert:(\\d+)$/.exec(String(id))\n  return match ? Number(match[1]) : null\n}\n",
+              "function getConnectorPointIds(shape, pointCount) {\n  const stored = shape.meta?.connectorPointIds\n  if (Array.isArray(stored) && stored.length === pointCount && stored.every(id => typeof id === 'string')) {\n    return stored\n  }\n  return getIndices(pointCount)\n}\n\nfunction getCreateHandleIndex(pointIds, segmentIndex) {\n  return getIndexBetween(pointIds[segmentIndex], pointIds[segmentIndex + 1])\n}\n",
+              'stable connector ids helpers',
+          )
+
+          old_handles = """  getHandles(shape) {\n    const points = normalizeConnectorPoints(shape.props.points)\n    const geometry = getConnectorPath(points).toGeometry()\n    const segments = typeof geometry.getSegments === 'function' ? geometry.getSegments() : []\n    const handles = []\n\n    for (let pointIndex = 0; pointIndex < points.length; pointIndex += 1) {\n      if (pointIndex > 0) {\n        const segmentIndex = pointIndex - 1\n        const segment = segments[segmentIndex]\n        const midpoint = segment?.interpolateAlongEdge\n          ? segment.interpolateAlongEdge(0.5)\n          : connectorMidpoint(points[segmentIndex], points[pointIndex])\n        handles.push({\n          id: `insert:${segmentIndex}`,\n          type: 'create',\n          x: midpoint.x,\n          y: midpoint.y,\n          snapType: 'align',\n        })\n      }\n\n      handles.push({\n        id: pointIndex === 0 ? 'start' : pointIndex === points.length - 1 ? 'end' : `point:${pointIndex}`,\n        type: 'vertex',\n        x: points[pointIndex].x,\n        y: points[pointIndex].y,\n        snapType: 'align',\n      })\n    }\n\n    const indices = [ZERO_INDEX_KEY, ...getIndicesAbove(ZERO_INDEX_KEY, handles.length - 1)]\n    return handles.map((handle, index) => ({ ...handle, index: indices[index] }))\n  }\n\n  onHandleDragStart(shape, info) {\n    const segmentIndex = parseInsertHandleId(info.handle.id)\n    if (segmentIndex === null) return undefined\n    return {\n      ...shape,\n      props: {\n        ...shape.props,\n        points: insertConnectorPoint(shape.props.points, segmentIndex, info.handle),\n      },\n    }\n  }\n\n  onHandleDrag(shape, info) {\n    const points = normalizeConnectorPoints(shape.props.points)\n    const insertSegmentIndex = parseInsertHandleId(info.handle.id)\n    const pointIndex = insertSegmentIndex === null\n      ? parsePointHandleId(info.handle.id, points.length)\n      : insertSegmentIndex + 1\n\n    if (pointIndex === null) return shape\n    return {\n      ...shape,\n      props: {\n        ...shape.props,\n        points: moveConnectorPoint(points, pointIndex, info.handle),\n      },\n    }\n  }\n"""
+          new_handles = """  getHandles(shape) {\n    const points = normalizeConnectorPoints(shape.props.points)\n    const pointIds = getConnectorPointIds(shape, points.length)\n    const geometry = getConnectorPath(points).toGeometry()\n    const segments = typeof geometry.getSegments === 'function' ? geometry.getSegments() : []\n    const handles = []\n\n    for (let pointIndex = 0; pointIndex < points.length; pointIndex += 1) {\n      if (pointIndex > 0) {\n        const segmentIndex = pointIndex - 1\n        const segment = segments[segmentIndex]\n        const midpoint = segment?.interpolateAlongEdge\n          ? segment.interpolateAlongEdge(0.5)\n          : connectorMidpoint(points[segmentIndex], points[pointIndex])\n        const createIndex = getCreateHandleIndex(pointIds, segmentIndex)\n        handles.push({\n          id: createIndex,\n          index: createIndex,\n          type: 'create',\n          x: midpoint.x,\n          y: midpoint.y,\n          canSnap: true,\n        })\n      }\n\n      handles.push({\n        id: pointIds[pointIndex],\n        index: pointIds[pointIndex],\n        type: 'vertex',\n        x: points[pointIndex].x,\n        y: points[pointIndex].y,\n        canSnap: true,\n      })\n    }\n\n    return handles.sort((a, b) => String(a.index).localeCompare(String(b.index)))\n  }\n\n  onHandleDragStart(shape, info) {\n    if (info.handle.type !== 'create') return undefined\n    const points = normalizeConnectorPoints(shape.props.points)\n    const pointIds = getConnectorPointIds(shape, points.length)\n    const segmentIndex = pointIds.findIndex((id, index) => (\n      index < pointIds.length - 1\n      && getCreateHandleIndex(pointIds, index) === info.handle.id\n    ))\n    if (segmentIndex < 0) return undefined\n\n    const nextIds = [...pointIds]\n    nextIds.splice(segmentIndex + 1, 0, info.handle.id)\n    return {\n      ...shape,\n      meta: { ...shape.meta, connectorPointIds: nextIds },\n      props: {\n        ...shape.props,\n        points: insertConnectorPoint(points, segmentIndex, info.handle),\n      },\n    }\n  }\n\n  onHandleDrag(shape, info) {\n    const points = normalizeConnectorPoints(shape.props.points)\n    const pointIds = getConnectorPointIds(shape, points.length)\n    let pointIndex = pointIds.indexOf(String(info.handle.id))\n\n    // During the first drag frame tldraw may call onHandleDrag before the\n    // onHandleDragStart return has been committed. Resolve the create handle\n    // to its insertion slot as a fallback; once committed, the same handle id\n    // is the new vertex id, exactly like tldraw's native Line shape.\n    if (pointIndex < 0 && info.handle.type === 'create') {\n      const segmentIndex = pointIds.findIndex((id, index) => (\n        index < pointIds.length - 1\n        && getCreateHandleIndex(pointIds, index) === info.handle.id\n      ))\n      if (segmentIndex >= 0) pointIndex = segmentIndex + 1\n    }\n\n    if (pointIndex < 0) return shape\n    return {\n      ...shape,\n      props: {\n        ...shape.props,\n        points: moveConnectorPoint(points, pointIndex, info.handle),\n      },\n    }\n  }\n"""
+          text = replace_once(text, old_handles, new_handles, 'connector immediate midpoint handles')
+          path.write_text(text)
+
+          Path('frontend/src/canvas/StationConnectorShapeUtil.test.js').write_text('''import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { readFileSync } from 'node:fs'\n\nconst source = readFileSync(new URL('./StationConnectorShapeUtil.jsx', import.meta.url), 'utf8')\n\ntest('connector create handle keeps the same id when it becomes a vertex', () => {\n  assert.match(source, /getIndexBetween/)\n  assert.match(source, /nextIds\.splice\(segmentIndex \+ 1, 0, info\.handle\.id\)/)\n  assert.match(source, /connectorPointIds: nextIds/)\n  assert.doesNotMatch(source, /id: `insert:/)\n})\n''')
+
+          legacy_upgrade = '''function richTextPlainText(node) {\n  if (!node || typeof node !== 'object') return ''\n  if (node.type === 'text') return String(node.text || '')\n  return (node.content || []).map(richTextPlainText).join('')\n}\n\nfunction nativeArrowPoints(props) {\n  const start = props?.start\n  const end = props?.end\n  if (!start || !end || !Number.isFinite(start.x) || !Number.isFinite(start.y) || !Number.isFinite(end.x) || !Number.isFinite(end.y)) return null\n  const bend = Number(props.bend || 0)\n  if (!Number.isFinite(bend) || Math.abs(bend) < 0.01) return [{ x: start.x, y: start.y }, { x: end.x, y: end.y }]\n  const dx = end.x - start.x\n  const dy = end.y - start.y\n  const length = Math.hypot(dx, dy)\n  if (!(length > 0)) return [{ x: start.x, y: start.y }, { x: end.x, y: end.y }]\n  const middle = {\n    x: (start.x + end.x) / 2 + (-dy / length) * bend,\n    y: (start.y + end.y) / 2 + (dx / length) * bend,\n  }\n  return [{ x: start.x, y: start.y }, middle, { x: end.x, y: end.y }]\n}\n\nexport function upgradeLegacyConnectors(snapshot) {\n  const store = snapshot?.store\n  if (!store || typeof store !== 'object') return snapshot\n\n  const boundArrowIds = new Set(\n    Object.values(store)\n      .filter(record => record?.typeName === 'binding' && record?.type === 'arrow' && record?.fromId)\n      .map(record => record.fromId)\n  )\n  let changed = false\n  const nextStore = { ...store }\n\n  for (const [key, record] of Object.entries(store)) {\n    if (record?.typeName !== 'shape' || record?.type !== 'arrow') continue\n    const props = record.props || {}\n    // Preserve any native arrow whose semantics our multipoint connector does\n    // not yet implement: bindings, labels, elbows, or scaled arrows.\n    if (boundArrowIds.has(record.id)) continue\n    if (props.kind && props.kind !== 'arc') continue\n    if (Math.abs(Number(props.scale || 1) - 1) > 0.0001) continue\n    if (richTextPlainText(props.richText).trim()) continue\n\n    const points = nativeArrowPoints(props)\n    if (!points) continue\n    nextStore[key] = {\n      ...record,\n      type: 's8-connector',\n      meta: { ...record.meta, upgradedFromNativeConnector: true },\n      props: {\n        points,\n        color: props.color || 'black',\n        dash: props.dash || 'draw',\n        size: props.size || 'm',\n        arrowheadStart: props.arrowheadStart || 'none',\n        arrowheadEnd: props.arrowheadEnd || 'arrow',\n      },\n    }\n    changed = true\n  }\n\n  return changed ? { ...snapshot, store: nextStore } : snapshot\n}\n'''
+          Path('frontend/src/canvas/legacyConnectorUpgrade.js').write_text(legacy_upgrade)
+          Path('frontend/src/canvas/legacyConnectorUpgrade.test.js').write_text('''import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { upgradeLegacyConnectors } from './legacyConnectorUpgrade.js'\n\nconst arrow = (overrides = {}) => ({\n  typeName: 'shape', id: 'shape:red', type: 'arrow', x: 10, y: 20, rotation: 0, index: 'a1', parentId: 'page:page', opacity: 1, isLocked: false, meta: {},\n  props: { kind: 'arc', start: { x: 0, y: 0 }, end: { x: 100, y: 0 }, bend: 30, scale: 1, color: 'red', dash: 'dashed', size: 'm', arrowheadStart: 'none', arrowheadEnd: 'arrow', richText: { type: 'doc', content: [] }, ...overrides },\n})\n\ntest('simple old native connectors upgrade to multipoint connectors without changing record identity', () => {\n  const input = { store: { 'shape:red': arrow() } }\n  const output = upgradeLegacyConnectors(input)\n  const upgraded = output.store['shape:red']\n  assert.equal(upgraded.id, 'shape:red')\n  assert.equal(upgraded.type, 's8-connector')\n  assert.equal(upgraded.props.points.length, 3)\n  assert.equal(upgraded.props.color, 'red')\n  assert.equal(upgraded.props.arrowheadEnd, 'arrow')\n})\n\ntest('bound, labeled, and elbow arrows remain native to avoid losing semantics', () => {\n  const bound = arrow()\n  const labeled = arrow({ richText: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'keep me' }] }] } })\n  const elbow = arrow({ kind: 'elbow' })\n  const output = upgradeLegacyConnectors({ store: {\n    'shape:red': bound,\n    'binding:1': { typeName: 'binding', id: 'binding:1', type: 'arrow', fromId: 'shape:red', toId: 'shape:box', props: {} },\n    'shape:label': { ...labeled, id: 'shape:label' },\n    'shape:elbow': { ...elbow, id: 'shape:elbow' },\n  } })\n  assert.equal(output.store['shape:red'].type, 'arrow')\n  assert.equal(output.store['shape:label'].type, 'arrow')\n  assert.equal(output.store['shape:elbow'].type, 'arrow')\n})\n''')
+
+          path = Path('frontend/src/TldrawCanvas.jsx')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "import { StationConnectorTool } from './canvas/StationConnectorTool'\n",
+              "import { StationConnectorTool } from './canvas/StationConnectorTool'\nimport { upgradeLegacyConnectors } from './canvas/legacyConnectorUpgrade'\n",
+              'legacy upgrade import',
+          )
+          text = replace_once(
+              text,
+              "        if (data.snapshot?.store) {\n          editor.store.loadStoreSnapshot(data.snapshot)\n        }",
+              "        if (data.snapshot?.store) {\n          // Upgrade only simple legacy native arrows. Bound/labeled/elbow arrows\n          // remain stock tldraw shapes so no connector semantics are discarded.\n          editor.store.loadStoreSnapshot(upgradeLegacyConnectors(data.snapshot))\n        }",
+              'legacy connector upgrade on load',
+          )
+          path.write_text(text)
+
+          # ── Tests: backend Office conversion and fixture path isolation ──
+          for test_path in Path('tests').glob('test_*.py'):
+              source = test_path.read_text()
+              marker = "'GSHEETS_FILE': 'gsheets.json',"
+              if marker in source and "'GSLIDES_FILE': 'gslides.json'," not in source:
+                  source = source.replace(marker, marker + "\n        'GSLIDES_FILE': 'gslides.json',")
+                  test_path.write_text(source)
+
+          Path('tests/test_office_import.py').write_text('''import io\nimport os\nimport tempfile\nimport unittest\nfrom unittest.mock import patch\n\nos.environ.pop('SUPABASE_URL', None)\nos.environ.pop('SUPABASE_KEY', None)\nos.environ.pop('S8_SECONDARY_PASSWORD', None)\n\nimport server\n\n\nclass OfficeImportTest(unittest.TestCase):\n    FILES = {\n        'BOARDS_FILE': 'boards.json', 'SHEETS_FILE': 'sheets.json',\n        'GDOCS_FILE': 'gdocs.json', 'GSHEETS_FILE': 'gsheets.json', 'GSLIDES_FILE': 'gslides.json',\n        'GOOGLE_AUTH_FILE': 'google_auth.json', 'GDRIVE_CONTENTS_FILE': 'gdrive_contents.json',\n        'OCR_FILE': 'ocr.json', 'WORKSPACE_FILE': 'workspace.json', 'ACCESS_PROFILES_FILE': 'access_profiles.json',\n        'AUTH_FILE': 'auth.json', 'ACCOUNTS_FILE': 'accounts.json', 'REPORTS_FILE': 'reports.json',\n        'R_TOKENS_FILE': 'r_tokens.json', 'PDFS_FILE': 'pdfs.json',\n    }\n\n    def setUp(self):\n        self.tmp = tempfile.TemporaryDirectory(prefix='station8-office-import-')\n        data_dir = os.path.join(self.tmp.name, 'data')\n        os.makedirs(data_dir)\n        server.DATA_DIR = data_dir\n        server.STORAGE_ROOT = self.tmp.name\n        server.UPLOADS_DIR = os.path.join(self.tmp.name, 'uploads')\n        server.PDFS_DIR = os.path.join(self.tmp.name, 'pdfs')\n        os.makedirs(server.UPLOADS_DIR)\n        os.makedirs(server.PDFS_DIR)\n        for attr, filename in self.FILES.items():\n            setattr(server, attr, os.path.join(data_dir, filename))\n        server.supabase = None\n        server.app.config.update(TESTING=True, SECRET_KEY='office-import-test')\n        self.client = server.app.test_client()\n        self.assertEqual(self.client.post('/api/auth/login', json={'password': 'owner'}).status_code, 200)\n        server._save(server.WORKSPACE_FILE, {'name': 'Station 8', 'owner': 'x', 'folders': [{'id': 'course', 'name': 'Course', 'parent_id': None}]})\n\n    def tearDown(self):\n        server.supabase = None\n        self.tmp.cleanup()\n\n    def import_file(self, filename, drive_id, drive_url):\n        with patch.object(server, '_get_google_access_token', return_value='token'), \\\n             patch.object(server, '_drive_resolve_parent_for_doc', return_value='drive-folder'), \\\n             patch.object(server, '_drive_import_office_file', return_value=(drive_id, drive_url)), \\\n             patch.object(server, '_share_drive_file_publicly', return_value=True), \\\n             patch.object(server, '_maybe_sync_one'):\n            return self.client.post('/api/google/import-office', data={\n                'folder_id': 'course',\n                'file': (io.BytesIO(b'PK\\x03\\x04fake-office-data'), filename),\n            }, content_type='multipart/form-data')\n\n    def test_docx_drop_becomes_google_doc_in_same_station_folder(self):\n        response = self.import_file('Exercises.docx', 'doc-id', 'https://docs.google.com/document/d/doc-id/edit')\n        self.assertEqual(response.status_code, 201, response.get_data(as_text=True))\n        payload = response.get_json()\n        self.assertEqual(payload['kind'], 'gdoc')\n        self.assertEqual(payload['item']['folder_id'], 'course')\n        self.assertEqual(payload['item']['name'], 'Exercises')\n        self.assertEqual(server._load_gdocs()[0]['drive_file_id'], 'doc-id')\n\n    def test_pptx_drop_becomes_google_slides_in_same_station_folder(self):\n        response = self.import_file('Slides.pptx', 'slide-id', 'https://docs.google.com/presentation/d/slide-id/edit')\n        self.assertEqual(response.status_code, 201, response.get_data(as_text=True))\n        payload = response.get_json()\n        self.assertEqual(payload['kind'], 'gslide')\n        self.assertEqual(payload['item']['folder_id'], 'course')\n        self.assertEqual(server._load_gslides()[0]['drive_file_id'], 'slide-id')\n\n    def test_other_office_types_are_rejected_explicitly(self):\n        response = self.client.post('/api/google/import-office', data={\n            'file': (io.BytesIO(b'PK\\x03\\x04fake'), 'sheet.xlsx'),\n        }, content_type='multipart/form-data')\n        self.assertEqual(response.status_code, 415)\n        self.assertEqual(response.get_json()['error'], 'unsupported_office_type')\n\n\nif __name__ == '__main__':\n    unittest.main()\n''')
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install frontend
+        run: npm ci
+        working-directory: frontend
+      - name: Frontend lint
+        run: npm run lint
+        working-directory: frontend
+      - name: Frontend tests
+        run: npm test
+        working-directory: frontend
+      - name: Frontend build
+        run: npm run build
+        working-directory: frontend
+
+      - name: Install backend
+        run: pip install -r requirements.txt
+      - name: Backend import check
+        env:
+          FLASK_SECRET_KEY: ci-dummy
+        run: python -c "import server"
+      - name: Backend tests
+        env:
+          FLASK_SECRET_KEY: ci-dummy
+        run: python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Verify safety invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          canvas = Path('frontend/src/TldrawCanvas.jsx').read_text()
+          connector = Path('frontend/src/canvas/StationConnectorShapeUtil.jsx').read_text()
+          server = Path('server.py').read_text()
+          app = Path('frontend/src/App.jsx').read_text()
+          assert 'loadingRef.current' in canvas
+          assert 'if (!loadSucceeded) return' in canvas
+          assert 'upgradeLegacyConnectors(data.snapshot)' in canvas
+          assert 'connectorPointIds' in connector
+          assert 'getIndexBetween' in connector
+          assert '/api/google/import-office' in server
+          assert "'gslide': 'application/vnd.google-apps.presentation'" in server
+          assert 'uploadDroppedFiles' in app
+          assert 'uploadDroppedPdfs' not in app
+          PY
+
+      - name: Commit verified implementation
+        shell: bash
+        run: |
+          rm .github/workflows/apply-office-drop-connector-ux.yml
+          git config user.name "Station 8 Fix Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: import Office drops and finish multipoint connectors"
+          git push origin HEAD:fix/office-drop-and-connector-ux
