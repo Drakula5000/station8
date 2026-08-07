@@ -8,6 +8,7 @@ import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
 import { StationConnectorShapeUtil } from './canvas/StationConnectorShapeUtil'
 import { StationConnectorTool } from './canvas/StationConnectorTool'
+import { upgradeLegacyConnectors } from './canvas/legacyConnectorUpgrade'
 import { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'
 import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'
 import { StationTextShapeUtil } from './canvas/StationTextShapeUtil'
@@ -441,7 +442,9 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
         if (!data || typeof data !== 'object') throw new Error('invalid board payload')
         if (data.asset_urls) setSignedUploadUrls(data.asset_urls)
         if (data.snapshot?.store) {
-          editor.store.loadStoreSnapshot(data.snapshot)
+          // Upgrade only simple legacy native arrows. Bound/labeled/elbow arrows
+          // remain stock tldraw shapes so no connector semantics are discarded.
+          editor.store.loadStoreSnapshot(upgradeLegacyConnectors(data.snapshot))
         }
         loadSucceeded = true
       })

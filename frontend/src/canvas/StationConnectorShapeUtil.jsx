@@ -10,10 +10,10 @@ import {
   STROKE_SIZES,
   SVGContainer,
   T,
-  ZERO_INDEX_KEY,
   getColorValue,
   getDefaultColorTheme,
-  getIndicesAbove,
+  getIndexBetween,
+  getIndices,
   useDefaultColorTheme,
   vecModelValidator,
 } from 'tldraw'
@@ -33,16 +33,16 @@ function getConnectorPath(points) {
     : PathBuilder.cubicSplineThroughPoints(normalized, { endOffsets: 0 })
 }
 
-function parsePointHandleId(id, pointCount) {
-  if (id === 'start') return 0
-  if (id === 'end') return pointCount - 1
-  const match = /^point:(\d+)$/.exec(String(id))
-  return match ? Number(match[1]) : null
+function getConnectorPointIds(shape, pointCount) {
+  const stored = shape.meta?.connectorPointIds
+  if (Array.isArray(stored) && stored.length === pointCount && stored.every(id => typeof id === 'string')) {
+    return stored
+  }
+  return getIndices(pointCount)
 }
 
-function parseInsertHandleId(id) {
-  const match = /^insert:(\d+)$/.exec(String(id))
-  return match ? Number(match[1]) : null
+function getCreateHandleIndex(pointIds, segmentIndex) {
+  return getIndexBetween(pointIds[segmentIndex], pointIds[segmentIndex + 1])
 }
 
 function Arrowhead({ type, point, neighbor, color, strokeWidth }) {
@@ -187,6 +187,7 @@ export class StationConnectorShapeUtil extends ShapeUtil {
 
   getHandles(shape) {
     const points = normalizeConnectorPoints(shape.props.points)
+    const pointIds = getConnectorPointIds(shape, points.length)
     const geometry = getConnectorPath(points).toGeometry()
     const segments = typeof geometry.getSegments === 'function' ? geometry.getSegments() : []
     const handles = []
@@ -198,48 +199,70 @@ export class StationConnectorShapeUtil extends ShapeUtil {
         const midpoint = segment?.interpolateAlongEdge
           ? segment.interpolateAlongEdge(0.5)
           : connectorMidpoint(points[segmentIndex], points[pointIndex])
+        const createIndex = getCreateHandleIndex(pointIds, segmentIndex)
         handles.push({
-          id: `insert:${segmentIndex}`,
+          id: createIndex,
+          index: createIndex,
           type: 'create',
           x: midpoint.x,
           y: midpoint.y,
-          snapType: 'align',
+          canSnap: true,
         })
       }
 
       handles.push({
-        id: pointIndex === 0 ? 'start' : pointIndex === points.length - 1 ? 'end' : `point:${pointIndex}`,
+        id: pointIds[pointIndex],
+        index: pointIds[pointIndex],
         type: 'vertex',
         x: points[pointIndex].x,
         y: points[pointIndex].y,
-        snapType: 'align',
+        canSnap: true,
       })
     }
 
-    const indices = [ZERO_INDEX_KEY, ...getIndicesAbove(ZERO_INDEX_KEY, handles.length - 1)]
-    return handles.map((handle, index) => ({ ...handle, index: indices[index] }))
+    return handles.sort((a, b) => String(a.index).localeCompare(String(b.index)))
   }
 
   onHandleDragStart(shape, info) {
-    const segmentIndex = parseInsertHandleId(info.handle.id)
-    if (segmentIndex === null) return undefined
+    if (info.handle.type !== 'create') return undefined
+    const points = normalizeConnectorPoints(shape.props.points)
+    const pointIds = getConnectorPointIds(shape, points.length)
+    const segmentIndex = pointIds.findIndex((id, index) => (
+      index < pointIds.length - 1
+      && getCreateHandleIndex(pointIds, index) === info.handle.id
+    ))
+    if (segmentIndex < 0) return undefined
+
+    const nextIds = [...pointIds]
+    nextIds.splice(segmentIndex + 1, 0, info.handle.id)
     return {
       ...shape,
+      meta: { ...shape.meta, connectorPointIds: nextIds },
       props: {
         ...shape.props,
-        points: insertConnectorPoint(shape.props.points, segmentIndex, info.handle),
+        points: insertConnectorPoint(points, segmentIndex, info.handle),
       },
     }
   }
 
   onHandleDrag(shape, info) {
     const points = normalizeConnectorPoints(shape.props.points)
-    const insertSegmentIndex = parseInsertHandleId(info.handle.id)
-    const pointIndex = insertSegmentIndex === null
-      ? parsePointHandleId(info.handle.id, points.length)
-      : insertSegmentIndex + 1
+    const pointIds = getConnectorPointIds(shape, points.length)
+    let pointIndex = pointIds.indexOf(String(info.handle.id))
 
-    if (pointIndex === null) return shape
+    // During the first drag frame tldraw may call onHandleDrag before the
+    // onHandleDragStart return has been committed. Resolve the create handle
+    // to its insertion slot as a fallback; once committed, the same handle id
+    // is the new vertex id, exactly like tldraw's native Line shape.
+    if (pointIndex < 0 && info.handle.type === 'create') {
+      const segmentIndex = pointIds.findIndex((id, index) => (
+        index < pointIds.length - 1
+        && getCreateHandleIndex(pointIds, index) === info.handle.id
+      ))
+      if (segmentIndex >= 0) pointIndex = segmentIndex + 1
+    }
+
+    if (pointIndex < 0) return shape
     return {
       ...shape,
       props: {

@@ -9,6 +9,7 @@ import PdfViewer from './components/PdfViewer'
 import PdfUploadPanel from './components/PdfUploadPanel'
 import { needsPdfTextReindex } from './pdf'
 import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'
+import { classifyDroppedFile, importOfficeFile } from './officeImport'
 import { loadFolderExpansionState, mergeFolderExpansionDefaults, saveFolderExpansionState } from './sidebarFolderState'
 import { appendSidebarDocument, reorderSidebarDocuments, sidebarDocumentKey, sortSidebarDocuments } from './sidebarDocumentOrder'
 import './styles/index.css'
@@ -34,8 +35,9 @@ const DOC_KIND_CONFIG = {
   board: { api: 'boards', label: 'Board', order: 0 },
   gdoc: { api: 'gdocs', label: 'Doc', order: 1 },
   gsheet: { api: 'gsheets', label: 'Sheet', order: 2 },
-  report: { api: 'reports', label: 'Report', order: 3 },
-  pdf: { api: 'pdfs', label: 'PDF', order: 4 },
+  gslide: { api: 'gslides', label: 'Slides', order: 3 },
+  report: { api: 'reports', label: 'Report', order: 4 },
+  pdf: { api: 'pdfs', label: 'PDF', order: 5 },
 }
 
 const DOC_KINDS = Object.keys(DOC_KIND_CONFIG)
@@ -296,6 +298,7 @@ function docKindIcon(type) {
   if (type === 'board') return <BoardIcon />
   if (type === 'gdoc') return <DocIcon />
   if (type === 'gsheet') return <SheetIcon />
+  if (type === 'gslide') return <DocIcon />
   if (type === 'report') return <ReportIcon />
   if (type === 'pdf') return <PdfIcon />
   return <BoardIcon />
@@ -309,6 +312,7 @@ const KIND_PILL_LABEL = {
   sheet:  'CELL',
   gdoc:   'DOC',
   gsheet: 'SHEET',
+  gslide: 'SLIDES',
   report: 'REPORT',
   pdf:    'PDF',
   name:   'NAME',
@@ -394,6 +398,7 @@ export default function App() {
   const [boards, setBoards] = useState([])
   const [gdocs, setGdocs] = useState([])
   const [gsheets, setGsheets] = useState([])
+  const [gslides, setGslides] = useState([])
   const [reports, setReports] = useState([])
   const [pdfs, setPdfs] = useState([])
   const [folders, setFolders] = useState([])
@@ -618,9 +623,10 @@ export default function App() {
     board: boards,
     gdoc: gdocs,
     gsheet: gsheets,
+    gslide: gslides,
     report: reports,
     pdf: pdfs,
-  }), [boards, gdocs, gsheets, reports, pdfs])
+  }), [boards, gdocs, gsheets, gslides, reports, pdfs])
   const allSidebarDocs = useMemo(
     () => DOC_KINDS.flatMap(kind => (docsByKind[kind] || []).map(item => ({ ...item, type: kind }))),
     [docsByKind],
@@ -814,6 +820,7 @@ export default function App() {
       setBoards(nextDocsByKind.board || [])
       setGdocs(nextDocsByKind.gdoc || [])
       setGsheets(nextDocsByKind.gsheet || [])
+      setGslides(nextDocsByKind.gslide || [])
       setReports(nextDocsByKind.report || [])
       setPdfs(nextDocsByKind.pdf || [])
       setFolders(nextFolders)
@@ -829,10 +836,11 @@ export default function App() {
     }
 
     const prefix = viewerMode === 'visitor' ? 'visitor/' : ''
-    const [bs, gd, gs, rp, pd, ws] = await Promise.all([
+    const [bs, gd, gs, gl, rp, pd, ws] = await Promise.all([
       fetchJson(`${API}/api/${prefix}boards`, {}, []),
       fetchJson(`${API}/api/${prefix}gdocs`, {}, []),
       fetchJson(`${API}/api/${prefix}gsheets`, {}, []),
+      fetchJson(`${API}/api/${prefix}gslides`, {}, []),
       fetchJson(`${API}/api/${prefix}reports`, {}, []),
       fetchJson(`${API}/api/${prefix}pdfs`, {}, []),
       fetchJson(`${API}/api/${prefix}workspace`, {}, null),
@@ -842,6 +850,7 @@ export default function App() {
       board: Array.isArray(bs) ? bs : [],
       gdoc: Array.isArray(gd) ? gd : [],
       gsheet: Array.isArray(gs) ? gs : [],
+      gslide: Array.isArray(gl) ? gl : [],
       report: Array.isArray(rp) ? rp : [],
       pdf: Array.isArray(pd) ? pd : [],
     }
@@ -1634,7 +1643,7 @@ export default function App() {
 
   const handleLogout = async () => {
     if (pdfUploadBusyRef.current) {
-      showError('Wait for the PDF upload to finish before logging out.')
+      showError('Wait for the file import to finish before logging out.')
       return
     }
     try {
@@ -2075,39 +2084,82 @@ export default function App() {
     event.preventDefault()
     const files = Array.from(event.dataTransfer.files || [])
     finishExternalPdfDrag()
-    if (files.length) await uploadDroppedPdfs(files, null)
+    if (files.length) await uploadDroppedFiles(files, null)
   }
 
-  const uploadDroppedPdfs = async (files, targetFolderId) => {
+  const uploadDroppedFiles = async (files, targetFolderId) => {
     if (pdfUploadBusyRef.current) {
-      showError('Another PDF upload is already in progress.')
+      showError('Another file import is already in progress.')
       return
     }
+    const classified = files.map(file => ({ file, route: classifyDroppedFile(file) }))
+    const unsupported = classified.filter(item => item.route.type === 'unsupported')
+    if (unsupported.length) {
+      const first = unsupported[0].file?.name || 'That file'
+      showError(`${first}: Station 8 accepts PDF, Word (.docx), and PowerPoint (.pptx) drops.`)
+    }
+    const accepted = classified.filter(item => item.route.type !== 'unsupported')
+    if (!accepted.length) return
+
     const destination = targetFolderId
       ? buildFolderPath(targetFolderId, folderById) || 'Workspace root'
       : 'Workspace root'
     pdfUploadBusyRef.current = true
     setPdfDropBusy(true)
-    setPdfDropProgress({ phase: 'preparing', index: 0, total: files.length, destination })
     const controller = new AbortController()
     pdfDropAbortRef.current = controller
+    const importedOffice = []
     try {
-      const result = await uploadPdfFiles(files, targetFolderId, progress => {
-        setPdfDropProgress({ ...progress, destination })
-      }, { signal: controller.signal })
-      if (result.uploaded.length) addUploadedPdfRecords(result.uploaded, { openSingle: result.uploaded.length === 1 })
-      if (result.failed.length) {
-        const first = result.failed[0]
-        const suffix = result.failed.length > 1 ? ` (+${result.failed.length - 1} more)` : ''
-        showError(`${first.file?.name || 'PDF'}: ${first.error}${suffix}`)
+      const officeItems = accepted.filter(item => item.route.type === 'office')
+      for (let index = 0; index < officeItems.length; index += 1) {
+        const { file, route } = officeItems[index]
+        setPdfDropProgress({
+          phase: 'office', file, index, total: accepted.length, destination,
+          officeLabel: route.label,
+        })
+        try {
+          const imported = await importOfficeFile(file, targetFolderId)
+          importedOffice.push(imported)
+          if (imported.kind === 'gdoc') setGdocs(items => [imported.item, ...items])
+          if (imported.kind === 'gslide') setGslides(items => [imported.item, ...items])
+          if (imported.item.folder_id) expandFolderPath(imported.item.folder_id)
+        } catch (error) {
+          if (error?.code === 'google_reconnect_required') {
+            requireGoogleReconnect(true)
+          } else if (error?.code === 'google_connection_required') {
+            showError('Connect Google first so Station 8 can convert Word and PowerPoint files.')
+          } else {
+            showError(`${file.name}: ${error?.message || 'Could not import this Office file.'}`)
+          }
+        }
+      }
+
+      const pdfFiles = accepted.filter(item => item.route.type === 'pdf').map(item => item.file)
+      if (pdfFiles.length) {
+        const result = await uploadPdfFiles(pdfFiles, targetFolderId, progress => {
+          setPdfDropProgress({ ...progress, destination })
+        }, { signal: controller.signal })
+        if (result.uploaded.length) {
+          addUploadedPdfRecords(result.uploaded, { openSingle: accepted.length === 1 && result.uploaded.length === 1 })
+        }
+        if (result.failed.length) {
+          const first = result.failed[0]
+          const suffix = result.failed.length > 1 ? ` (+${result.failed.length - 1} more)` : ''
+          showError(`${first.file?.name || 'PDF'}: ${first.error}${suffix}`)
+        }
+      }
+
+      if (accepted.length === 1 && importedOffice.length === 1) {
+        const imported = importedOffice[0]
+        openDocument(imported.kind, imported.item.id, imported.item.folder_id)
       }
     } catch (error) {
       if (error?.name === 'AbortError') {
         if (error.uploaded?.length) {
-          addUploadedPdfRecords(error.uploaded, { openSingle: error.uploaded.length === 1 })
+          addUploadedPdfRecords(error.uploaded, { openSingle: accepted.length === 1 && error.uploaded.length === 1 })
         }
       } else {
-        showError(error?.message || 'PDF upload failed.')
+        showError(error?.message || 'File import failed.')
       }
     } finally {
       pdfDropAbortRef.current = null
@@ -2229,7 +2281,7 @@ export default function App() {
       event.stopPropagation()
       const files = Array.from(event.dataTransfer.files || [])
       finishExternalPdfDrag()
-      if (files.length) await uploadDroppedPdfs(files, folderId)
+      if (files.length) await uploadDroppedFiles(files, folderId)
       return
     }
     const dragged = dragItemRef.current
@@ -2273,7 +2325,7 @@ export default function App() {
       const files = Array.from(event.dataTransfer.files || [])
       const targetFolderId = doc.folder_id || null
       finishExternalPdfDrag()
-      if (files.length) await uploadDroppedPdfs(files, targetFolderId)
+      if (files.length) await uploadDroppedFiles(files, targetFolderId)
       return
     }
 
@@ -2342,7 +2394,7 @@ export default function App() {
       event.stopPropagation()
       const files = Array.from(event.dataTransfer.files || [])
       finishExternalPdfDrag()
-      if (files.length) await uploadDroppedPdfs(files, null)
+      if (files.length) await uploadDroppedFiles(files, null)
       return
     }
     const dragged = dragItemRef.current
@@ -2368,7 +2420,7 @@ export default function App() {
       if (deleteTarget.type === 'folder') {
         endpoint = `/api/folders/${deleteTarget.id}?mode=${deleteMode}`
       } else {
-        const isDriveKind = deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet'
+        const isDriveKind = deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet' || deleteTarget.type === 'gslide'
         const driveQuery = isDriveKind && deleteAlsoDrive ? '?drive=1' : ''
         endpoint = `/api/${DOC_KIND_API[deleteTarget.type]}/${deleteTarget.id}${driveQuery}`
       }
@@ -2556,10 +2608,10 @@ export default function App() {
                 role="status"
                 aria-live="polite"
                 aria-atomic="true"
-                aria-label={`PDF destination: ${externalDropDestination}`}
+                aria-label={`File destination: ${externalDropDestination}`}
                 title={externalDropDestination}
               >
-                <span>PDF →</span>
+                <span>DROP →</span>
                 <strong>{externalDropDestination}</strong>
               </div>
             ) : (
@@ -2658,11 +2710,11 @@ export default function App() {
                 </span>
                 {googleAuth.connected && (
                   <div className="sidebar-drive-actions">
-                    {(gdocs.length > 0 || gsheets.length > 0) && (
+                    {(gdocs.length > 0 || gsheets.length > 0 || gslides.length > 0) && (
                       <button
                         className={`sidebar-drive-icon${driveShareState.busy ? ' is-busy' : ''}`}
                         onClick={shareAllDrive}
-                        title="Set every linked Doc and Sheet to 'anyone with link → reader' so visitors can view them"
+                        title="Set every linked Doc, Sheet, and Slides file to 'anyone with link → reader' so visitors can view them"
                         type="button"
                         disabled={driveShareState.busy}
                       >
@@ -2712,7 +2764,7 @@ export default function App() {
                     <span className="drive-settings-toggle-text">
                       <span className="drive-settings-toggle-title">Mirror Station 8 folders going forward</span>
                       <span className="drive-settings-toggle-sub">
-                        Only applies to <strong>new</strong> Docs and Sheets. Use the button below to organize existing files.
+                        Only applies to <strong>new</strong> Docs, Sheets, and Slides. Use the button below to organize existing files.
                       </span>
                     </span>
                   </label>
@@ -2720,7 +2772,7 @@ export default function App() {
                     className="drive-settings-action-btn"
                     onClick={() => setDriveSyncOpen(true)}
                     type="button"
-                    title="Move every linked Doc and Sheet into its mirrored Drive folder"
+                    title="Move every linked Doc, Sheet, and Slides file into its mirrored Drive folder"
                   >
                     Move existing files into folders…
                   </button>
@@ -2738,7 +2790,7 @@ export default function App() {
                   onClick={googleAuth.reconnectRequired ? () => requireGoogleReconnect(true) : openGoogleConnect}
                   title={googleAuth.reconnectRequired
                     ? 'Google testing mode requires a weekly reconnect'
-                    : 'Link your account to create Docs and Sheets'}
+                    : 'Link your account to create Docs, Sheets, and Slides'}
                   type="button"
                   disabled={googleAuth.loading}
                 >
@@ -2760,7 +2812,7 @@ export default function App() {
               <button
                 className="sidebar-utility-btn sidebar-utility-danger"
                 onClick={handleLogout}
-                title={pdfDropBusy ? 'Wait for the PDF upload to finish' : 'Log out'}
+                title={pdfDropBusy ? 'Wait for the file import to finish' : 'Log out'}
                 type="button"
                 disabled={pdfDropBusy}
               >
@@ -2975,7 +3027,7 @@ export default function App() {
                   />
                 </>
               )}
-              {(activeId?.type === 'gdoc' || activeId?.type === 'gsheet') && activeDoc && (
+              {(activeId?.type === 'gdoc' || activeId?.type === 'gsheet' || activeId?.type === 'gslide') && activeDoc && (
                 <GoogleEmbed
                   key={activeId.id}
                   kind={activeId.type}
@@ -3006,7 +3058,7 @@ export default function App() {
                 <div className="database-empty-main">
                   <div className="database-hero" style={{ paddingTop: 0 }}>
                     <h1 className="database-hero-title">Nothing open</h1>
-                    <p className="database-hero-sub">Create folders, boards, docs, sheets, and PDFs to organize your research.</p>
+                    <p className="database-hero-sub">Create folders, boards, docs, sheets, slides, and PDFs to organize your research.</p>
                     <div className="database-hero-tries" style={{ marginTop: '1rem' }}>
                       <button className="database-hero-try" onClick={openNewFolderModal} type="button">New folder</button>
                       <button className="database-hero-try" onClick={openNewBoardModal} type="button">New board</button>
@@ -3179,7 +3231,7 @@ export default function App() {
             <p className="modal-copy">
               {deleteTarget.type === 'folder'
                 ? <>Choose what should happen to <strong>{deleteTarget.name}</strong>.</>
-                : (deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet')
+                : (deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet' || deleteTarget.type === 'gslide')
                   ? <><strong>{deleteTarget.name}</strong> will be removed from Station 8. The file in your Google Drive stays put unless you opt in below.</>
                   : <><strong>{deleteTarget.name}</strong> will be permanently removed.</>}
             </p>
@@ -3228,7 +3280,7 @@ export default function App() {
               </p>
             )}
 
-            {(deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet') && (
+            {(deleteTarget.type === 'gdoc' || deleteTarget.type === 'gsheet' || deleteTarget.type === 'gslide') && (
               <label className="delete-drive-toggle">
                 <input
                   type="checkbox"
@@ -3273,7 +3325,7 @@ export default function App() {
       {googleReconnectOpen && (
     <Modal onClose={dismissGoogleReconnect} title="Google’s weekly reconnect is due">
       <p className="modal-copy">
-        Station 8 uses Google’s testing mode, which requires each connected Google account to reconnect every 7 days. This is expected. Reconnect to keep using Docs and Sheets.
+        Station 8 uses Google’s testing mode, which requires each connected Google account to reconnect every 7 days. This is expected. Reconnect to keep using Docs, Sheets, and Slides.
       </p>
       <div className="modal-footer">
         <button className="btn-ghost" onClick={dismissGoogleReconnect} type="button">Later</button>
@@ -3394,7 +3446,7 @@ export default function App() {
               ))}
             </div>
             <p className="drive-picker-hint">
-              New Docs and Sheets will be saved to <strong>{drivePicker.breadcrumb[drivePicker.breadcrumb.length - 1]?.name || 'My Drive'}</strong>.
+              New Docs, Sheets, and Slides will be saved to <strong>{drivePicker.breadcrumb[drivePicker.breadcrumb.length - 1]?.name || 'My Drive'}</strong>.
             </p>
           </div>
           <div className="modal-footer">
@@ -3490,9 +3542,9 @@ export default function App() {
       {pdfDropBusy && (
         <div className="pdf-drop-progress-toast" role="status">
           <span className="pdf-drop-progress-dot" />
-          {pdfDropProgress?.file?.name || 'Adding PDF…'}
+          {pdfDropProgress?.file?.name || 'Adding file…'}
           {pdfDropProgress?.destination ? ` to ${pdfDropProgress.destination}` : ''}
-          {pdfDropProgress ? ` · ${pdfProgressLabel(pdfDropProgress)}` : ''}
+          {pdfDropProgress ? ` · ${pdfDropProgress.phase === 'office' ? `Converting to ${pdfDropProgress.officeLabel}…` : pdfProgressLabel(pdfDropProgress)}` : ''}
           {!pdfDropProgress?.stopping && ['opening', 'reading', 'ocr'].includes(pdfDropProgress?.phase) && (
             <button
               className="pdf-drop-progress-stop"
@@ -4718,7 +4770,7 @@ function GoogleEmbed({ kind, doc, readOnly, googleConnected, onConnectGoogle }) 
   // visitor-pill search button — both work regardless of focus.
   const url = doc.embed_url
   if (!url) {
-    const kindLabel = kind === 'gdoc' ? 'Google Doc' : 'Google Sheet'
+    const kindLabel = kind === 'gdoc' ? 'Google Doc' : kind === 'gslide' ? 'Google Slides' : 'Google Sheet'
     return (
       <div className="gdrive-empty">
         <div className="gdrive-empty-card">

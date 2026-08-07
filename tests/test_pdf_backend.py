@@ -101,6 +101,7 @@ class PdfBackendTest(unittest.TestCase):
         'SHEETS_FILE': 'sheets.json',
         'GDOCS_FILE': 'gdocs.json',
         'GSHEETS_FILE': 'gsheets.json',
+        'GSLIDES_FILE': 'gslides.json',
         'GOOGLE_AUTH_FILE': 'google_auth.json',
         'GDRIVE_CONTENTS_FILE': 'gdrive_contents.json',
         'OCR_FILE': 'ocr.json',
