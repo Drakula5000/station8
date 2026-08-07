@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Tldraw, getSvgAsImage } from 'tldraw'
+import { Tldraw, createShapeId, getArrowInfo, getSvgAsImage } from 'tldraw'
 import { patchSvgExports, hasCustomFill } from './canvas/magicFill'
 import 'tldraw/tldraw.css'
 import { ShapeInspector } from './components/ShapeInspector'
@@ -8,7 +8,7 @@ import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
 import { StationConnectorShapeUtil } from './canvas/StationConnectorShapeUtil'
 import { StationConnectorTool } from './canvas/StationConnectorTool'
-import { upgradeLegacyConnectors } from './canvas/legacyConnectorUpgrade'
+import { upgradeLoadedLegacyConnectors } from './canvas/legacyConnectorUpgrade'
 import { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'
 import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'
 import { StationTextShapeUtil } from './canvas/StationTextShapeUtil'
@@ -442,9 +442,11 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
         if (!data || typeof data !== 'object') throw new Error('invalid board payload')
         if (data.asset_urls) setSignedUploadUrls(data.asset_urls)
         if (data.snapshot?.store) {
-          // Upgrade only simple legacy native arrows. Bound/labeled/elbow arrows
-          // remain stock tldraw shapes so no connector semantics are discarded.
-          editor.store.loadStoreSnapshot(upgradeLegacyConnectors(data.snapshot))
+          // Load native arrows first so tldraw can resolve any endpoint bindings
+          // into their actual rendered geometry. Then upgrade simple legacy
+          // arrows (bound or unbound) to the Station multipoint connector.
+          editor.store.loadStoreSnapshot(data.snapshot)
+          upgradeLoadedLegacyConnectors(editor, { getArrowInfo, createShapeId })
         }
         loadSucceeded = true
       })
