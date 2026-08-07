@@ -78,6 +78,46 @@ class OfficeImportTest(unittest.TestCase):
         self.assertEqual(response.status_code, 415)
         self.assertEqual(response.get_json()['error'], 'unsupported_office_type')
 
+    def test_drive_office_import_uses_crlf_multipart_body(self):
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+            def read(self):
+                return b'{"id":"doc-id"}'
+
+        def fake_urlopen(request, timeout=30):
+            captured['body'] = request.data
+            captured['content_type'] = request.get_header('Content-type')
+            return FakeResponse()
+
+        with patch.object(server._urllib_request, 'urlopen', side_effect=fake_urlopen):
+            file_id, url = server._drive_import_office_file(
+                'Exercises.docx',
+                b'PK\x03\x04office-data',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'gdoc',
+                parent_id='drive-folder',
+                access_token='token',
+            )
+
+        self.assertEqual(file_id, 'doc-id')
+        self.assertEqual(url, 'https://docs.google.com/document/d/doc-id/edit')
+        content_type = captured['content_type']
+        self.assertTrue(content_type.startswith('multipart/related; boundary='))
+        boundary = content_type.split('boundary=', 1)[1]
+        body = captured['body']
+        self.assertTrue(body.startswith(f'--{boundary}\r\n'.encode()))
+        self.assertIn(b'Content-Type: application/json; charset=UTF-8\r\n\r\n', body)
+        self.assertIn(
+            b'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\nPK\x03\x04office-data',
+            body,
+        )
+        self.assertTrue(body.endswith(f'\r\n--{boundary}--\r\n'.encode()))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -4586,22 +4586,13 @@ def _drive_import_office_file(filename, blob, source_mime, target_kind, parent_i
 
     boundary = f'station8-{uuid.uuid4().hex}'
     prefix = (
-        f'--{boundary}\\r\
-'
-        'Content-Type: application/json; charset=UTF-8\\r\
-\\r\
-'
-        f'{json.dumps(metadata)}\\r\
-'
-        f'--{boundary}\\r\
-'
-        f'Content-Type: {source_mime}\\r\
-\\r\
-'
+        f'--{boundary}\r\n'
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n'
+        f'{json.dumps(metadata)}\r\n'
+        f'--{boundary}\r\n'
+        f'Content-Type: {source_mime}\r\n\r\n'
     ).encode('utf-8')
-    suffix = f'\\r\
---{boundary}--\\r\
-'.encode('utf-8')
+    suffix = f'\r\n--{boundary}--\r\n'.encode('utf-8')
     body = prefix + blob + suffix
     url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType'
     try:
@@ -4650,8 +4641,6 @@ def google_import_office():
         return jsonify({'error': 'empty_office_file'}), 400
     if len(blob) > MAX_OFFICE_IMPORT_BYTES:
         return jsonify({'error': 'office_file_too_large'}), 413
-    # DOCX/PPTX are ZIP-based OOXML containers. Reject a renamed arbitrary file
-    # before sending it to Drive.
     if not blob.startswith(b'PK'):
         return jsonify({'error': 'invalid_office_file'}), 400
 
