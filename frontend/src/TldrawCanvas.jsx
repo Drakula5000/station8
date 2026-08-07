@@ -6,6 +6,8 @@ import { ShapeInspector } from './components/ShapeInspector'
 import { ImageLightbox } from './components/ImageLightbox'
 import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
+import { StationConnectorShapeUtil } from './canvas/StationConnectorShapeUtil'
+import { StationConnectorTool } from './canvas/StationConnectorTool'
 import { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'
 import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'
 import { StationTextShapeUtil } from './canvas/StationTextShapeUtil'
@@ -90,10 +92,12 @@ const FRAME_DROPPED_IMAGE_INSET = 32
 // StationTextShapeUtil sizes text shapes with our smaller font table; the
 // rendered font-size is overridden via CSS to match — see StationTextShapeUtil.js.
 const STATION_SHAPE_UTILS = [
+  StationConnectorShapeUtil,
   StationFrameShapeUtil,
   StationNoteShapeUtil,
   StationTextShapeUtil,
 ]
+const STATION_TOOLS = [StationConnectorTool]
 const FIGMA_REORDER_SHORTCUTS = {
   bringForward: 'cmd+],ctrl+]',
   bringToFront: 'cmd+alt+],ctrl+shift+]',
@@ -707,6 +711,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
           options={tldrawOptions}
           overrides={TLDRAW_UI_OVERRIDES}
           shapeUtils={STATION_SHAPE_UTILS}
+          tools={STATION_TOOLS}
         >
           {!readOnly && <FjToolbar toolInfoRef={toolInfoRef} onOpenLightbox={openLightbox} onToolChange={setActiveTool} />}
           {!readOnly && <ShapeInspector />}

@@ -492,8 +492,8 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
       ><FjTextIcon /></button>
 
       <button
-        className={`fj-tool ${currentTool === 'arrow' ? 'active' : ''}`}
-        onClick={() => setTool('arrow')}
+        className={`fj-tool ${currentTool === 's8-connector' ? 'active' : ''}`}
+        onClick={() => setTool('s8-connector')}
         onPointerDown={stopToolbarPointer}
         title="Connector"
         type="button"
