@@ -1,0 +1,253 @@
+from pathlib import Path
+
+# Connector: tldraw keeps the ORIGINAL create handle for the whole drag.
+path = Path('frontend/src/canvas/StationConnectorShapeUtil.jsx')
+text = path.read_text()
+old_helper = '''function getConnectorPointIds(shape, pointCount) {
+  const stored = shape.meta?.connectorPointIds
+  if (Array.isArray(stored) && stored.length === pointCount && stored.every(id => typeof id === 'string')) {
+    return stored
+  }
+  return getIndices(pointCount)
+}
+'''
+new_helper = '''function getConnectorPointIds(pointCount) {
+  return getIndices(pointCount)
+}
+'''
+if old_helper not in text:
+    raise SystemExit('connector point-id helper anchor missing')
+text = text.replace(old_helper, new_helper, 1)
+text = text.replace('getConnectorPointIds(shape, points.length)', 'getConnectorPointIds(points.length)')
+
+start = text.find('  onHandleDragStart(shape, info) {')
+end = text.find('\n  component(shape) {', start)
+if start < 0 or end < 0:
+    raise SystemExit('connector drag-method anchors missing')
+methods = '''  onHandleDragStart(shape, { handle }) {
+    if (handle.type !== 'create') return undefined
+    const points = normalizeConnectorPoints(shape.props.points)
+    const pointIds = getConnectorPointIds(points.length)
+    const segmentIndex = pointIds.findIndex((id, index) => (
+      index < pointIds.length - 1
+      && getCreateHandleIndex(pointIds, index) === handle.id
+    ))
+    if (segmentIndex < 0) return undefined
+
+    return {
+      ...shape,
+      props: {
+        ...shape.props,
+        points: insertConnectorPoint(points, segmentIndex, handle),
+      },
+    }
+  }
+
+  onHandleDrag(shape, info) {
+    const { handle, initial } = info
+    const points = normalizeConnectorPoints(shape.props.points)
+    const pointIds = getConnectorPointIds(points.length)
+    let pointIndex = pointIds.indexOf(String(handle.id))
+
+    // DraggingHandle keeps the original create handle id/type for the whole
+    // gesture. Resolve it against the original shape, then address the point
+    // inserted by onHandleDragStart in the current shape.
+    if (pointIndex < 0 && handle.type === 'create') {
+      const initialPoints = normalizeConnectorPoints(initial?.props?.points)
+      const initialIds = getConnectorPointIds(initialPoints.length)
+      const initialSegmentIndex = initialIds.findIndex((id, index) => (
+        index < initialIds.length - 1
+        && getCreateHandleIndex(initialIds, index) === handle.id
+      ))
+
+      if (initialSegmentIndex >= 0) {
+        if (points.length === initialPoints.length + 1) {
+          pointIndex = initialSegmentIndex + 1
+        } else if (points.length === initialPoints.length) {
+          return {
+            ...shape,
+            props: {
+              ...shape.props,
+              points: insertConnectorPoint(points, initialSegmentIndex, handle),
+            },
+          }
+        }
+      }
+    }
+
+    if (pointIndex < 0) return shape
+    return {
+      ...shape,
+      props: {
+        ...shape.props,
+        points: moveConnectorPoint(points, pointIndex, handle),
+      },
+    }
+  }
+'''
+text = text[:start] + methods + text[end:]
+path.write_text(text)
+
+Path('frontend/src/canvas/StationConnectorShapeUtil.test.js').write_text('''import test from 'node:test'\nimport assert from 'node:assert/strict'\nimport { readFileSync } from 'node:fs'\n\nconst source = readFileSync(new URL('./StationConnectorShapeUtil.jsx', import.meta.url), 'utf8')\n\ntest('connector drag resolves the persistent create handle against the initial shape', () => {\n  assert.match(source, /const \\{ handle, initial \\} = info/)\n  assert.match(source, /const initialPoints = normalizeConnectorPoints\\(initial\\?\\.props\\?\\.points\\)/)\n  assert.match(source, /pointIndex = initialSegmentIndex \\+ 1/)\n  assert.doesNotMatch(source, /connectorPointIds/)\n})\n\ntest('connector still uses fractional create-handle indices', () => {\n  assert.match(source, /getIndexBetween/)\n  assert.match(source, /type: 'create'/)\n  assert.match(source, /canSnap: true/)\n})\n''')
+
+# Generic folder/sidebar drag/drop: one classifier, one sequential batch queue.
+app_path = Path('frontend/src/App.jsx')
+app = app_path.read_text()
+folder_anchor = "const folderKey = (folderId) => folderId || ROOT_FOLDER\n"
+helper = '''const folderKey = (folderId) => folderId || ROOT_FOLDER
+
+function droppedFileProgressLabel(progress) {
+  if (!progress) return ''
+  if (progress.phase !== 'office') return pdfProgressLabel(progress)
+  const total = Number(progress.total) || 1
+  const index = Number(progress.index) || 0
+  const queue = total > 1 ? `${index + 1} of ${total} · ` : ''
+  const remaining = Math.max(0, total - index - 1)
+  const queued = remaining ? ` · ${remaining} more queued` : ''
+  return `${queue}Converting to ${progress.officeLabel || 'Google'}…${queued}`
+}
+'''
+if folder_anchor not in app:
+    raise SystemExit('App progress-helper anchor missing')
+app = app.replace(folder_anchor, helper, 1)
+
+old_setter = '''  const setDocsForKind = (kind, updater) => {
+    if (kind === 'board') setBoards(updater)
+    else if (kind === 'gdoc') setGdocs(updater)
+    else if (kind === 'gsheet') setGsheets(updater)
+    else if (kind === 'report') setReports(updater)
+    else if (kind === 'pdf') setPdfs(updater)
+  }
+'''
+new_setter = '''  const setDocsForKind = (kind, updater) => {
+    if (kind === 'board') setBoards(updater)
+    else if (kind === 'gdoc') setGdocs(updater)
+    else if (kind === 'gsheet') setGsheets(updater)
+    else if (kind === 'gslide') setGslides(updater)
+    else if (kind === 'report') setReports(updater)
+    else if (kind === 'pdf') setPdfs(updater)
+  }
+'''
+if old_setter not in app:
+    raise SystemExit('App document-kind setter anchor missing')
+app = app.replace(old_setter, new_setter, 1)
+
+func_start = app.find('  const uploadDroppedFiles = async (files, targetFolderId) => {')
+func_end = app.find('\n  const isFolderDescendant =', func_start)
+if func_start < 0 or func_end < 0:
+    raise SystemExit('App dropped-file function anchors missing')
+new_func = '''  const uploadDroppedFiles = async (files, targetFolderId) => {
+    if (pdfUploadBusyRef.current) {
+      showError('Another file import is already in progress.')
+      return
+    }
+
+    const classified = files.map(file => ({ file, route: classifyDroppedFile(file) }))
+    const accepted = classified.filter(item => item.route.type !== 'unsupported')
+    const unsupported = classified.filter(item => item.route.type === 'unsupported')
+    if (!accepted.length) {
+      const first = unsupported[0]?.file?.name || 'That file'
+      showError(`${first}: Station 8 accepts PDF, Word (.docx), and PowerPoint (.pptx) drops.`)
+      return
+    }
+
+    // Supported Office files are never sent through PDF validation. Clear any
+    // previous drop error before beginning a valid batch; unsupported members
+    // of a mixed batch are reported only after the accepted imports finish.
+    setErrorVisible(false)
+    setErrorMessage('')
+
+    const destination = targetFolderId
+      ? buildFolderPath(targetFolderId, folderById) || 'Workspace root'
+      : 'Workspace root'
+    pdfUploadBusyRef.current = true
+    setPdfDropBusy(true)
+    const controller = new AbortController()
+    pdfDropAbortRef.current = controller
+    const importedOffice = []
+
+    try {
+      for (let index = 0; index < accepted.length; index += 1) {
+        const { file, route } = accepted[index]
+
+        if (route.type === 'office') {
+          setPdfDropProgress({
+            phase: 'office', file, index, total: accepted.length, destination,
+            officeLabel: route.label,
+          })
+          try {
+            const imported = await importOfficeFile(file, targetFolderId)
+            importedOffice.push(imported)
+            if (imported.kind === 'gdoc') setGdocs(items => [imported.item, ...items])
+            if (imported.kind === 'gslide') setGslides(items => [imported.item, ...items])
+            if (imported.item.folder_id) expandFolderPath(imported.item.folder_id)
+          } catch (error) {
+            if (error?.code === 'google_reconnect_required') {
+              requireGoogleReconnect(true)
+            } else if (error?.code === 'google_connection_required') {
+              showError('Connect Google first so Station 8 can convert Word and PowerPoint files.')
+            } else {
+              showError(`${file.name}: ${error?.message || 'Could not import this Office file.'}`)
+            }
+          }
+          continue
+        }
+
+        if (route.type === 'pdf') {
+          const result = await uploadPdfFiles([file], targetFolderId, progress => {
+            setPdfDropProgress({
+              ...progress,
+              file,
+              index,
+              total: accepted.length,
+              destination,
+            })
+          }, { signal: controller.signal })
+          if (result.uploaded.length) {
+            addUploadedPdfRecords(result.uploaded, {
+              openSingle: accepted.length === 1 && result.uploaded.length === 1,
+            })
+          }
+          if (result.failed.length) {
+            const first = result.failed[0]
+            showError(`${first.file?.name || 'PDF'}: ${first.error}`)
+          }
+        }
+      }
+
+      if (accepted.length === 1 && importedOffice.length === 1) {
+        const imported = importedOffice[0]
+        openDocument(imported.kind, imported.item.id, imported.item.folder_id)
+      }
+
+      if (unsupported.length) {
+        const first = unsupported[0].file?.name || 'That file'
+        const suffix = unsupported.length > 1 ? ` (+${unsupported.length - 1} more)` : ''
+        showError(`${first}: unsupported file type${suffix}. Station 8 accepts PDF, Word (.docx), and PowerPoint (.pptx) drops.`)
+      }
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        if (error.uploaded?.length) {
+          addUploadedPdfRecords(error.uploaded, {
+            openSingle: accepted.length === 1 && error.uploaded.length === 1,
+          })
+        }
+      } else {
+        showError(error?.message || 'File import failed.')
+      }
+    } finally {
+      pdfDropAbortRef.current = null
+      pdfUploadBusyRef.current = false
+      setPdfDropBusy(false)
+      setPdfDropProgress(null)
+    }
+  }
+'''
+app = app[:func_start] + new_func + app[func_end:]
+
+old_progress = "{pdfDropProgress ? ` · ${pdfDropProgress.phase === 'office' ? `Converting to ${pdfDropProgress.officeLabel}…` : pdfProgressLabel(pdfDropProgress)}` : ''}"
+new_progress = "{pdfDropProgress ? ` · ${droppedFileProgressLabel(pdfDropProgress)}` : ''}"
+if old_progress not in app:
+    raise SystemExit('App progress-toast anchor missing')
+app = app.replace(old_progress, new_progress, 1)
+app_path.write_text(app)
