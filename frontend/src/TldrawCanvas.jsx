@@ -7,6 +7,7 @@ import { ImageLightbox } from './components/ImageLightbox'
 import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
 import { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'
+import { StationLineShapeUtil } from './canvas/StationLineShapeUtil'
 import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'
 import { StationTextShapeUtil } from './canvas/StationTextShapeUtil'
 import { FrameCornerStyles, GeoCornerStyles, ImageShapeStyles, ListStyles } from './canvas/ShapeStyles'
@@ -91,6 +92,7 @@ const FRAME_DROPPED_IMAGE_INSET = 32
 // rendered font-size is overridden via CSS to match — see StationTextShapeUtil.js.
 const STATION_SHAPE_UTILS = [
   StationFrameShapeUtil,
+  StationLineShapeUtil,
   StationNoteShapeUtil,
   StationTextShapeUtil,
 ]
