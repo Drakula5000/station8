@@ -1,4 +1,4 @@
-import { StateNode, Vec, createShapeId } from 'tldraw'
+import { StateNode, Vec, createShapeId, getIndices } from 'tldraw'
 import { STATION_CONNECTOR_TYPE } from './StationConnectorShapeUtil'
 
 export const STATION_CONNECTOR_TOOL = 's8-connector'
@@ -8,6 +8,7 @@ export class StationConnectorTool extends StateNode {
 
   shapeId = null
   startPoint = null
+  endIndex = null
 
   onEnter() {
     this.editor.setCursor({ type: 'cross', rotation: 0 })
@@ -16,6 +17,7 @@ export class StationConnectorTool extends StateNode {
   onPointerDown() {
     const point = this.editor.inputs.getCurrentPagePoint()
     const id = createShapeId()
+    const [startIndex, endIndex] = getIndices(2)
 
     this.editor.markHistoryStoppingPoint('create connector')
     this.editor.createShape({
@@ -24,26 +26,40 @@ export class StationConnectorTool extends StateNode {
       x: point.x,
       y: point.y,
       props: {
-        points: [{ x: 0, y: 0 }, { x: 0, y: 0 }],
+        spline: 'cubic',
+        scale: 1,
+        points: {
+          [startIndex]: { id: startIndex, index: startIndex, x: 0, y: 0 },
+          [endIndex]: { id: endIndex, index: endIndex, x: 0, y: 0 },
+        },
       },
     })
 
     this.shapeId = id
     this.startPoint = new Vec(point.x, point.y)
+    this.endIndex = endIndex
     this.editor.select(id)
   }
 
   onPointerMove() {
-    if (!this.shapeId || !this.startPoint) return
+    if (!this.shapeId || !this.startPoint || !this.endIndex) return
     const current = this.editor.inputs.getCurrentPagePoint()
+    const shape = this.editor.getShape(this.shapeId)
+    if (!shape) return
+
     this.editor.updateShape({
       id: this.shapeId,
       type: STATION_CONNECTOR_TYPE,
       props: {
-        points: [
-          { x: 0, y: 0 },
-          { x: current.x - this.startPoint.x, y: current.y - this.startPoint.y },
-        ],
+        points: {
+          ...shape.props.points,
+          [this.endIndex]: {
+            id: this.endIndex,
+            index: this.endIndex,
+            x: current.x - this.startPoint.x,
+            y: current.y - this.startPoint.y,
+          },
+        },
       },
     })
   }
@@ -54,9 +70,7 @@ export class StationConnectorTool extends StateNode {
     const distance = Vec.Dist(this.startPoint, current)
     const id = this.shapeId
 
-    this.shapeId = null
-    this.startPoint = null
-
+    this.clearDraftState()
     if (distance < 4 / this.editor.getZoomLevel()) {
       this.editor.deleteShapes([id])
     } else {
@@ -78,9 +92,14 @@ export class StationConnectorTool extends StateNode {
     this.discardDraft()
   }
 
-  discardDraft() {
-    if (this.shapeId) this.editor.deleteShapes([this.shapeId])
+  clearDraftState() {
     this.shapeId = null
     this.startPoint = null
+    this.endIndex = null
+  }
+
+  discardDraft() {
+    if (this.shapeId) this.editor.deleteShapes([this.shapeId])
+    this.clearDraftState()
   }
 }
