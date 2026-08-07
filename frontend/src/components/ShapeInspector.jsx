@@ -101,16 +101,16 @@ const MAX_INSPECTOR_SCALE = 1
 
 // Which control rows apply to which shape types.
 // Keep conservative — show a control only when ALL selected shapes support it.
-const SHAPES_WITH_COLOR   = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 'frame', 'highlight'])
+const SHAPES_WITH_COLOR   = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 'frame', 'highlight', 's8-connector'])
 const SHAPES_WITH_FILL    = new Set(['geo'])
 const SHAPES_WITH_TEXT    = new Set(['note', 'geo', 'text', 'arrow'])
-const SHAPES_WITH_SIZE    = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw'])
+const SHAPES_WITH_SIZE    = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 's8-connector'])
 const SHAPES_WITH_ALIGN   = new Set(['note', 'geo', 'text'])
 const SHAPES_WITH_CORNERS = new Set(['frame'])
 const SHAPES_WITH_IMAGE_STYLING = new Set(['image'])
 const SHAPES_WITH_FREEFORM_TEXT_SIZE = new Set(['text'])
 const SHAPES_WITH_LISTS = new Set(['note', 'text'])
-const SHAPES_WITH_ARROWHEADS = new Set(['arrow'])
+const SHAPES_WITH_ARROWHEADS = new Set(['arrow', 's8-connector'])
 // Shapes where "no border" is meaningful: a geo rectangle with a fill can
 // still read as a card without an outline. Frames always have a border (it's
 // how they work), so they're excluded. For arrows/lines/draws the stroke
@@ -137,7 +137,7 @@ const SHAPES_WITH_PERMISSIVE_COLOR = new Set(['text', 'draw', 'highlight'])
 //     just produce yellow regardless of mode.
 //   - frame: frameStroke/frameFill use a grey-only palette, no useful
 //     black/white flip available.
-const SHAPES_WITH_AUTO_COLOR = new Set(['text', 'draw', 'note', 'geo', 'arrow', 'line'])
+const SHAPES_WITH_AUTO_COLOR = new Set(['text', 'draw', 'note', 'geo', 'arrow', 'line', 's8-connector'])
 
 function allShapesMatch(shapes, set) {
   return shapes.length > 0 && shapes.every((s) => set.has(s.type))
