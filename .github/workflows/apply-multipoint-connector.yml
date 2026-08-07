@@ -1,0 +1,85 @@
+name: Apply multipoint connector
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - frontend/src/TldrawCanvas.jsx
+      - frontend/src/canvas/StationArrowShapeUtil.jsx
+      - frontend/src/canvas/StationArrowShapeUtil.test.js
+      - frontend/src/canvas/StationLineShapeUtil.js
+      - frontend/src/canvas/StationLineShapeUtil.test.js
+      - .github/workflows/apply-multipoint-connector.yml
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  apply-and-verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Wire connector utility and revert unrelated line override
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/src/TldrawCanvas.jsx')
+          text = path.read_text()
+
+          old_import = "import { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'\nimport { StationLineShapeUtil } from './canvas/StationLineShapeUtil'"
+          new_import = "import { StationArrowShapeUtil } from './canvas/StationArrowShapeUtil'\nimport { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'"
+          if old_import not in text:
+              raise SystemExit('expected StationLine import block not found')
+          text = text.replace(old_import, new_import, 1)
+
+          old_utils = "const STATION_SHAPE_UTILS = [\n  StationFrameShapeUtil,\n  StationLineShapeUtil,\n  StationNoteShapeUtil,\n  StationTextShapeUtil,\n]"
+          new_utils = "const STATION_SHAPE_UTILS = [\n  StationArrowShapeUtil,\n  StationFrameShapeUtil,\n  StationNoteShapeUtil,\n  StationTextShapeUtil,\n]"
+          if old_utils not in text:
+              raise SystemExit('expected StationLine registration not found')
+          text = text.replace(old_utils, new_utils, 1)
+          path.write_text(text)
+          PY
+
+          rm -f frontend/src/canvas/StationLineShapeUtil.js frontend/src/canvas/StationLineShapeUtil.test.js
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+        working-directory: frontend
+
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Unit tests
+        run: npm test
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+
+      - name: Commit verified connector implementation
+        shell: bash
+        run: |
+          rm .github/workflows/apply-multipoint-connector.yml
+          git config user.name "Station 8 Fix Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add frontend/src/TldrawCanvas.jsx frontend/src/canvas/StationArrowShapeUtil.jsx frontend/src/canvas/StationArrowShapeUtil.test.js frontend/src/canvas/StationLineShapeUtil.js frontend/src/canvas/StationLineShapeUtil.test.js .github/workflows
+          git commit -m "feat(canvas): add multipoint connector curves"
+          git push origin HEAD:${{ github.head_ref }}
