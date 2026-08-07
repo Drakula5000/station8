@@ -6,7 +6,6 @@ import { ShapeInspector } from './components/ShapeInspector'
 import { ImageLightbox } from './components/ImageLightbox'
 import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
-import { StationArrowShapeUtil } from './canvas/StationArrowShapeUtil'
 import { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'
 import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'
 import { StationTextShapeUtil } from './canvas/StationTextShapeUtil'
@@ -91,7 +90,6 @@ const FRAME_DROPPED_IMAGE_INSET = 32
 // StationTextShapeUtil sizes text shapes with our smaller font table; the
 // rendered font-size is overridden via CSS to match — see StationTextShapeUtil.js.
 const STATION_SHAPE_UTILS = [
-  StationArrowShapeUtil,
   StationFrameShapeUtil,
   StationNoteShapeUtil,
   StationTextShapeUtil,
@@ -296,7 +294,10 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
 
   const doSave = useCallback(async () => {
     const editor = editorRef.current
-    if (!editor || readOnlyRef.current) return
+    // Never persist the editor while a board load is still in progress or has
+    // failed. A failed fetch / snapshot migration must not be able to turn the
+    // temporary blank editor into the board's durable snapshot.
+    if (!editor || readOnlyRef.current || loadingRef.current) return
     const notify = onSaveStateRef.current
     notify?.('saving')
     try {
@@ -426,18 +427,29 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
     // loads where the cached-bounds fit fired against stale data before the
     // fresh snapshot replaced it. Keep the code path identical for owner
     // and visitor.
+    let loadSucceeded = false
     fetch(url, { credentials: 'include' })
-      .then(r => r.ok ? r.json() : null)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`board load failed (${response.status})`)
+        return response.json()
+      })
       .then(data => {
-        if (data?.asset_urls) setSignedUploadUrls(data.asset_urls)
-        if (data?.snapshot?.store) {
+        if (!data || typeof data !== 'object') throw new Error('invalid board payload')
+        if (data.asset_urls) setSignedUploadUrls(data.asset_urls)
+        if (data.snapshot?.store) {
           editor.store.loadStoreSnapshot(data.snapshot)
         }
+        loadSucceeded = true
       })
       .catch(err => {
+        // Keep loadingRef true and lock the temporary blank editor. The save
+        // listener and doSave both refuse writes while loadingRef is true.
         console.error('board load failed', err)
+        editor.updateInstanceState({ isReadonly: true })
+        onSaveStateRef.current?.('error')
       })
       .finally(() => {
+        if (!loadSucceeded) return
         loadingRef.current = false
         // Re-apply read-only AFTER snapshot load. loadStoreSnapshot replaces
         // the entire store including the instance_state record, which
