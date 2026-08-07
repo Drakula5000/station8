@@ -3057,6 +3057,7 @@ export default function App() {
                     onFindDismiss={onFindDismiss}
                     findBoards={findBoards}
                     findShapeIds={findShapeIdsByBoard[activeId.id] || []}
+                    onExternalFilesDrop={(files) => uploadDroppedFiles(files, activeDoc?.folder_id || null)}
                     onNavigateBoard={(boardId) => {
                       const board = boards.find(b => b.id === boardId)
                       openDocument('board', boardId, board?.folder_id)

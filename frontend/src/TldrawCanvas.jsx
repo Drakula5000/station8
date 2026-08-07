@@ -8,7 +8,7 @@ import { STICKY_SWATCHES } from './colors'
 import { ShapeColorSync } from './canvas/ShapeColorSync'
 import { StationConnectorShapeUtil } from './canvas/StationConnectorShapeUtil'
 import { StationConnectorTool } from './canvas/StationConnectorTool'
-import { upgradeLoadedLegacyConnectors } from './canvas/legacyConnectorUpgrade'
+import { migrateStoredStationConnectors, upgradeLoadedLegacyConnectors } from './canvas/legacyConnectorUpgrade'
 import { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'
 import { StationNoteShapeUtil } from './canvas/StationNoteShapeUtil'
 import { StationTextShapeUtil } from './canvas/StationTextShapeUtil'
@@ -243,7 +243,7 @@ function getDroppedImageTargetSize(editor, shape) {
   return resized || { w: width, h: height }
 }
 
-export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveState, colorMode, findQuery, onFindDismiss, findBoards, onNavigateBoard, findShapeIds }) {
+export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveState, colorMode, findQuery, onFindDismiss, findBoards, onNavigateBoard, findShapeIds, onExternalFilesDrop }) {
   const boardIdRef = useRef(boardId)
   const readOnlyRef = useRef(readOnly)
   const viewerModeRef = useRef(viewerMode)
@@ -445,7 +445,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
           // Load native arrows first so tldraw can resolve any endpoint bindings
           // into their actual rendered geometry. Then upgrade simple legacy
           // arrows (bound or unbound) to the Station multipoint connector.
-          editor.store.loadStoreSnapshot(data.snapshot)
+          editor.store.loadStoreSnapshot(migrateStoredStationConnectors(data.snapshot))
           upgradeLoadedLegacyConnectors(editor, { getArrowInfo, createShapeId })
         }
         loadSucceeded = true
@@ -679,6 +679,20 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
     }
   }, [])
 
+  const handleDocumentDropCapture = useCallback((event) => {
+    if (readOnlyRef.current || typeof onExternalFilesDrop !== 'function') return
+    const files = Array.from(event.dataTransfer?.files || [])
+    const stationFiles = files.filter(file => /\.(?:pdf|docx|pptx)$/i.test(String(file?.name || '')))
+    if (!stationFiles.length) return
+
+    // Station document types belong to Station 8's import queue, not tldraw's
+    // image/media asset importer. Stop the event here so tldraw cannot emit its
+    // generic "File type is not allowed" toast for a supported DOCX/PPTX/PDF.
+    event.preventDefault()
+    event.stopPropagation()
+    void onExternalFilesDrop(stationFiles)
+  }, [onExternalFilesDrop])
+
   const ghostPx = ghost && editorRef.current
     ? getNotePreviewSizePx(editorRef.current)
     : 0
@@ -707,6 +721,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
       onMouseLeave={handleMouseLeave}
       onPointerDownCapture={handlePointerDownCapture}
       onWheelCapture={handleWheelCapture}
+      onDropCapture={handleDocumentDropCapture}
     >
       {fontsReady && (
         <Tldraw
