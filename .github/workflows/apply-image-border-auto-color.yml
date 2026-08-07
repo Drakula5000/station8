@@ -1,0 +1,131 @@
+name: Apply image border auto color
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - frontend/src/components/ShapeInspector.jsx
+      - frontend/src/canvas/ShapeStyles.jsx
+      - frontend/src/canvas/imageBorder.js
+      - frontend/src/canvas/imageBorder.test.js
+      - frontend/src/styles/theme.css
+      - .github/workflows/apply-image-border-auto-color.yml
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  apply-and-verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Add mode-aware image border color
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              text = path.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              path.write_text(text.replace(old, new, 1))
+
+          inspector = Path('frontend/src/components/ShapeInspector.jsx')
+          replace_once(
+              inspector,
+              "import { MAGIC_FILL } from '../canvas/magicFill'\n",
+              "import { MAGIC_FILL } from '../canvas/magicFill'\nimport { AUTO_IMAGE_BORDER, normalizeImageBorderColor } from '../canvas/imageBorder'\n",
+              'import image border helper',
+          )
+          replace_once(
+              inspector,
+              "  const activeImageBorderColor = showImageStyling && shapes.every(\n    s => String(s.meta?.imageBorderColor ?? COLOR_SWATCHES[5].bg) === String(shapes[0].meta?.imageBorderColor ?? COLOR_SWATCHES[5].bg)\n  ) ? String(shapes[0].meta?.imageBorderColor ?? COLOR_SWATCHES[5].bg) : undefined\n",
+              "  const activeImageBorderColor = showImageStyling && shapes.every(\n    s => normalizeImageBorderColor(s.meta?.imageBorderColor) === normalizeImageBorderColor(shapes[0].meta?.imageBorderColor)\n  ) ? normalizeImageBorderColor(shapes[0].meta?.imageBorderColor) : undefined\n  const isImageBorderAuto = showImageStyling && activeImageBorderColor === AUTO_IMAGE_BORDER\n",
+              'default image border to auto',
+          )
+          replace_once(
+              inspector,
+              "  const applyImageBorderColor = (color) => updateMeta('imageBorderColor', color)\n",
+              "  const applyImageBorderColor = (color) => updateMeta('imageBorderColor', color)\n  const applyImageBorderColorAuto = () => updateMeta('imageBorderColor', AUTO_IMAGE_BORDER)\n",
+              'add image border auto action',
+          )
+          replace_once(
+              inspector,
+              "            {isAutoEligible && (\n              <button\n                key=\"auto\"\n                className={`insp-swatch ${isAllAutoColor ? 'active' : ''}`}\n                onClick={applyColorAuto}\n                title=\"Auto (follows canvas mode — flips with light/dark toggle)\"\n                type=\"button\"\n                data-swatch-id=\"auto\"\n              />\n            )}\n",
+              "            {(isAutoEligible || showImageStyling) && (\n              <button\n                key=\"auto\"\n                className={`insp-swatch ${(showImageStyling ? isImageBorderAuto : isAllAutoColor) ? 'active' : ''}`}\n                onClick={showImageStyling ? applyImageBorderColorAuto : applyColorAuto}\n                title=\"Auto (follows canvas mode — flips with light/dark toggle)\"\n                type=\"button\"\n                data-swatch-id=\"auto\"\n              />\n            )}\n",
+              'show auto swatch for image borders',
+          )
+
+          styles = Path('frontend/src/canvas/ShapeStyles.jsx')
+          replace_once(
+              styles,
+              "import { RECT_CLASS_GEOS } from './styleOptions'\n",
+              "import { RECT_CLASS_GEOS } from './styleOptions'\nimport { AUTO_IMAGE_BORDER, normalizeImageBorderColor } from './imageBorder'\n",
+              'import image border resolution',
+          )
+          replace_once(
+              styles,
+              "    const borderColor = image.meta?.imageBorderColor || 'var(--s8-accent)'\n",
+              "    const storedBorderColor = normalizeImageBorderColor(image.meta?.imageBorderColor)\n    const borderColor = storedBorderColor === AUTO_IMAGE_BORDER\n      ? 'var(--s8-auto-contrast)'\n      : storedBorderColor\n",
+              'resolve auto image border color',
+          )
+
+          theme = Path('frontend/src/styles/theme.css')
+          replace_once(
+              theme,
+              "  --s8-text:           #dce8f8;\n",
+              "  --s8-text:           #dce8f8;\n  --s8-auto-contrast:  var(--s8-tl-white);\n",
+              'dark auto contrast token',
+          )
+          replace_once(
+              theme,
+              "  --s8-text:           #08172a;\n",
+              "  --s8-text:           #08172a;\n  --s8-auto-contrast:  var(--s8-tl-black);\n",
+              'light auto contrast token',
+          )
+
+          Path('frontend/src/canvas/imageBorder.js').write_text("""export const AUTO_IMAGE_BORDER = '__s8_auto_image_border__'\n\nexport function normalizeImageBorderColor(value) {\n  return typeof value === 'string' && value.trim() ? value : AUTO_IMAGE_BORDER\n}\n""")
+          Path('frontend/src/canvas/imageBorder.test.js').write_text("""import test from 'node:test'\nimport assert from 'node:assert/strict'\n\nimport { AUTO_IMAGE_BORDER, normalizeImageBorderColor } from './imageBorder.js'\n\ntest('image borders default to mode-aware auto color', () => {\n  assert.equal(normalizeImageBorderColor(undefined), AUTO_IMAGE_BORDER)\n  assert.equal(normalizeImageBorderColor(null), AUTO_IMAGE_BORDER)\n  assert.equal(normalizeImageBorderColor(''), AUTO_IMAGE_BORDER)\n})\n\ntest('explicit image border colors remain explicit', () => {\n  assert.equal(normalizeImageBorderColor('var(--s8-tl-teal)'), 'var(--s8-tl-teal)')\n  assert.equal(normalizeImageBorderColor(AUTO_IMAGE_BORDER), AUTO_IMAGE_BORDER)\n})\n""")
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+        working-directory: frontend
+
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Unit tests
+        run: npm test
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          rm .github/workflows/apply-image-border-auto-color.yml
+          git config user.name "Station 8 Fix Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add frontend/src/components/ShapeInspector.jsx frontend/src/canvas/ShapeStyles.jsx frontend/src/canvas/imageBorder.js frontend/src/canvas/imageBorder.test.js frontend/src/styles/theme.css .github/workflows
+          git commit -m "feat(canvas): add auto color to image borders"
+          git push origin HEAD:${{ github.head_ref }}
