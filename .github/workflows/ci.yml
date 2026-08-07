@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-# Opt into Node 24 for all JS-based actions ahead of GitHub's June 2026
-# default switch (Node 20 deprecated). Removable once every action we use
-# ships a Node-24-native version.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
@@ -60,7 +57,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_*.py'
 
   materialize-office-connector-feature:
-    name: Materialize Office + Connector source
+    name: Repair Office + Connector source
     if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'fix/office-drop-and-connector-ux'
     runs-on: ubuntu-latest
     steps:
@@ -68,52 +65,98 @@ jobs:
         with:
           ref: fix/office-drop-and-connector-ux
           fetch-depth: 0
-      - name: Apply staged source patch
+
+      - name: Repair Office multipart wire format
         shell: bash
         run: |
-          if [ ! -f .github/workflows/apply-office-drop-connector-ux.yml ]; then
-            echo "Feature source already materialized."
-            exit 0
-          fi
-
           python - <<'PY'
           from pathlib import Path
-          import textwrap
 
-          raw = Path('.github/workflows/apply-office-drop-connector-ux.yml').read_text()
-          start = "          python - <<'PY'\n"
-          end = "\n          PY\n"
-          if start not in raw or end not in raw:
-              raise SystemExit('could not locate staged source patch')
-          body = raw.split(start, 1)[1].split(end, 1)[0]
-          exec(compile(textwrap.dedent(body), 'office-connector-feature-patch', 'exec'), {})
+          server_path = Path('server.py')
+          text = server_path.read_text()
+          func = text.find('def _drive_import_office_file')
+          start = text.find("    boundary = f'station8-{uuid.uuid4().hex}'\n", func)
+          end = text.find("    url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType'\n", start)
+          if func < 0 or start < 0 or end < 0:
+              raise SystemExit('Office multipart source anchors missing')
+
+          replacement = r'''    boundary = f'station8-{uuid.uuid4().hex}'
+    prefix = (
+        f'--{boundary}\r\n'
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n'
+        f'{json.dumps(metadata)}\r\n'
+        f'--{boundary}\r\n'
+        f'Content-Type: {source_mime}\r\n\r\n'
+    ).encode('utf-8')
+    suffix = f'\r\n--{boundary}--\r\n'.encode('utf-8')
+    body = prefix + blob + suffix
+'''
+          text = text[:start] + replacement + text[end:]
+          server_path.write_text(text)
+
+          test_path = Path('tests/test_office_import.py')
+          test_text = test_path.read_text()
+          marker = "\n\nif __name__ == '__main__':\n"
+          if 'test_drive_office_import_uses_crlf_multipart_body' not in test_text:
+              if marker not in test_text:
+                  raise SystemExit('Office test insertion anchor missing')
+              method = r'''
+    def test_drive_office_import_uses_crlf_multipart_body(self):
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+            def read(self):
+                return b'{"id":"doc-id"}'
+
+        def fake_urlopen(request, timeout=30):
+            captured['body'] = request.data
+            captured['content_type'] = request.get_header('Content-type')
+            return FakeResponse()
+
+        with patch.object(server._urllib_request, 'urlopen', side_effect=fake_urlopen):
+            file_id, url = server._drive_import_office_file(
+                'Exercises.docx',
+                b'PK\x03\x04office-data',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'gdoc',
+                parent_id='drive-folder',
+                access_token='token',
+            )
+
+        self.assertEqual(file_id, 'doc-id')
+        self.assertEqual(url, 'https://docs.google.com/document/d/doc-id/edit')
+        content_type = captured['content_type']
+        self.assertTrue(content_type.startswith('multipart/related; boundary='))
+        boundary = content_type.split('boundary=', 1)[1]
+        body = captured['body']
+        self.assertTrue(body.startswith(f'--{boundary}\r\n'.encode()))
+        self.assertIn(b'Content-Type: application/json; charset=UTF-8\r\n\r\n', body)
+        self.assertIn(
+            b'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\nPK\x03\x04office-data',
+            body,
+        )
+        self.assertTrue(body.endswith(f'\r\n--{boundary}--\r\n'.encode()))
+'''
+              test_path.write_text(test_text.replace(marker, method + marker, 1))
           PY
 
-          # The staged generator escaped one Python docstring delimiter. Fix
-          # that generated source before committing; normal CI validates the
-          # resulting source on the next PR synchronization.
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('server.py')
-          text = path.read_text()
-          broken = r'    \"\"\"Upload an OOXML file and ask Drive to convert it to a Google-native type.\"\"\"'
-          fixed = '    """Upload an OOXML file and ask Drive to convert it to a Google-native type."""'
-          if broken not in text:
-              raise SystemExit('expected generated Office docstring anchor missing')
-          path.write_text(text.replace(broken, fixed, 1))
-          PY
-
+          rm -f .github/workflows/agent-office-connector-patch.yml
+          rm -f .github/workflows/repair-office-multipart.yml
+          rm -f .github/workflows/repair-office-multipart-pr.yml
           rm -f .github/workflows/apply-office-drop-connector-ux.yml
           rm -f .github/workflows/run-staged-office-patch.yml
-          rm -f .github/workflows/agent-office-connector-patch.yml
           rm -f _agent_trigger*.txt
 
           git config user.name "Station 8 Fix Bot"
           git config user.email "actions@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "No source changes to commit."
+            echo "Feature source already repaired."
             exit 0
           fi
-          git commit -m "feat: import Office drops and finish multipoint connectors"
+          git commit -m "fix: finalize Office imports and connector UX"
           git push origin HEAD:fix/office-drop-and-connector-ux
