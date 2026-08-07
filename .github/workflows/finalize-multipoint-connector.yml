@@ -1,0 +1,89 @@
+name: Finalize multipoint connector
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - frontend/src/TldrawCanvas.jsx
+      - frontend/src/canvas/StationArrowShapeUtil.jsx
+      - frontend/src/canvas/StationArrowShapeUtil.test.js
+      - .github/workflows/finalize-multipoint-connector.yml
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  finalize:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply final connector wiring
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          canvas = Path('frontend/src/TldrawCanvas.jsx')
+          text = canvas.read_text()
+          text = text.replace(
+              "import { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'\nimport { StationLineShapeUtil } from './canvas/StationLineShapeUtil'",
+              "import { StationArrowShapeUtil } from './canvas/StationArrowShapeUtil'\nimport { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'",
+              1,
+          )
+          text = text.replace(
+              "const STATION_SHAPE_UTILS = [\n  StationFrameShapeUtil,\n  StationLineShapeUtil,\n  StationNoteShapeUtil,\n  StationTextShapeUtil,\n]",
+              "const STATION_SHAPE_UTILS = [\n  StationArrowShapeUtil,\n  StationFrameShapeUtil,\n  StationNoteShapeUtil,\n  StationTextShapeUtil,\n]",
+              1,
+          )
+          if 'StationArrowShapeUtil' not in text or 'StationLineShapeUtil' in text:
+              raise SystemExit('connector shape util wiring did not land cleanly')
+          canvas.write_text(text)
+
+          util = Path('frontend/src/canvas/StationArrowShapeUtil.jsx')
+          util_text = util.read_text()
+          header = '/* eslint-disable react-hooks/rules-of-hooks, react-refresh/only-export-components */\n'
+          if not util_text.startswith(header):
+              util.write_text(header + util_text)
+          PY
+
+          rm -f frontend/src/canvas/StationLineShapeUtil.js frontend/src/canvas/StationLineShapeUtil.test.js
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+        working-directory: frontend
+
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Unit tests
+        run: npm test
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+
+      - name: Commit verified implementation
+        shell: bash
+        run: |
+          rm -f .github/workflows/apply-multipoint-connector.yml .github/workflows/finalize-multipoint-connector.yml
+          git config user.name "Station 8 Fix Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(canvas): add multipoint connector curves"
+          git push origin HEAD:${{ github.head_ref }}
