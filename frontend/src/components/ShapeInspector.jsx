@@ -88,11 +88,6 @@ const STROKE_TOGGLE_OPTIONS = [
   { id: 'off', label: 'Off', title: 'No border' },
 ]
 
-const LINE_SPLINE_OPTIONS = [
-  { id: 'line', label: 'Straight', title: 'Straight segments' },
-  { id: 'cubic', label: 'Curve', title: 'Smooth curve through every line point' },
-]
-
 const IMAGE_BORDER_OPTIONS = [
   { id: 0, label: 'Off', title: 'No border' },
   { id: 1, label: 'Thin', title: 'Thin border' },
@@ -116,7 +111,6 @@ const SHAPES_WITH_IMAGE_STYLING = new Set(['image'])
 const SHAPES_WITH_FREEFORM_TEXT_SIZE = new Set(['text'])
 const SHAPES_WITH_LISTS = new Set(['note', 'text'])
 const SHAPES_WITH_ARROWHEADS = new Set(['arrow'])
-const SHAPES_WITH_LINE_SPLINE = new Set(['line'])
 // Shapes where "no border" is meaningful: a geo rectangle with a fill can
 // still read as a card without an outline. Frames always have a border (it's
 // how they work), so they're excluded. For arrows/lines/draws the stroke
@@ -365,7 +359,6 @@ export const ShapeInspector = track(function ShapeInspector() {
   const showArrowheads = allShapesMatch(shapes, SHAPES_WITH_ARROWHEADS)
   const showStrokeStyle = allShapesMatch(shapes, SHAPES_WITH_STROKE_STYLE)
   const showStrokeToggle = allShapesMatch(shapes, SHAPES_WITH_STROKE_TOGGLE)
-  const showLineSpline = allShapesMatch(shapes, SHAPES_WITH_LINE_SPLINE)
 
   // Group selections and other unsupported shape sets previously rendered an
   // empty inspector shell here, which showed up as a blank floating bar.
@@ -383,7 +376,6 @@ export const ShapeInspector = track(function ShapeInspector() {
     || showArrowheads
     || showStrokeStyle
     || showStrokeToggle
-    || showLineSpline
   )) {
     return null
   }
@@ -430,9 +422,6 @@ export const ShapeInspector = track(function ShapeInspector() {
   const activeSize  = sharedStyle(editor, DefaultSizeStyle)
   const activeAlign = sharedStyle(editor, DefaultHorizontalAlignStyle)
   const activeStrokeStyle = showStrokeStyle ? sharedStyle(editor, DefaultDashStyle) : undefined
-  const activeLineSpline = showLineSpline && shapes.every(
-    (shape) => shape.props?.spline === shapes[0].props?.spline
-  ) ? shapes[0].props?.spline : undefined
   const activeArrowheadStart = showArrowheads ? sharedStyle(editor, ArrowShapeArrowheadStartStyle) : undefined
   const activeArrowheadEnd   = showArrowheads ? sharedStyle(editor, ArrowShapeArrowheadEndStyle) : undefined
   const activeCorner = showCorners && shapes.every(
@@ -614,9 +603,6 @@ export const ShapeInspector = track(function ShapeInspector() {
   const applyImageBorder = (width) => updateMeta('imageBorderWidth', width)
   const applyImageBorderColor = (color) => updateMeta('imageBorderColor', color)
   const applyImageBorderColorAuto = () => updateMeta('imageBorderColor', AUTO_IMAGE_BORDER)
-  const applyLineSpline = (id) => editor.updateShapes(
-    shapes.map((shape) => ({ id: shape.id, type: shape.type, props: { spline: id } }))
-  )
   const applyArrowheadStart = (id) => editor.setStyleForSelectedShapes(ArrowShapeArrowheadStartStyle, id)
   const applyArrowheadEnd   = (id) => editor.setStyleForSelectedShapes(ArrowShapeArrowheadEndStyle, id)
   const applyStrokeNone = (none) => updateMeta('strokeNone', none)
@@ -791,23 +777,6 @@ export const ShapeInspector = track(function ShapeInspector() {
                 title={option.title}
                 type="button"
               >{option.shortLabel}</button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {showLineSpline && (
-        <div className="insp-row">
-          <div className="insp-label">Path</div>
-          <div className="insp-body">
-            {LINE_SPLINE_OPTIONS.map((option) => (
-              <button
-                key={option.id}
-                className={`insp-btn ${activeLineSpline === option.id ? 'active' : ''}`}
-                onClick={() => applyLineSpline(option.id)}
-                title={option.title}
-                type="button"
-              >{option.label}</button>
             ))}
           </div>
         </div>
