@@ -130,6 +130,7 @@ html[data-mode="dark"], html:not([data-mode]) {
   --s8-hover:          rgba(0, 221, 255, 0.07);
   --s8-active:         rgba(0, 221, 255, 0.14);
   --s8-text:           #dce8f8;
+  --s8-auto-contrast:  var(--s8-tl-white);
   --s8-text-mid:       #8b9cbd;
   --s8-text-dim:       #6473a0;
   --s8-pill-bg:        rgba(8, 12, 24, 0.85);
@@ -211,6 +212,7 @@ html[data-mode="light"] {
   --s8-hover:          rgba(0, 150, 184, 0.07);
   --s8-active:         rgba(0, 150, 184, 0.14);
   --s8-text:           #08172a;
+  --s8-auto-contrast:  var(--s8-tl-black);
   --s8-text-mid:       #4a5b78;
   --s8-text-dim:       #8090a8;
   --s8-pill-bg:        rgba(255, 255, 255, 0.85);
