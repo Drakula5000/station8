@@ -1,0 +1,148 @@
+name: Apply multipoint connector v2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - frontend/src/TldrawCanvas.jsx
+      - frontend/src/canvas/FjToolbar.jsx
+      - frontend/src/components/ShapeInspector.jsx
+      - frontend/src/canvas/styleOptions.js
+      - frontend/src/canvas/StationConnectorShapeUtil.jsx
+      - frontend/src/canvas/StationConnectorTool.js
+      - frontend/src/canvas/stationConnectorPoints.js
+      - frontend/src/canvas/stationConnectorPoints.test.js
+      - .github/workflows/apply-multipoint-connector-v2.yml
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  apply-and-verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Wire safe custom connector
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          canvas = Path('frontend/src/TldrawCanvas.jsx')
+          text = canvas.read_text()
+          old = "import { ShapeColorSync } from './canvas/ShapeColorSync'\nimport { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'"
+          new = "import { ShapeColorSync } from './canvas/ShapeColorSync'\nimport { StationConnectorShapeUtil } from './canvas/StationConnectorShapeUtil'\nimport { StationConnectorTool } from './canvas/StationConnectorTool'\nimport { StationFrameShapeUtil } from './canvas/StationFrameShapeUtil'"
+          if old not in text:
+              raise SystemExit('canvas import anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = "const STATION_SHAPE_UTILS = [\n  StationFrameShapeUtil,\n  StationNoteShapeUtil,\n  StationTextShapeUtil,\n]"
+          new = "const STATION_SHAPE_UTILS = [\n  StationConnectorShapeUtil,\n  StationFrameShapeUtil,\n  StationNoteShapeUtil,\n  StationTextShapeUtil,\n]\nconst STATION_TOOLS = [StationConnectorTool]"
+          if old not in text:
+              raise SystemExit('shape util anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = "          overrides={TLDRAW_UI_OVERRIDES}\n          shapeUtils={STATION_SHAPE_UTILS}"
+          new = "          overrides={TLDRAW_UI_OVERRIDES}\n          shapeUtils={STATION_SHAPE_UTILS}\n          tools={STATION_TOOLS}"
+          if old not in text:
+              raise SystemExit('Tldraw props anchor not found')
+          text = text.replace(old, new, 1)
+          canvas.write_text(text)
+
+          toolbar = Path('frontend/src/canvas/FjToolbar.jsx')
+          text = toolbar.read_text()
+          old = "className={`fj-tool ${currentTool === 'arrow' ? 'active' : ''}`}\n        onClick={() => setTool('arrow')}"
+          new = "className={`fj-tool ${currentTool === 's8-connector' ? 'active' : ''}`}\n        onClick={() => setTool('s8-connector')}"
+          if old not in text:
+              raise SystemExit('connector toolbar anchor not found')
+          text = text.replace(old, new, 1)
+          toolbar.write_text(text)
+
+          inspector = Path('frontend/src/components/ShapeInspector.jsx')
+          text = inspector.read_text()
+          replacements = {
+              "const SHAPES_WITH_COLOR   = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 'frame', 'highlight'])":
+              "const SHAPES_WITH_COLOR   = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 'frame', 'highlight', 's8-connector'])",
+              "const SHAPES_WITH_SIZE    = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw'])":
+              "const SHAPES_WITH_SIZE    = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 's8-connector'])",
+              "const SHAPES_WITH_ARROWHEADS = new Set(['arrow'])":
+              "const SHAPES_WITH_ARROWHEADS = new Set(['arrow', 's8-connector'])",
+              "const SHAPES_WITH_AUTO_COLOR = new Set(['text', 'draw', 'note', 'geo', 'arrow', 'line'])":
+              "const SHAPES_WITH_AUTO_COLOR = new Set(['text', 'draw', 'note', 'geo', 'arrow', 'line', 's8-connector'])",
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'inspector anchor not found: {old}')
+              text = text.replace(old, new, 1)
+          inspector.write_text(text)
+
+          styles = Path('frontend/src/canvas/styleOptions.js')
+          text = styles.read_text()
+          old = "export const SHAPES_WITH_STROKE_STYLE = new Set(['geo', 'arrow', 'line', 'draw'])"
+          new = "export const SHAPES_WITH_STROKE_STYLE = new Set(['geo', 'arrow', 'line', 'draw', 's8-connector'])"
+          if old not in text:
+              raise SystemExit('style option anchor not found')
+          styles.write_text(text.replace(old, new, 1))
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+        working-directory: frontend
+
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Unit tests
+        run: npm test
+        working-directory: frontend
+
+      - name: Production build
+        run: npm run build
+        working-directory: frontend
+
+      - name: Verify connector safety boundaries
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          canvas = Path('frontend/src/TldrawCanvas.jsx').read_text()
+          toolbar = Path('frontend/src/canvas/FjToolbar.jsx').read_text()
+          util = Path('frontend/src/canvas/StationConnectorShapeUtil.jsx').read_text()
+          assert 'StationConnectorShapeUtil' in canvas
+          assert 'tools={STATION_TOOLS}' in canvas
+          assert "setTool('s8-connector')" in toolbar
+          assert 'extends ShapeUtil' in util
+          assert 'extends ArrowShapeUtil' not in util
+          assert "type: 'create'" in util
+          assert 'insertConnectorPoint' in util
+          assert 'cubicSplineThroughPoints' in util
+          # The emergency board-load protection must remain intact.
+          assert 'if (!editor || readOnlyRef.current || loadingRef.current) return' in canvas
+          assert 'let loadSucceeded = false' in canvas
+          assert 'if (!loadSucceeded) return' in canvas
+          PY
+
+      - name: Commit verified implementation
+        shell: bash
+        run: |
+          rm .github/workflows/apply-multipoint-connector-v2.yml
+          git config user.name "Station 8 Fix Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(canvas): add safe multipoint connector"
+          git push origin HEAD:${{ github.head_ref }}
