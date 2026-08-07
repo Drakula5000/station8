@@ -124,6 +124,9 @@ jobs:
 
           rm -f .github/workflows/apply-office-drop-connector-ux.yml
           rm -f .github/workflows/run-staged-office-patch.yml
+          rm -f .github/workflows/agent-office-connector-patch.yml
+          rm -f .github/workflows/repair-office-multipart.yml
+          rm -f .github/workflows/repair-office-multipart-pr.yml
           rm -f _agent_trigger*.txt
 
           git config user.name "Station 8 Fix Bot"
@@ -133,5 +136,5 @@ jobs:
             echo "Feature source already repaired."
             exit 0
           fi
-          git commit -m "fix: emit valid Drive multipart Office imports"
+          git commit -m "fix: validate Office imports and connector UX"
           git push origin HEAD:fix/office-drop-and-connector-ux
