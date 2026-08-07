@@ -22,7 +22,7 @@ jobs:
           ref: fix/native-line-connector-canvas-office-drop
           fetch-depth: 0
 
-      - name: Patch canvas drop routing and stored connector migration
+      - name: Patch canvas document routing and stored connector migration
         shell: bash
         run: |
           python - <<'PY'
@@ -45,6 +45,20 @@ jobs:
           elif new_sig not in canvas:
               raise SystemExit('TldrawCanvas signature anchor missing')
 
+          old_ref = "  const onSaveStateRef = useRef(onSaveState)\n"
+          new_ref = "  const onSaveStateRef = useRef(onSaveState)\n  const onExternalFilesDropRef = useRef(onExternalFilesDrop)\n"
+          if 'const onExternalFilesDropRef = useRef' not in canvas:
+              if old_ref not in canvas:
+                  raise SystemExit('external drop ref anchor missing')
+              canvas = canvas.replace(old_ref, new_ref, 1)
+
+          old_effect = "    onSaveStateRef.current = onSaveState\n  }, [boardId, readOnly, viewerMode, onSaveState])"
+          new_effect = "    onSaveStateRef.current = onSaveState\n    onExternalFilesDropRef.current = onExternalFilesDrop\n  }, [boardId, readOnly, viewerMode, onSaveState, onExternalFilesDrop])"
+          if old_effect in canvas:
+              canvas = canvas.replace(old_effect, new_effect, 1)
+          elif new_effect not in canvas:
+              raise SystemExit('external drop ref sync anchor missing')
+
           old_load = "          editor.store.loadStoreSnapshot(data.snapshot)\n          upgradeLoadedLegacyConnectors(editor, { getArrowInfo, createShapeId })"
           new_load = "          editor.store.loadStoreSnapshot(migrateStoredStationConnectors(data.snapshot))\n          upgradeLoadedLegacyConnectors(editor, { getArrowInfo, createShapeId })"
           if old_load in canvas:
@@ -52,19 +66,64 @@ jobs:
           elif new_load not in canvas:
               raise SystemExit('snapshot migration anchor missing')
 
-          handler_anchor = "  const ghostPx = ghost && editorRef.current\n"
-          handler = """  const handleDocumentDropCapture = useCallback((event) => {\n    if (readOnlyRef.current || typeof onExternalFilesDrop !== 'function') return\n    const files = Array.from(event.dataTransfer?.files || [])\n    const stationFiles = files.filter(file => /\\.(?:pdf|docx|pptx)$/i.test(String(file?.name || '')))\n    if (!stationFiles.length) return\n\n    // Station document types belong to Station 8's import queue, not tldraw's\n    // image/media asset importer. Stop the event here so tldraw cannot emit its\n    // generic \"File type is not allowed\" toast for a supported DOCX/PPTX/PDF.\n    event.preventDefault()\n    event.stopPropagation()\n    void onExternalFilesDrop(stationFiles)\n  }, [onExternalFilesDrop])\n\n"""
-          if 'const handleDocumentDropCapture = useCallback' not in canvas:
-              if handler_anchor not in canvas:
-                  raise SystemExit('canvas drop handler insertion anchor missing')
-              canvas = canvas.replace(handler_anchor, handler + handler_anchor, 1)
+          old_handler = """      const mediaFiles = files.filter((file) => file.type.startsWith('image/') || file.type.startsWith('video/'))
+      const otherFiles = files.filter((file) => !file.type.startsWith('image/') && !file.type.startsWith('video/'))
 
-          wrapper_anchor = "      onWheelCapture={handleWheelCapture}\n"
-          wrapper_drop = "      onDropCapture={handleDocumentDropCapture}\n"
-          if wrapper_drop not in canvas:
-              if wrapper_anchor not in canvas:
-                  raise SystemExit('canvas wrapper event anchor missing')
-              canvas = canvas.replace(wrapper_anchor, wrapper_anchor + wrapper_drop, 1)
+      if (mediaFiles.length && defaultFilesHandler) {
+        const originalZoomToSelection = editor.zoomToSelection
+        editor.zoomToSelection = () => editor
+        try {
+          await defaultFilesHandler({ ...externalContent, files: mediaFiles, point })
+        } finally {
+          editor.zoomToSelection = originalZoomToSelection
+        }
+      }
+
+      if (otherFiles.length && defaultFilesHandler) {
+        await defaultFilesHandler({ ...externalContent, files: otherFiles })
+      }
+"""
+          new_handler = """      const stationFiles = files.filter(file => /\\.(?:pdf|docx|pptx)$/i.test(String(file?.name || '')))
+      const mediaFiles = files.filter((file) => file.type.startsWith('image/') || file.type.startsWith('video/'))
+      const otherFiles = files.filter((file) => (
+        !stationFiles.includes(file)
+        && !file.type.startsWith('image/')
+        && !file.type.startsWith('video/')
+      ))
+
+      // Intercept Station 8 document types here, inside tldraw's registered
+      // file pipeline. Supported DOCX/PPTX/PDF files never reach tldraw's
+      // generic file validator, so it cannot emit "File type is not allowed".
+      if (stationFiles.length && !readOnlyRef.current && typeof onExternalFilesDropRef.current === 'function') {
+        await onExternalFilesDropRef.current(stationFiles)
+      }
+
+      if (mediaFiles.length && defaultFilesHandler) {
+        const originalZoomToSelection = editor.zoomToSelection
+        editor.zoomToSelection = () => editor
+        try {
+          await defaultFilesHandler({ ...externalContent, files: mediaFiles, point })
+        } finally {
+          editor.zoomToSelection = originalZoomToSelection
+        }
+      }
+
+      if (otherFiles.length && defaultFilesHandler) {
+        await defaultFilesHandler({ ...externalContent, files: otherFiles })
+      }
+"""
+          if old_handler in canvas:
+              canvas = canvas.replace(old_handler, new_handler, 1)
+          elif 'const stationFiles = files.filter' not in canvas:
+              raise SystemExit('tldraw external files handler anchor missing')
+
+          capture_start = canvas.find('  const handleDocumentDropCapture = useCallback((event) => {')
+          if capture_start >= 0:
+              capture_end = canvas.find('\n  const ghostPx = ghost && editorRef.current', capture_start)
+              if capture_end < 0:
+                  raise SystemExit('capture handler removal anchor missing')
+              canvas = canvas[:capture_start] + canvas[capture_end + 1:]
+          canvas = canvas.replace('      onDropCapture={handleDocumentDropCapture}\n', '')
 
           canvas_path.write_text(canvas)
 
@@ -109,5 +168,5 @@ jobs:
             echo "Feature source already patched."
             exit 0
           fi
-          git commit -m "fix: route canvas document drops through Station 8"
+          git commit -m "fix: route Station documents inside tldraw file handler"
           git push origin HEAD:fix/native-line-connector-canvas-office-drop
