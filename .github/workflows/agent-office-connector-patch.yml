@@ -12,7 +12,6 @@ permissions:
 
 jobs:
   apply:
-    if: github.head_ref == 'fix/office-drop-and-connector-ux'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
