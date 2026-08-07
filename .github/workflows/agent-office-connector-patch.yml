@@ -17,35 +17,31 @@ jobs:
           ref: fix/office-drop-and-connector-ux
           fetch-depth: 0
 
-      - name: Apply staged patch if present
+      - name: Repair feature source if needed
         shell: bash
         run: |
-          if [ ! -f .github/workflows/apply-office-drop-connector-ux.yml ]; then
-            echo "No staged patch; nothing to do."
-            exit 0
-          fi
-
-          python - <<'PY'
+          if [ -f .github/workflows/apply-office-drop-connector-ux.yml ]; then
+            python - <<'PY'
           from pathlib import Path
           import textwrap
-
           raw = Path('.github/workflows/apply-office-drop-connector-ux.yml').read_text()
           start = "          python - <<'PY'\n"
           end = "\n          PY\n"
           if start not in raw or end not in raw:
-              raise SystemExit('could not locate staged patch body')
+              raise SystemExit('could not locate staged source patch')
           body = raw.split(start, 1)[1].split(end, 1)[0]
-          exec(compile(textwrap.dedent(body), 'staged-office-connector-patch', 'exec'), {})
+          exec(compile(textwrap.dedent(body), 'office-connector-feature-patch', 'exec'), {})
           PY
+          fi
 
           python - <<'PY'
           from pathlib import Path
 
-          path = Path('server.py')
-          text = path.read_text()
-          start = text.find('_OFFICE_IMPORTS = {')
-          end = text.find('\ndef _create_drive_file_verbose', start)
-          if start < 0 or end < 0:
+          server_path = Path('server.py')
+          text = server_path.read_text()
+          office_start = text.find('_OFFICE_IMPORTS = {')
+          office_end = text.find('\ndef _create_drive_file_verbose', office_start)
+          if office_start < 0 or office_end < 0:
               raise SystemExit('Office import block anchors missing')
 
           block = r'''_OFFICE_IMPORTS = {
@@ -61,6 +57,7 @@ jobs:
 
 
 def _drive_import_office_file(filename, blob, source_mime, target_kind, parent_id=None, access_token=None, timeout=30):
+    """Upload an OOXML file and ask Drive to convert it to a Google-native type."""
     access_token = access_token or _get_google_access_token()
     target_mime = _DRIVE_MIME.get(target_kind)
     if not access_token or not target_mime or not blob:
@@ -175,16 +172,71 @@ def google_import_office():
     return jsonify({'kind': kind, 'item': item}), 201
 
 '''
-          path.write_text(text[:start] + block + text[end:])
+          server_path.write_text(text[:office_start] + block + text[office_end:])
+
+          test_path = Path('tests/test_office_import.py')
+          test_text = test_path.read_text()
+          marker = "\n\nif __name__ == '__main__':\n"
+          test_name = 'test_drive_office_import_uses_crlf_multipart_body'
+          if test_name not in test_text:
+              method = r'''
+    def test_drive_office_import_uses_crlf_multipart_body(self):
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"id":"doc-id"}'
+
+        def fake_urlopen(request, timeout=30):
+            captured['body'] = request.data
+            captured['content_type'] = request.get_header('Content-type')
+            return FakeResponse()
+
+        with patch.object(server._urllib_request, 'urlopen', side_effect=fake_urlopen):
+            file_id, url = server._drive_import_office_file(
+                'Exercises.docx',
+                b'PK\x03\x04office-data',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'gdoc',
+                parent_id='drive-folder',
+                access_token='token',
+            )
+
+        self.assertEqual(file_id, 'doc-id')
+        self.assertEqual(url, 'https://docs.google.com/document/d/doc-id/edit')
+        content_type = captured['content_type']
+        self.assertTrue(content_type.startswith('multipart/related; boundary='))
+        boundary = content_type.split('boundary=', 1)[1]
+        body = captured['body']
+        self.assertTrue(body.startswith(f'--{boundary}\r\n'.encode()))
+        self.assertIn(b'Content-Type: application/json; charset=UTF-8\r\n\r\n', body)
+        self.assertIn(
+            b'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\nPK\x03\x04office-data',
+            body,
+        )
+        self.assertTrue(body.endswith(f'\r\n--{boundary}--\r\n'.encode()))
+'''
+              if marker not in test_text:
+                  raise SystemExit('Office test insertion anchor missing')
+              test_path.write_text(test_text.replace(marker, method + marker, 1))
           PY
 
           rm -f .github/workflows/apply-office-drop-connector-ux.yml
           rm -f .github/workflows/run-staged-office-patch.yml
-          rm -f .github/workflows/agent-office-connector-patch.yml
           rm -f _agent_trigger*.txt
 
           git config user.name "Station 8 Fix Bot"
           git config user.email "actions@users.noreply.github.com"
           git add -A
-          git commit -m "feat: import Office drops and finish multipoint connectors"
+          if git diff --cached --quiet; then
+            echo "Feature source already repaired."
+            exit 0
+          fi
+          git commit -m "fix: emit valid Drive multipart Office imports"
           git push origin HEAD:fix/office-drop-and-connector-ux
