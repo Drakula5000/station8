@@ -1,0 +1,47 @@
+name: Apply connector and Office drop fix
+
+on:
+  pull_request:
+    branches: [main]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    if: github.event.pull_request.head.ref == 'fix/connector-drag-office-drop-ux' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/connector-drag-office-drop-ux
+          fetch-depth: 0
+      - name: Apply source patch
+        run: python ops/apply_connector_office_drop_fix.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - name: Commit verified fix
+        run: |
+          rm -f ops/apply_connector_office_drop_fix.py
+          rm -f .github/workflows/connector-office-drop-fix.yml
+          rm -f .github/workflows/apply-connector-office-fix-pr.yml
+          git config user.name "Station 8 Fix Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: make connector bends draggable and queue file drops"
+          git push origin HEAD:fix/connector-drag-office-drop-ux
