@@ -6,5 +6,6 @@ const source = readFileSync(new URL('./StationFrameShapeUtil.js', import.meta.ur
 
 test('Station sections preserve frame behavior without clipping children', () => {
   assert.match(source, /FrameShapeUtil\.configure\(\{ showColors: true \}\)/)
+  assert.match(source, /getClipPath\(\)\s*\{\s*return undefined\s*\}/)
   assert.match(source, /shouldClipChild\(\)\s*\{\s*return false\s*\}/)
 })
