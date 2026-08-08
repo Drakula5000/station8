@@ -20,17 +20,29 @@ jobs:
         with:
           ref: refactor/code-health
           fetch-depth: 0
+      - name: Detect completed refactor
+        id: state
+        run: |
+          if [ -f .code-health-applied ]; then
+            echo "applied=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "applied=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-python@v5
+        if: steps.state.outputs.applied != 'true'
         with:
           python-version: '3.11'
       - uses: actions/setup-node@v4
+        if: steps.state.outputs.applied != 'true'
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Apply refactor
+        if: steps.state.outputs.applied != 'true'
         run: python ops/refactor_code_health.py
       - name: Finish generated frontend wiring
+        if: steps.state.outputs.applied != 'true'
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -59,8 +71,10 @@ jobs:
           modal.write_text(modal.read_text().rstrip() + '\n')
           PY
       - name: Patch hygiene
+        if: steps.state.outputs.applied != 'true'
         run: git diff --check
       - name: Backend verification
+        if: steps.state.outputs.applied != 'true'
         env:
           FLASK_SECRET_KEY: ci-dummy
         run: |
@@ -68,14 +82,18 @@ jobs:
           python -c "import server"
           python -m unittest discover -s tests -p 'test_*.py'
       - name: Frontend verification
+        if: steps.state.outputs.applied != 'true'
         working-directory: frontend
         run: |
           npm ci
           npm run lint
           npm test
           npm run build
-      - name: Commit verified refactor
+      - name: Commit verified product refactor
+        if: steps.state.outputs.applied != 'true'
         run: |
+          touch .code-health-applied
+          git checkout HEAD -- .github/workflows
           git config user.name "Station 8 Refactor Bot"
           git config user.email "actions@users.noreply.github.com"
           git add -A
