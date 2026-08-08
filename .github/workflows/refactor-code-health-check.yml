@@ -5,13 +5,13 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
-  verify-refactor:
+  apply-and-verify:
     if: github.head_ref == 'refactor/code-health'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -19,6 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: refactor/code-health
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -27,33 +28,56 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Apply embedded refactor in runner
-        shell: bash
+      - name: Apply refactor
+        run: python ops/refactor_code_health.py
+      - name: Finish generated frontend wiring
         run: |
           python - <<'PY'
           from pathlib import Path
-          import textwrap
-          workflow = Path('.github/workflows/refactor-code-health.yml').read_text()
-          start_marker = "          python - <<'PY'\n"
-          end_marker = "\n          PY\n"
-          start = workflow.index(start_marker) + len(start_marker)
-          end = workflow.index(end_marker, start)
-          source = textwrap.dedent(workflow[start:end])
-          exec(compile(source, 'refactor_code_health.py', 'exec'), {'__name__': '__main__'})
+          app = Path('frontend/src/App.jsx')
+          text = app.read_text()
+          text = text.replace(
+              "import { API, fetchJson, fetchJsonPatch, fetchJsonPost } from './api'",
+              "import { API, JSON_HEADERS, fetchJson, fetchJsonPatch, fetchJsonPost } from './api'",
+              1,
+          )
+          text = text.replace(
+              "import { DOC_KIND_API, DOC_KIND_LABEL, DOC_KIND_ORDER, DOC_KINDS, ROOT_FOLDER } from './documentKinds'",
+              "import { DOC_KIND_API, DOC_KIND_CONFIG, DOC_KIND_LABEL, DOC_KIND_ORDER, DOC_KINDS, ROOT_FOLDER, docTypeLabel } from './documentKinds'",
+              1,
+          )
+          app.write_text(text)
+
+          package = Path('frontend/package.json')
+          package.write_text(package.read_text().replace(
+              '"test": "node --test"',
+              '"test": "node --test --test-force-exit"',
+              1,
+          ))
+
+          modal = Path('frontend/src/styles/modal.css')
+          modal.write_text(modal.read_text().rstrip() + '\n')
           PY
-      - run: git diff --check
-      - run: pip install -r requirements.txt
-      - name: Backend tests
+      - name: Patch hygiene
+        run: git diff --check
+      - name: Backend verification
         env:
           FLASK_SECRET_KEY: ci-dummy
         run: |
+          pip install -r requirements.txt
           python -c "import server"
           python -m unittest discover -s tests -p 'test_*.py'
-      - run: npm ci
+      - name: Frontend verification
         working-directory: frontend
-      - run: npm run lint
-        working-directory: frontend
-      - run: npm test
-        working-directory: frontend
-      - run: npm run build
-        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm test
+          npm run build
+      - name: Commit verified refactor
+        run: |
+          git config user.name "Station 8 Refactor Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor: consolidate Station 8 code health"
+          git push origin HEAD:refactor/code-health
