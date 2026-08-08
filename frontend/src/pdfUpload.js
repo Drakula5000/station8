@@ -1,16 +1,10 @@
 import { extractPdfPages, validatePdfFiles } from './pdf.js'
-
-const API = import.meta.env?.VITE_API_URL || ''
+import { API, readApiError } from './api.js'
 
 function pdfAbortError() {
   const error = new Error('PDF text indexing was stopped.')
   error.name = 'AbortError'
   return error
-}
-
-async function readApiError(response, fallback) {
-  const body = await response.json().catch(() => null)
-  return body?.error || body?.message || fallback
 }
 
 export function pdfProgressLabel(progress, { includeQueue = true } = {}) {

@@ -1,3 +1,5 @@
+import { AURORA_TL_COLOR_TO_BG, NOTE_LIGHT_BG_TL_COLORS } from '../colors'
+
 // Export-time SVG patcher.
 //
 // On canvas, every Aurora override (note backgrounds, frame colours, custom
@@ -52,41 +54,15 @@ function resolveCssVar(value) {
   return resolved || value
 }
 
-// tldraw colour name → Aurora swatch CSS var. Mirrors the override map in
-// tldraw.css (note backgrounds + geo/text/frame colour rules). yellow and
-// green are legacy aliases that map onto lavender / teal so the picker
-// remains consistent with the design system.
-const COLOR_TO_VAR = {
-  'light-violet': '--s8-tl-lavender',
-  'yellow':        '--s8-tl-lavender',
-  'violet':        '--s8-tl-violet',
-  'light-red':     '--s8-tl-pink',
-  'red':           '--s8-tl-pink-strong',
-  'light-blue':    '--s8-tl-blue',
-  'blue':          '--s8-tl-blue',
-  'light-green':   '--s8-tl-teal',
-  'green':         '--s8-tl-teal',
-  'orange':        '--s8-tl-orange',
-  'grey':          '--s8-tl-grey',
-  'black':         '--s8-tl-black',
-  'white':         '--s8-tl-white',
-}
-
 function auroraHex(colorName) {
-  const v = COLOR_TO_VAR[colorName]
-  if (!v) return null
-  return resolveCssVar(`var(${v})`)
+  const value = AURORA_TL_COLOR_TO_BG[colorName]
+  return value ? resolveCssVar(value) : null
 }
 
 // Notes contrast text against the swatch bg, not the canvas. Matches the
 // per-swatch buckets documented in tldraw.css's note-text section.
-const NOTE_LIGHT_BG_COLORS = new Set([
-  'light-violet', 'yellow', 'light-red', 'light-blue', 'blue',
-  'light-green', 'green', 'orange', 'white',
-])
-
 function noteTextHex(colorName) {
-  return NOTE_LIGHT_BG_COLORS.has(colorName) ? '#1d1d1d' : '#FFFFFF'
+  return NOTE_LIGHT_BG_TL_COLORS.has(colorName) ? '#1d1d1d' : '#FFFFFF'
 }
 
 // ============================================================

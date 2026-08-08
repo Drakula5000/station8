@@ -65,3 +65,16 @@ export const HIGHLIGHT_SWATCHES = [
   { id: 'mint',       tl: 'green',         bg: '#00ffc8', bgDark: '#009774' },
   { id: 'white',      tl: 'white',         bg: '#ffffff', bgDark: '#ffffff' },
 ]
+
+
+export const AURORA_TL_COLOR_TO_BG = Object.fromEntries(
+  AURORA_SWATCHES.map(({ tl, bg }) => [tl, bg])
+)
+AURORA_TL_COLOR_TO_BG.yellow = AURORA_TL_COLOR_TO_BG['light-violet']
+AURORA_TL_COLOR_TO_BG.green = AURORA_TL_COLOR_TO_BG['light-green']
+AURORA_TL_COLOR_TO_BG.blue = AURORA_TL_COLOR_TO_BG['light-blue']
+
+export const NOTE_LIGHT_BG_TL_COLORS = new Set([
+  'light-violet', 'yellow', 'light-red', 'light-blue', 'blue',
+  'light-green', 'green', 'orange', 'white',
+])

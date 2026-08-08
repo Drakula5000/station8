@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Tldraw, createShapeId, getArrowInfo, getSvgAsImage } from 'tldraw'
-import { patchSvgExports, hasCustomFill } from './canvas/magicFill'
+import { Tldraw, createShapeId, getArrowInfo } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { ShapeInspector } from './components/ShapeInspector'
 import { ImageLightbox } from './components/ImageLightbox'
@@ -21,8 +20,10 @@ import { RICH_TEXT_EXTENSIONS } from './canvas/richTextExtensions'
 import { getSignedUploadUrl, setSignedUploadUrls } from './canvas/signedUploadUrls'
 import { isEditableTarget, resolveImageShapeUrl } from './canvas/shared'
 import { useCanvasCamera } from './canvas/useCanvasCamera'
+import { API } from './api'
+import { partitionDroppedFiles } from './fileDropRouting'
+import { copyExport, downloadExport } from './canvas/exporting'
 
-const API = import.meta.env.VITE_API_URL || ''
 
 // Send uploads through our Flask endpoint so they're indexed for search. OCR
 // runs in the browser (Tesseract.js) because Render's Python native runtime
@@ -114,78 +115,6 @@ const FIGMA_REORDER_SHORTCUTS = {
 // snapshots don't silently produce transparent PNGs — the user can still flip
 // it off in the UI and this code will honour that choice. Bypasses
 // `helpers.exportAs`/`helpers.copyAs` because those functions drop opts.
-function exportTimestamp() {
-  const now = new Date()
-  const y = String(now.getFullYear()).slice(2)
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  const hh = String(now.getHours()).padStart(2, '0')
-  const mm = String(now.getMinutes()).padStart(2, '0')
-  const ss = String(now.getSeconds()).padStart(2, '0')
-  return `${y}-${m}-${d} ${hh}.${mm}.${ss}`
-}
-
-function exportName(editor, ids, format) {
-  if (ids.length === 1) {
-    const first = editor.getShape(ids[0])
-    if (first && editor.isShapeOfType(first, 'frame')) {
-      return `${first.props.name || 'frame'}.${format}`
-    }
-  }
-  return `shapes at ${exportTimestamp()}.${format}`
-}
-
-function getExportOpts(editor) {
-  return {
-    background: editor.getInstanceState().exportBackground,
-    darkMode: editor.user.getIsDarkMode(),
-  }
-}
-
-// Fast path: no shape in the export carries a custom fill, so tldraw's
-// native toImage gives the right result. Slow path: at least one shape has
-// meta.fillColor (magic or explicit) — get the SVG string, patch the fill
-// + text colours, then run it through tldraw's own SVG-to-PNG converter
-// (getSvgAsImage) so we don't reinvent foreignObject font handling.
-async function getExportBlob(editor, ids, format) {
-  const opts = { format, ...getExportOpts(editor) }
-  const needsPatch = ids.some(id => hasCustomFill(editor.getShape(id)))
-  if (!needsPatch) {
-    const { blob } = await editor.toImage(ids, opts)
-    return blob
-  }
-  const { svg, width, height } = await editor.getSvgString(ids, opts)
-  const patched = patchSvgExports(svg, editor, ids, opts.darkMode)
-  if (format === 'svg') {
-    return new Blob([patched], { type: 'image/svg+xml' })
-  }
-  return await getSvgAsImage(patched, { type: format, width, height, pixelRatio: 2 })
-}
-
-async function downloadExport(editor, ids, format) {
-  if (ids.length === 0) return
-  const blob = await getExportBlob(editor, ids, format)
-  if (!blob) return
-  const link = document.createElement('a')
-  link.href = URL.createObjectURL(blob)
-  link.download = exportName(editor, ids, format)
-  link.click()
-  URL.revokeObjectURL(link.href)
-}
-
-async function copyExport(editor, ids, format) {
-  if (ids.length === 0) return
-  const blob = await getExportBlob(editor, ids, format)
-  if (!blob) return
-  if (format === 'svg') {
-    await navigator.clipboard.writeText(await blob.text())
-  } else {
-    // Safari needs the ClipboardItem constructed synchronously with a Promise
-    // value; we already have the blob so wrapping it is fine.
-    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
-  }
-}
-
 const TLDRAW_UI_OVERRIDES = {
   actions(editor, actions) {
     const selectedOrAll = () => {
@@ -248,6 +177,7 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
   const readOnlyRef = useRef(readOnly)
   const viewerModeRef = useRef(viewerMode)
   const onSaveStateRef = useRef(onSaveState)
+  const onExternalFilesDropRef = useRef(onExternalFilesDrop)
   const saveTimerRef = useRef(null)
   const loadingRef = useRef(false)
   const cleanupRef = useRef(null)
@@ -295,7 +225,8 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
     readOnlyRef.current = readOnly
     viewerModeRef.current = viewerMode
     onSaveStateRef.current = onSaveState
-  }, [boardId, readOnly, viewerMode, onSaveState])
+    onExternalFilesDropRef.current = onExternalFilesDrop
+  }, [boardId, readOnly, viewerMode, onSaveState, onExternalFilesDrop])
 
   const doSave = useCallback(async () => {
     const editor = editorRef.current
@@ -481,8 +412,11 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
     const defaultFilesHandler = editor.externalContentHandlers.files
     editor.registerExternalContentHandler('files', async (externalContent) => {
       const { files, point } = externalContent
-      const mediaFiles = files.filter((file) => file.type.startsWith('image/') || file.type.startsWith('video/'))
-      const otherFiles = files.filter((file) => !file.type.startsWith('image/') && !file.type.startsWith('video/'))
+      const { stationFiles, mediaFiles, otherFiles } = partitionDroppedFiles(files)
+
+      if (stationFiles.length && !readOnlyRef.current && typeof onExternalFilesDropRef.current === 'function') {
+        await onExternalFilesDropRef.current(stationFiles)
+      }
 
       if (mediaFiles.length && defaultFilesHandler) {
         const originalZoomToSelection = editor.zoomToSelection
@@ -679,20 +613,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
     }
   }, [])
 
-  const handleDocumentDropCapture = useCallback((event) => {
-    if (readOnlyRef.current || typeof onExternalFilesDrop !== 'function') return
-    const files = Array.from(event.dataTransfer?.files || [])
-    const stationFiles = files.filter(file => /\.(?:pdf|docx|pptx)$/i.test(String(file?.name || '')))
-    if (!stationFiles.length) return
-
-    // Station document types belong to Station 8's import queue, not tldraw's
-    // image/media asset importer. Stop the event here so tldraw cannot emit its
-    // generic "File type is not allowed" toast for a supported DOCX/PPTX/PDF.
-    event.preventDefault()
-    event.stopPropagation()
-    void onExternalFilesDrop(stationFiles)
-  }, [onExternalFilesDrop])
-
   const ghostPx = ghost && editorRef.current
     ? getNotePreviewSizePx(editorRef.current)
     : 0
@@ -721,7 +641,6 @@ export default function TldrawCanvas({ boardId, readOnly, viewerMode, onSaveStat
       onMouseLeave={handleMouseLeave}
       onPointerDownCapture={handlePointerDownCapture}
       onWheelCapture={handleWheelCapture}
-      onDropCapture={handleDocumentDropCapture}
     >
       {fontsReady && (
         <Tldraw

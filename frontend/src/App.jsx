@@ -7,15 +7,18 @@ import {
 import ReportViewer from './components/ReportViewer'
 import PdfViewer from './components/PdfViewer'
 import PdfUploadPanel from './components/PdfUploadPanel'
+import { DismissibleNotice } from './components/DismissibleNotice'
+import { AccessGate } from './components/AccessGate'
+import { GDriveUrlField, GoogleEmbed } from './components/GoogleEmbed'
 import { needsPdfTextReindex } from './pdf'
 import { pdfProgressLabel, reindexPdf, uploadPdfFiles } from './pdfUpload'
 import { classifyDroppedFile, importOfficeFile } from './officeImport'
+import { API, JSON_HEADERS, fetchJson, fetchJsonPatch, fetchJsonPost } from './api'
+import { DOC_KIND_API, DOC_KIND_CONFIG, DOC_KIND_LABEL, DOC_KIND_ORDER, DOC_KINDS, ROOT_FOLDER, docTypeLabel } from './documentKinds'
 import { loadFolderExpansionState, mergeFolderExpansionDefaults, saveFolderExpansionState } from './sidebarFolderState'
 import { appendSidebarDocument, reorderSidebarDocuments, sidebarDocumentKey, sortSidebarDocuments } from './sidebarDocumentOrder'
 import './styles/index.css'
 
-const API = import.meta.env.VITE_API_URL || ''
-const ROOT_FOLDER = '__root__'
 const SIDEBAR_STORAGE_KEY = 's8.sidebarCollapsed'
 const GOOGLE_RECONNECT_DISMISSED_KEY = 's8.googleReconnectDismissed'
 
@@ -26,23 +29,6 @@ if (typeof document !== 'undefined') {
     document.documentElement.removeAttribute('data-theme')
   } catch { /* pre-render environments have no document */ }
 }
-
-// One registry drives every document-kind seam: API paths, labels, sort order,
-// route validation, folder summaries, access profiles, and database cards.
-// Keeping this exhaustive prevents new kinds from silently working in only
-// one surface (the drift that previously broke report routes/search hits).
-const DOC_KIND_CONFIG = {
-  board: { api: 'boards', label: 'Board', order: 0 },
-  gdoc: { api: 'gdocs', label: 'Doc', order: 1 },
-  gsheet: { api: 'gsheets', label: 'Sheet', order: 2 },
-  gslide: { api: 'gslides', label: 'Slides', order: 3 },
-  report: { api: 'reports', label: 'Report', order: 4 },
-  pdf: { api: 'pdfs', label: 'PDF', order: 5 },
-}
-
-const DOC_KINDS = Object.keys(DOC_KIND_CONFIG)
-const DOC_KIND_API = Object.fromEntries(DOC_KINDS.map(kind => [kind, DOC_KIND_CONFIG[kind].api]))
-const DOC_KIND_LABEL = Object.fromEntries(DOC_KINDS.map(kind => [kind, DOC_KIND_CONFIG[kind].label]))
 
 const compareByName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
 const normalizeFolderValue = (value) => value === ROOT_FOLDER ? null : (value || null)
@@ -119,8 +105,6 @@ function buildFolderOptions(folders, parentId = null, depth = 0, seen = new Set(
       ]
     })
 }
-
-const DOC_KIND_ORDER = Object.fromEntries(DOC_KINDS.map(kind => [kind, DOC_KIND_CONFIG[kind].order]))
 
 function sortDocs(items) {
   return [...items].sort((a, b) => {
@@ -301,10 +285,6 @@ function buildUrl(doc = null) {
   return doc?.type && doc?.id ? `/${doc.type}/${doc.id}` : '/'
 }
 
-function docTypeLabel(type) {
-  return DOC_KIND_LABEL[type] || 'Item'
-}
-
 function docKindIcon(type) {
   if (type === 'board') return <BoardIcon />
   if (type === 'gdoc') return <DocIcon />
@@ -372,26 +352,6 @@ function formatDocDate(value) {
     ? { month: 'short', day: 'numeric' }
     : { year: 'numeric', month: 'short', day: 'numeric' }
   ).format(date)
-}
-
-async function fetchJson(url, options = {}, fallback = null) {
-  try {
-    const res = await fetch(url, { credentials: 'include', ...options })
-    if (!res.ok) return fallback
-    return await res.json()
-  } catch {
-    return fallback
-  }
-}
-
-const JSON_HEADERS = { 'Content-Type': 'application/json' }
-
-function fetchJsonPost(url, payload, fallback = null) {
-  return fetchJson(url, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(payload) }, fallback)
-}
-
-function fetchJsonPatch(url, payload, fallback = null) {
-  return fetchJson(url, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(payload) }, fallback)
 }
 
 function clearStorageByPrefix(storage, prefix) {
@@ -3575,10 +3535,10 @@ export default function App() {
       )}
 
       {errorVisible && errorMessage && (
-        <div className="error-toast">{errorMessage}</div>
+        <DismissibleNotice className="error-toast">{errorMessage}</DismissibleNotice>
       )}
       {pdfDropBusy && (
-        <div className="pdf-drop-progress-toast" role="status">
+        <DismissibleNotice className="pdf-drop-progress-toast" role="status">
           <span className="pdf-drop-progress-dot" />
           {pdfDropProgress?.file?.name || 'Adding file…'}
           {pdfDropProgress?.destination ? ` to ${pdfDropProgress.destination}` : ''}
@@ -3595,122 +3555,14 @@ export default function App() {
               Stop
             </button>
           )}
-        </div>
+        </DismissibleNotice>
       )}
       {pdfReindexProgress && (
-        <div className="pdf-drop-progress-toast" role="status">
+        <DismissibleNotice className="pdf-drop-progress-toast" role="status">
           <span className="pdf-drop-progress-dot" />
           {pdfReindexProgress.name || 'PDF'} · {pdfProgressLabel(pdfReindexProgress, { includeQueue: false })}
-        </div>
+        </DismissibleNotice>
       )}
-    </div>
-  )
-}
-
-function AccessGate({
-  loading = false,
-  authConfigured = true,
-  setupAllowed = false,
-  requiresSetup = false,
-  backendOffline = false,
-  authBusy = false,
-  authError = '',
-  loginPassword = '',
-  ownerPassword = '',
-  route,
-  onLoginPasswordChange,
-  onOwnerPasswordChange,
-  onSubmitLogin,
-  onSubmitSetup,
-}) {
-  if (loading) {
-    return (
-      <div className="auth-shell s8-grid">
-        <div className="auth-card auth-card-loading">
-          <div className="auth-kicker">Station 8</div>
-          <div className="auth-title">Loading access state…</div>
-        </div>
-      </div>
-    )
-  }
-
-  if (backendOffline) {
-    return (
-      <div className="auth-shell s8-grid">
-        <div className="auth-card">
-          <div className="auth-kicker">Station 8</div>
-          <h1 className="auth-title">Backend offline</h1>
-          <p className="auth-copy">
-            The Station 8 backend isn't responding at <code>localhost:5001</code>.
-            Make sure <code>dev.command</code> is running, then reload this page.
-          </p>
-          <p className="auth-copy" style={{ marginTop: '0.625rem', fontSize: '0.75rem', opacity: 0.7 }}>
-            If it keeps failing, open <code>data/server.log</code> to see what crashed.
-          </p>
-          <button
-            className="auth-submit"
-            onClick={() => window.location.reload()}
-            type="button"
-          >
-            Reload
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  const directLabel = route?.doc ? `${docTypeLabel(route.doc.type)} link` : 'Workspace'
-  const allowSetup = requiresSetup && setupAllowed
-  const configMissing = !authConfigured && !setupAllowed
-
-  return (
-    <div className="auth-shell s8-grid">
-      <div className="auth-card">
-        <div className="auth-kicker">Station 8</div>
-        <h1 className="auth-title">{allowSetup ? 'Set up access' : configMissing ? 'Access offline' : 'Enter the workspace'}</h1>
-        <p className="auth-copy">
-          {allowSetup
-            ? 'Create the owner password. Visitor access passwords are managed from the owner view after setup.'
-            : configMissing
-            ? 'Station 8 access is not configured on the server. The owner needs to set OWNER_PASSWORD on the backend.'
-            : `${directLabel} is protected. Enter either the owner password or a visitor access password to continue.`}
-        </p>
-
-        {allowSetup ? (
-          <div className="auth-form">
-            <label className="auth-label">
-              <span>Owner password</span>
-              <input
-                type="password"
-                value={ownerPassword}
-                onChange={(e) => onOwnerPasswordChange(e.target.value)}
-                placeholder="At least 6 characters"
-              />
-            </label>
-            <button className="auth-submit" onClick={onSubmitSetup} disabled={authBusy || ownerPassword.length < 6} type="button">
-              {authBusy ? 'Setting up…' : 'Save passwords'}
-            </button>
-          </div>
-        ) : !configMissing ? (
-          <div className="auth-form">
-            <label className="auth-label">
-              <span>Password</span>
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={(e) => onLoginPasswordChange(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') onSubmitLogin() }}
-                placeholder="Owner or visitor access password"
-              />
-            </label>
-            <button className="auth-submit" onClick={onSubmitLogin} disabled={authBusy || !loginPassword.trim()} type="button">
-              {authBusy ? 'Entering…' : 'Enter Station 8'}
-            </button>
-          </div>
-        ) : null}
-
-        {authError && <div className="auth-error">{authError}</div>}
-      </div>
     </div>
   )
 }
@@ -4789,87 +4641,6 @@ function FolderField({ label, value, onChange, options }) {
           <option key={option.value} value={option.value}>{option.label}</option>
         ))}
       </select>
-    </label>
-  )
-}
-
-function GoogleEmbed({ kind, doc, readOnly, googleConnected, onConnectGoogle }) {
-  // Embed URLs:
-  //   - /edit?usp=…  → full editor UI inside the iframe (owner)
-  //   - /preview     → clean read-only render (visitor)
-  //
-  // Google's /preview view still draws a thin top bar with doc name + "Open in
-  // Google" link. We crop that off via CSS (`.is-readonly` on the wrapper) so
-  // visitors see only the doc body — Station 8's pill already shows the title.
-  //
-  // We do NOT try to intercept keyboard shortcuts inside the iframe. Cross-
-  // origin iframes own their own keyboard; ⌘F inside a Google Doc goes to
-  // Google's in-doc find, and that's fine. Station 8 search is on ⌘K + the
-  // visitor-pill search button — both work regardless of focus.
-  const url = doc.embed_url
-  if (!url) {
-    const kindLabel = kind === 'gdoc' ? 'Google Doc' : kind === 'gslide' ? 'Google Slides' : 'Google Sheet'
-    return (
-      <div className="gdrive-empty">
-        <div className="gdrive-empty-card">
-          <div className="gdrive-empty-icon"><GoogleLogoIcon /></div>
-          <div className="gdrive-empty-title">{kindLabel} not linked yet</div>
-          <div className="gdrive-empty-copy">
-            {googleConnected
-              ? 'This item has no Google file attached yet. Delete and recreate it — new docs and sheets are now created in your Drive automatically.'
-              : 'Connect your Google account once and Station 8 will create this file in your Drive automatically.'}
-          </div>
-          {!googleConnected && (
-            <button className="gdrive-empty-cta" onClick={onConnectGoogle} type="button">
-              <GoogleLogoIcon /> <span>Connect Google</span>
-            </button>
-          )}
-        </div>
-      </div>
-    )
-  }
-  const embedUrl = readOnly ? toPreviewUrl(url) : url
-  return (
-    <div
-      className={`gdrive-embed-wrap${readOnly ? ' is-readonly' : ''}`}
-      data-kind={kind}
-    >
-      <iframe
-        className="gdrive-embed-frame"
-        src={embedUrl}
-        title={doc.name}
-        allow="clipboard-write; clipboard-read"
-      />
-    </div>
-  )
-}
-
-// Best-effort rewrite of any Drive doc/sheet URL to the clean /preview form.
-// Handles /edit, /edit?…, and already-preview URLs. Leaves unknown formats alone.
-function toPreviewUrl(url) {
-  return url
-    .replace(/\/edit(\?.*)?$/, '/preview')
-    .replace(/\?embedded=true.*$/, '')
-}
-
-function GDriveUrlField({ value, onChange, googleConnected, placeholder, kindLabel }) {
-  return (
-    <label className="modal-field gdrive-url-field">
-      <span className="modal-field-label">
-        {googleConnected ? 'Or import an existing Drive URL' : 'Google Drive URL'}
-        {googleConnected ? (
-          <span className="gdrive-url-hint">Leave empty to create a brand new {kindLabel} in your Drive automatically.</span>
-        ) : (
-          <span className="gdrive-url-hint">Paste a Drive URL you've shared as "anyone with link." Required until Google is connected.</span>
-        )}
-      </span>
-      <input
-        type="url"
-        className="gdrive-url-input"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-      />
     </label>
   )
 }

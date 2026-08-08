@@ -8,12 +8,40 @@ import {
   SVGContainer,
   getColorValue,
   getDefaultColorTheme,
+  createShapePropsMigrationIds,
+  createShapePropsMigrationSequence,
   getIndexBetween,
   sortByIndex,
   useDefaultColorTheme,
 } from 'tldraw'
+import { normalizeStoredConnectorProps } from './legacyConnectorUpgrade'
 
 export const STATION_CONNECTOR_TYPE = 's8-connector'
+
+
+const STATION_CONNECTOR_VERSIONS = createShapePropsMigrationIds(STATION_CONNECTOR_TYPE, {
+  NormalizeLineProps: 1,
+})
+
+export const stationConnectorMigrations = createShapePropsMigrationSequence({
+  sequence: [
+    {
+      id: STATION_CONNECTOR_VERSIONS.NormalizeLineProps,
+      up(props) {
+        const normalized = normalizeStoredConnectorProps(props)
+        if (normalized) Object.assign(props, normalized)
+      },
+      down(props) {
+        const points = Object.values(props?.points || {})
+          .sort(sortByIndex)
+          .map(point => ({ x: Number(point.x), y: Number(point.y) }))
+        if (points.length >= 2) props.points = points
+        delete props.spline
+        delete props.scale
+      },
+    },
+  ],
+})
 
 function connectorPointRecords(shape) {
   return Object.values(shape.props.points || {}).sort(sortByIndex)
@@ -117,7 +145,7 @@ function StationConnectorComponent({ shape }) {
 // later. Create handles remain visually hidden until hover (native tldraw UX).
 export class StationConnectorShapeUtil extends LineShapeUtil {
   static type = STATION_CONNECTOR_TYPE
-  static migrations = undefined
+  static migrations = stationConnectorMigrations
   static props = {
     ...LineShapeUtil.props,
     arrowheadStart: ArrowShapeArrowheadStartStyle,
