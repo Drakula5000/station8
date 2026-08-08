@@ -72,6 +72,14 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Apply refactor in runner
         run: python ops/refactor_code_health.py
+      - name: Normalize generated endings
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for name in ['frontend/src/styles/modal.css']:
+              path = Path(name)
+              path.write_text(path.read_text().rstrip() + '\n')
+          PY
       - run: git diff --check
       - run: pip install -r requirements.txt
       - name: Backend verification
