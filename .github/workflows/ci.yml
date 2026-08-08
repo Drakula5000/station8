@@ -70,20 +70,8 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Apply embedded refactor in runner
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import textwrap
-          workflow = Path('.github/workflows/refactor-code-health.yml').read_text()
-          start_marker = "          python - <<'PY'\n"
-          end_marker = "\n          PY\n"
-          start = workflow.index(start_marker) + len(start_marker)
-          end = workflow.index(end_marker, start)
-          source = textwrap.dedent(workflow[start:end])
-          exec(compile(source, 'refactor_code_health.py', 'exec'), {'__name__': '__main__'})
-          PY
+      - name: Apply refactor in runner
+        run: python ops/refactor_code_health.py
       - run: git diff --check
       - run: pip install -r requirements.txt
       - name: Backend verification
