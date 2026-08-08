@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-# Opt into Node 24 for all JS-based actions ahead of GitHub's June 2026
-# default switch (Node 20 deprecated). Removable once every action we use
-# ships a Node-24-native version.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
@@ -55,3 +52,51 @@ jobs:
         env:
           FLASK_SECRET_KEY: ci-dummy
         run: python -m unittest discover -s tests -p 'test_*.py'
+
+  code-health-refactor:
+    name: Code health transformed-tree verification
+    if: github.head_ref == 'refactor/code-health'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/code-health
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply embedded refactor in runner
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+          workflow = Path('.github/workflows/refactor-code-health.yml').read_text()
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY\n"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          source = textwrap.dedent(workflow[start:end])
+          exec(compile(source, 'refactor_code_health.py', 'exec'), {'__name__': '__main__'})
+          PY
+      - run: git diff --check
+      - run: pip install -r requirements.txt
+      - name: Backend verification
+        env:
+          FLASK_SECRET_KEY: ci-dummy
+        run: |
+          python -c "import server"
+          python -m unittest discover -s tests -p 'test_*.py'
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
