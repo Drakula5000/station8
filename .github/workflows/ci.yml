@@ -88,6 +88,9 @@ jobs:
               "import { DOC_KIND_API, DOC_KIND_CONFIG, DOC_KIND_LABEL, DOC_KIND_ORDER, DOC_KINDS, ROOT_FOLDER, docTypeLabel } from './documentKinds'",
               1,
           )
+          package = Path('frontend/package.json')
+          package_text = package.read_text().replace('"test": "node --test"', '"test": "node --test --test-force-exit"', 1)
+          package.write_text(package_text)
           path.write_text(text)
           PY
       - name: Normalize generated endings
