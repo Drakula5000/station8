@@ -14,6 +14,7 @@ import './styles/index.css'
 const API = import.meta.env.VITE_API_URL || ''
 const ROOT_FOLDER = '__root__'
 const SIDEBAR_STORAGE_KEY = 's8.sidebarCollapsed'
+const SIDEBAR_SECTIONS_STORAGE_KEY = 's8.sidebarSectionsCollapsed'
 
 // Aurora is the only theme — ensure data-theme is always absent so Aurora
 // tokens (on html[data-mode]) take effect.
@@ -504,6 +505,13 @@ export default function App() {
       return false
     }
   })
+  const [sidebarSectionsCollapsed, setSidebarSectionsCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem(SIDEBAR_SECTIONS_STORAGE_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
 
   const [colorMode, setColorMode] = useState(() => {
     try { return window.localStorage.getItem('s8.colorMode') || 'dark' } catch { return 'dark' }
@@ -650,6 +658,14 @@ export default function App() {
       // Ignore storage failures; collapse state can fall back to per-session.
     }
   }, [sidebarCollapsed])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_SECTIONS_STORAGE_KEY, String(sidebarSectionsCollapsed))
+    } catch {
+      // Ignore storage failures; section state can fall back to per-session.
+    }
+  }, [sidebarSectionsCollapsed])
 
   useEffect(() => {
     const onPopState = () => setRoute(parseRoute())
@@ -1498,10 +1514,8 @@ export default function App() {
     setExpandedFolders(current => ({ ...current, [folderId]: current[folderId] === false ? true : false }))
   }
 
-  const hasExpandedFolders = folders.some(folder => expandedFolders[folder.id] !== false)
-
-  const collapseAllFolders = () => {
-    setExpandedFolders(Object.fromEntries(folders.map(folder => [folder.id, false])))
+  const toggleSidebarSections = () => {
+    setSidebarSectionsCollapsed((collapsed) => !collapsed)
   }
 
   const openDeleteDialog = (target) => {
@@ -1598,6 +1612,7 @@ export default function App() {
     }
     return Object.entries(counts).sort((a, b) => b[1] - a[1])
   })()
+  const sidebarContentCollapsed = sidebarSectionsCollapsed && !externalPdfDragActive
 
   const filterByTag = (tag) => {
     setTagFilter(cur => cur === tag ? null : tag)
@@ -2327,6 +2342,7 @@ export default function App() {
             <span className="sidebar-brand">Station 8</span>
           </div>
 
+          <div className="sidebar-scroll">
           {/* Content actions — four doc kinds on equal footing.
               Folder is a structural action and lives in the WORKSPACE
               section header below, not here. */}
@@ -2364,11 +2380,12 @@ export default function App() {
                 <div className="sb-section-actions">
                   <button
                     className="sb-add"
-                    onClick={collapseAllFolders}
-                    title="Collapse all folders"
-                    aria-label="Collapse all folders"
+                    onClick={toggleSidebarSections}
+                    title={sidebarContentCollapsed ? 'Expand Workspace and Tags' : 'Collapse Workspace and Tags'}
+                    aria-label={sidebarContentCollapsed ? 'Expand Workspace and Tags' : 'Collapse Workspace and Tags'}
+                    aria-expanded={!sidebarContentCollapsed}
+                    aria-controls="workspace-tree sidebar-tags"
                     type="button"
-                    disabled={!hasExpandedFolders}
                   >
                     <CollapseAllIcon />
                   </button>
@@ -2385,19 +2402,22 @@ export default function App() {
               </>
             )}
           </div>
-          <div
-            className={`workspace-tree${!externalPdfDragActive && dropTargetFolderId === ROOT_FOLDER ? ' is-root-drop-target' : ''}`}
-            onDragLeave={handleWorkspaceDragLeave}
-            onDragOver={handleWorkspaceDragOver}
-            onDrop={handleWorkspaceDrop}
-          >
-            {rootFolders.map(folder => renderFolderNode(folder))}
-            {rootDocs.length > 0 && rootFolders.length > 0 && <div className="sb-subsection">Unfiled</div>}
-            {rootDocs.map(doc => renderDocItem(doc))}
-            {!hasWorkspaceItems && (
-              <div className="sb-empty">{tagFilter ? 'No matching items' : 'Nothing here yet'}</div>
-            )}
-          </div>
+          {!sidebarContentCollapsed && (
+            <div
+              className={`workspace-tree${!externalPdfDragActive && dropTargetFolderId === ROOT_FOLDER ? ' is-root-drop-target' : ''}`}
+              id="workspace-tree"
+              onDragLeave={handleWorkspaceDragLeave}
+              onDragOver={handleWorkspaceDragOver}
+              onDrop={handleWorkspaceDrop}
+            >
+              {rootFolders.map(folder => renderFolderNode(folder))}
+              {rootDocs.length > 0 && rootFolders.length > 0 && <div className="sb-subsection">Unfiled</div>}
+              {rootDocs.map(doc => renderDocItem(doc))}
+              {!hasWorkspaceItems && (
+                <div className="sb-empty">{tagFilter ? 'No matching items' : 'Nothing here yet'}</div>
+              )}
+            </div>
+          )}
 
           {allTags.length > 0 && (
             <>
@@ -2409,17 +2429,19 @@ export default function App() {
                   </button>
                 )}
               </div>
-              <div className="sb-tags">
-                {allTags.map(([t, count]) => {
-                  const active = tagFilter === t
-                  return (
-                    <button key={t} className={`sb-tag${active ? ' active' : ''}`}
-                      onClick={() => filterByTag(t)} type="button">
-                      #{t} · {count}
-                    </button>
-                  )
-                })}
-              </div>
+              {!sidebarContentCollapsed && (
+                <div className="sb-tags" id="sidebar-tags">
+                  {allTags.map(([t, count]) => {
+                    const active = tagFilter === t
+                    return (
+                      <button key={t} className={`sb-tag${active ? ' active' : ''}`}
+                        onClick={() => filterByTag(t)} type="button">
+                        #{t} · {count}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </>
           )}
 
@@ -2443,6 +2465,7 @@ export default function App() {
           <button className="search-btn" onClick={openAccessProfiles} type="button">
             <span className="search-btn-label"><UnlockIcon /> Visitor access</span>
           </button>
+          </div>
 
           {/* Sticky footer */}
           <div className="sidebar-footer">

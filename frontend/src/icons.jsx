@@ -351,6 +351,30 @@ export function FjLineIcon() {
   )
 }
 
+export function FjSquareBracketIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 4H6v16h9"/>
+    </svg>
+  )
+}
+
+export function FjCurlyBracketIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 4C9 4 10 8 7 9.5S11 11 11 12s-7 .8-4 2.5S9 20 15 20"/>
+    </svg>
+  )
+}
+
+export function FjRoundBracketIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M15 4C9 7 9 17 15 20"/>
+    </svg>
+  )
+}
+
 export function FjSectionIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">

@@ -14,7 +14,7 @@
     "node": ">=22.13.0"
   },
   "dependencies": {
-    "pdfjs-dist": "^6.1.200",
+    "pdfjs-dist": "^6.2.108",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-spreadsheet": "^0.10.1",

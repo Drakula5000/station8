@@ -189,6 +189,34 @@ class AccountIsolationTest(unittest.TestCase):
         self.assertEqual(limited.status_code, 429)
         self.assertIn('Retry-After', limited.headers)
 
+    def test_reports_normalize_and_persist_tags(self):
+        self.assertEqual(self.login('owner').status_code, 200)
+        server._save_reports([{
+            'id': 'report-without-tags',
+            'name': 'Imported output',
+            'folder_id': None,
+            'private': None,
+        }])
+
+        listed = self.client.get('/api/reports')
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.get_json(), [{
+            'id': 'report-without-tags',
+            'name': 'Imported output',
+            'folder_id': None,
+            'private': None,
+            'tags': [],
+        }])
+
+        patched = self.client.patch('/api/reports/report-without-tags', json={
+            'tags': '#research, output, #research',
+        })
+        self.assertEqual(patched.status_code, 200)
+        self.assertEqual(patched.get_json()['tags'], ['research', 'output', 'research'])
+
+        reloaded = server._load_reports()
+        self.assertEqual(reloaded[0]['tags'], ['research', 'output', 'research'])
+
     def test_render_environment_provisions_and_updates_secondary_password(self):
         os.environ[server.SECONDARY_ACCOUNT_PASSWORD_ENV] = 'initial account phrase'
         account = server._sync_secondary_account_from_environment()

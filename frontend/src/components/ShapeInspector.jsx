@@ -10,6 +10,10 @@ import {
   DefaultDashStyle,
   ArrowShapeArrowheadStartStyle,
   ArrowShapeArrowheadEndStyle,
+  FONT_FAMILIES,
+  LABEL_FONT_SIZES,
+  TEXT_PROPS,
+  renderHtmlFromRichTextForMeasurement,
 } from 'tldraw'
 import { FjDraftIcon, FjDataIcon, FjAnalysisIcon, FjInsightIcon, CloseIcon } from '../icons'
 import { AURORA_SWATCHES as COLOR_SWATCHES } from '../colors'
@@ -22,6 +26,8 @@ import {
 import { MAGIC_FILL } from '../canvas/magicFill'
 
 const DEFAULT_FILL_OPACITY = 0.4
+const GEO_LABEL_PADDING = 16
+const MIN_GEO_SIZE_WITH_LABEL = 51
 
 const FILL_OPACITY_OPTIONS = [
   { id: 0, label: 'Off', title: 'No fill' },
@@ -100,10 +106,10 @@ const MAX_INSPECTOR_SCALE = 1
 
 // Which control rows apply to which shape types.
 // Keep conservative — show a control only when ALL selected shapes support it.
-const SHAPES_WITH_COLOR   = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 'frame', 'highlight'])
+const SHAPES_WITH_COLOR   = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 'frame', 'highlight', 'bracket'])
 const SHAPES_WITH_FILL    = new Set(['geo'])
 const SHAPES_WITH_TEXT    = new Set(['note', 'geo', 'text', 'arrow'])
-const SHAPES_WITH_SIZE    = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw'])
+const SHAPES_WITH_SIZE    = new Set(['note', 'geo', 'text', 'arrow', 'line', 'draw', 'bracket'])
 const SHAPES_WITH_ALIGN   = new Set(['note', 'geo', 'text'])
 const SHAPES_WITH_CORNERS = new Set(['frame'])
 const SHAPES_WITH_IMAGE_STYLING = new Set(['image'])
@@ -146,6 +152,33 @@ function allRectangleGeoShapes(shapes) {
   return shapes.length > 0 && shapes.every(
     (shape) => shape.type === 'geo' && RECT_CLASS_GEOS.has(shape.props?.geo)
   )
+}
+
+function allGeoShapes(shapes) {
+  return shapes.length > 0 && shapes.every((shape) => shape.type === 'geo')
+}
+
+// Keep the label's present wrapping width, then tighten the box around the
+// measured result. This gives existing boxes an intentional "Fit to text"
+// action without unexpectedly turning paragraphs into very wide single lines.
+function getGeoTextFitProps(editor, shape) {
+  const scale = Number(shape.props?.scale) || 1
+  const currentInnerWidth = Math.max(
+    MIN_GEO_SIZE_WITH_LABEL - GEO_LABEL_PADDING * 2,
+    shape.props.w / scale - GEO_LABEL_PADDING * 2,
+  )
+  const html = renderHtmlFromRichTextForMeasurement(editor, shape.props.richText)
+  const measured = editor.textMeasure.measureHtml(html, {
+    ...TEXT_PROPS,
+    fontFamily: FONT_FAMILIES[shape.props.font],
+    fontSize: LABEL_FONT_SIZES[shape.props.size],
+    maxWidth: currentInnerWidth,
+  })
+  return {
+    w: Math.max(MIN_GEO_SIZE_WITH_LABEL, Math.ceil(measured.w + GEO_LABEL_PADDING * 2)) * scale,
+    h: Math.max(MIN_GEO_SIZE_WITH_LABEL, Math.ceil(measured.h + GEO_LABEL_PADDING * 2)) * scale,
+    growY: 0,
+  }
 }
 
 // Pluck a shared style value across a selection. Returns undefined when
@@ -352,6 +385,7 @@ export const ShapeInspector = track(function ShapeInspector() {
   const showAlign = allShapesMatch(shapes, SHAPES_WITH_ALIGN)
   const showCorners = allShapesMatch(shapes, SHAPES_WITH_CORNERS)
   const showGeoCorners = allRectangleGeoShapes(shapes)
+  const showFitToText = allGeoShapes(shapes)
   const showImageStyling = allShapesMatch(shapes, SHAPES_WITH_IMAGE_STYLING)
   const showTextSizeInput = allShapesMatch(shapes, SHAPES_WITH_FREEFORM_TEXT_SIZE)
   const showLists = allShapesMatch(shapes, SHAPES_WITH_LISTS)
@@ -369,6 +403,7 @@ export const ShapeInspector = track(function ShapeInspector() {
     || showAlign
     || showCorners
     || showGeoCorners
+    || showFitToText
     || showImageStyling
     || showTextSizeInput
     || showLists
@@ -603,6 +638,14 @@ export const ShapeInspector = track(function ShapeInspector() {
   const applyArrowheadStart = (id) => editor.setStyleForSelectedShapes(ArrowShapeArrowheadStartStyle, id)
   const applyArrowheadEnd   = (id) => editor.setStyleForSelectedShapes(ArrowShapeArrowheadEndStyle, id)
   const applyStrokeNone = (none) => updateMeta('strokeNone', none)
+  const fitGeoToText = () => editor.run(() => {
+    editor.markHistoryStoppingPoint('fit_geo_to_text')
+    editor.updateShapes(shapes.map((shape) => ({
+      id: shape.id,
+      type: shape.type,
+      props: getGeoTextFitProps(editor, shape),
+    })))
+  })
   const applyListType = (listType) => {
     editor.updateShapes(
       shapes.map(s => ({
@@ -861,6 +904,20 @@ export const ShapeInspector = track(function ShapeInspector() {
                 type="button"
               >{a.label}</button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {showFitToText && (
+        <div className="insp-row">
+          <div className="insp-label">Box</div>
+          <div className="insp-body">
+            <button
+              className="insp-btn insp-btn-fit"
+              onClick={fitGeoToText}
+              title="Tighten the box around its current text while preserving line wrapping"
+              type="button"
+            >Fit to text</button>
           </div>
         </div>
       )}

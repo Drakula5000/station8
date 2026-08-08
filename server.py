@@ -872,15 +872,18 @@ def _save_gsheets_strict(gsheets):
 
 
 def _load_reports():
-    return _load(REPORTS_FILE, [])
+    folders = _get_workspace().get('folders', [])
+    return [_normalize_doc(report, folders) for report in _load(REPORTS_FILE, []) if isinstance(report, dict)]
 
 
 def _save_reports(reports):
-    _save(REPORTS_FILE, reports)
+    folders = _get_workspace().get('folders', [])
+    _save(REPORTS_FILE, [_normalize_doc(report, folders) for report in reports])
 
 
 def _save_reports_strict(reports):
-    _save_json_strict(REPORTS_FILE, reports)
+    folders = _get_workspace().get('folders', [])
+    _save_json_strict(REPORTS_FILE, [_normalize_doc(report, folders) for report in reports])
 
 
 def _load_report(report_id):
@@ -3014,6 +3017,7 @@ def push_report():
         record = {
             'id': report_id,
             'name': name,
+            'tags': [],
             'folder_id': None,
             'private': None,
             'source_path_hash': path_hash,
@@ -3082,6 +3086,8 @@ def patch_report(report_id):
     for field in ('name', 'folder_id', 'private'):
         if field in body:
             record[field] = body[field]
+    if 'tags' in body:
+        record['tags'] = _parse_tags(body.get('tags'))
     record['updated_at'] = datetime.utcnow().isoformat() + 'Z'
     _save_reports(reports)
     blob = _load_report(report_id) or {}

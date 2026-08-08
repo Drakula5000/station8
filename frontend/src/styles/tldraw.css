@@ -40,6 +40,23 @@
   stroke-width: calc(0.0625rem * var(--tl-scale)) !important;
 }
 
+/* Single brackets are custom SVG shapes. Their paths use currentColor, so
+   keep their palette aligned with the other Aurora canvas shapes. */
+.tldraw-wrap [data-shape-type='bracket'] { color: var(--s8-tl-text-on-light); }
+.tldraw-wrap [data-tl-color='light-violet'][data-shape-type='bracket'],
+.tldraw-wrap [data-tl-color='yellow'][data-shape-type='bracket'] { color: var(--s8-tl-lavender); }
+.tldraw-wrap [data-tl-color='light-red'][data-shape-type='bracket'] { color: var(--s8-tl-pink); }
+.tldraw-wrap [data-tl-color='light-blue'][data-shape-type='bracket'],
+.tldraw-wrap [data-tl-color='blue'][data-shape-type='bracket'] { color: var(--s8-tl-blue); }
+.tldraw-wrap [data-tl-color='light-green'][data-shape-type='bracket'],
+.tldraw-wrap [data-tl-color='green'][data-shape-type='bracket'] { color: var(--s8-tl-teal); }
+.tldraw-wrap [data-tl-color='orange'][data-shape-type='bracket'] { color: var(--s8-tl-orange); }
+.tldraw-wrap [data-tl-color='violet'][data-shape-type='bracket'] { color: var(--s8-tl-violet); }
+.tldraw-wrap [data-tl-color='red'][data-shape-type='bracket'] { color: var(--s8-tl-pink-strong); }
+.tldraw-wrap [data-tl-color='grey'][data-shape-type='bracket'] { color: var(--s8-tl-grey); }
+.tldraw-wrap [data-tl-color='white'][data-shape-type='bracket'] { color: var(--s8-tl-white); }
+html[data-mode='dark'] .tldraw-wrap [data-tl-color='black'][data-shape-type='bracket'] { color: var(--s8-tl-white); }
+
 /* Flat sticky corners — tldraw's default 0.0625rem gets scaled up by --tl-scale on
    large notes, reading as a rounded card. Aurora (and every other theme) wants
    a crisp rectangular sticky. */

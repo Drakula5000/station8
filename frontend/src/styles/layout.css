@@ -69,6 +69,25 @@
 .sidebar-action:hover { background: var(--s8-active); }
 .sidebar-action:disabled { cursor: progress; opacity: 0.5; }
 
+/* Workspace and Tags can grow without hiding lower folders or controls.
+   The header and Drive/footer stay fixed; this middle lane is the only
+   scroll region in the owner sidebar. */
+.sidebar-scroll {
+  flex: 1;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.sidebar-scroll > * { flex-shrink: 0; }
+
 /* Sticky footer — Connect Google as a content row, theme/logout as compact utility strip */
 .sidebar-footer {
   flex-shrink: 0;

@@ -10,6 +10,7 @@ import {
   FjTriangleIcon, FjHexagonIcon, FjStarIcon, FjOvalIcon, FjTrapezoidIcon,
   FjArrowRightIcon, FjArrowLeftIcon, FjArrowUpIcon, FjArrowDownIcon,
   FjXBoxIcon, FjCheckBoxIcon, FjCloudIcon, FjHeartIcon,
+  FjSquareBracketIcon, FjCurlyBracketIcon, FjRoundBracketIcon,
   FjMarkerIcon,
 } from '../icons'
 import { AURORA_SWATCHES, STICKY_SWATCHES, HIGHLIGHT_SWATCHES } from '../colors'
@@ -46,7 +47,17 @@ const GEO_SHAPES = [
   { id: 'check-box',   Icon: FjCheckBoxIcon },
 ]
 
-const SHAPE_ICON_MAP = Object.fromEntries([...GEO_SHAPES.map(s => [s.id, s.Icon]), ['line', FjLineIcon]])
+const BRACKET_SHAPES = [
+  { id: 'bracket-square', Icon: FjSquareBracketIcon, bracket: 'square', title: 'Square bracket [' },
+  { id: 'bracket-curly',  Icon: FjCurlyBracketIcon,  bracket: 'curly',  title: 'Curly bracket {' },
+  { id: 'bracket-round',  Icon: FjRoundBracketIcon,  bracket: 'round',  title: 'Round bracket (' },
+]
+
+const SHAPE_ICON_MAP = Object.fromEntries([
+  ...GEO_SHAPES.map(s => [s.id, s.Icon]),
+  ...BRACKET_SHAPES.map(s => [s.id, s.Icon]),
+  ['line', FjLineIcon],
+])
 
 export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox, onToolChange }) {
   const editor = useEditor()
@@ -338,6 +349,10 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
     setLastShape(shape)
     if (shape === 'line') {
       editor.setCurrentTool('line')
+    } else if (shape.startsWith('bracket-')) {
+      const bracket = BRACKET_SHAPES.find((item) => item.id === shape)?.bracket || 'square'
+      try { editor.setStyleForNextShapes(DefaultDashStyle, 'solid') } catch { /* no-op */ }
+      editor.setCurrentTool('bracket', { bracket })
     } else {
       try { editor.setStyleForNextShapes(GeoShapeGeoStyle, shape) } catch { /* no-op */ }
       try {
@@ -457,7 +472,7 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
       <div className="shape-btn-wrap">
         <div className={`fj-split ${shapePickerOpen ? 'open' : ''}`}>
           <button
-            className={`fj-tool fj-tool-main ${['geo', 'line'].includes(currentTool) ? 'active' : ''}`}
+            className={`fj-tool fj-tool-main ${['geo', 'line', 'bracket'].includes(currentTool) ? 'active' : ''}`}
             onClick={() => setShape(lastShape)}
             onPointerDown={stopToolbarPointer}
             title="Shapes"
@@ -475,10 +490,14 @@ export const FjToolbar = track(function FjToolbar({ toolInfoRef, onOpenLightbox,
         {shapePickerOpen && (
           <div className="shape-picker" onClick={e => e.stopPropagation()}>
             {GEO_SHAPES.map((s) => (
-              <button key={s.id} className="shape-option" onClick={() => setShape(s.id)} title={s.id} type="button"><s.Icon /></button>
+              <button key={s.id} className="shape-option" onClick={() => setShape(s.id)} title={s.title || s.id} type="button"><s.Icon /></button>
             ))}
             <div className="shape-picker-sep" />
             <button className="shape-option shape-option-line" onClick={() => setShape('line')} title="line" type="button"><FjLineIcon /></button>
+            <div className="shape-picker-sep" />
+            {BRACKET_SHAPES.map((s) => (
+              <button key={s.id} className="shape-option" onClick={() => setShape(s.id)} title={s.title} type="button"><s.Icon /></button>
+            ))}
           </div>
         )}
       </div>

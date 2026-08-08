@@ -12,7 +12,7 @@ export const STROKE_STYLE_OPTIONS = [
   { id: 'solid', label: 'Solid', shortLabel: 'Solid', title: 'Solid stroke', icon: 'dash-solid' },
 ]
 
-export const SHAPES_WITH_STROKE_STYLE = new Set(['geo', 'arrow', 'line', 'draw'])
+export const SHAPES_WITH_STROKE_STYLE = new Set(['geo', 'arrow', 'line', 'draw', 'bracket'])
 
 // Rectangle-class geos that support real corner radius (rendered via CSS
 // border-radius + outline on the wrapper, see GeoCornerStyles in ShapeStyles).
