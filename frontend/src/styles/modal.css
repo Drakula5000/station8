@@ -961,3 +961,27 @@
   white-space: nowrap;
 }
 .pill-mode-btn:hover { background: var(--s8-active); }
+
+/* Dismissible status/error notices. Dismissal hides presentation only; the
+   underlying import/OCR promise continues independently in App state. */
+.station-notice { padding-right: 2.35rem !important; }
+.station-notice-dismiss {
+  position: absolute;
+  right: 0.55rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1.35rem;
+  height: 1.35rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.station-notice-dismiss:hover { opacity: 1; }

@@ -1,4 +1,4 @@
-const API = import.meta.env?.VITE_API_URL || ''
+import { API } from './api.js'
 
 export function classifyDroppedFile(file) {
   const name = String(file?.name || '').toLowerCase()

@@ -37,7 +37,7 @@ export function connectorPointMap(points) {
   }))
 }
 
-function normalizeStoredPointMap(points) {
+export function normalizeStoredPointMap(points) {
   if (Array.isArray(points)) return connectorPointMap(points)
   if (!points || typeof points !== 'object') return null
 
@@ -57,6 +57,19 @@ function normalizeStoredPointMap(points) {
   return entries.length >= 2 ? Object.fromEntries(entries) : null
 }
 
+
+export function normalizeStoredConnectorProps(props = {}) {
+  const points = normalizeStoredPointMap(props?.points)
+  if (!points) return null
+  const rawScale = Number(props?.scale)
+  return {
+    ...props,
+    points,
+    spline: props?.spline || 'cubic',
+    scale: Number.isFinite(rawScale) ? rawScale : 1,
+  }
+}
+
 // Normalize every historical Station Connector snapshot, not only the first
 // array-based version. Several intermediate builds already stored a point map
 // but did not carry LineShapeUtil's spline/scale fields, which left those old
@@ -70,17 +83,11 @@ export function migrateStoredStationConnectors(snapshot) {
   for (const [key, record] of Object.entries(store)) {
     if (record?.typeName !== 'shape' || record?.type !== 's8-connector') continue
 
-    const points = normalizeStoredPointMap(record.props?.points)
-    if (!points) continue
-    const rawScale = Number(record.props?.scale)
+    const props = normalizeStoredConnectorProps(record.props)
+    if (!props) continue
     nextStore[key] = {
       ...record,
-      props: {
-        ...record.props,
-        points,
-        spline: record.props?.spline || 'cubic',
-        scale: Number.isFinite(rawScale) ? rawScale : 1,
-      },
+      props,
     }
     changed = true
   }

@@ -14,6 +14,8 @@ from functools import wraps
 from html.parser import HTMLParser as _StdlibHTMLParser
 from threading import RLock
 
+from storage_layer import JsonStore
+
 from flask import Flask, g, has_app_context, has_request_context, jsonify, request, send_from_directory, session, redirect
 from cryptography.fernet import Fernet, InvalidToken
 from itsdangerous import URLSafeSerializer, BadSignature
@@ -228,112 +230,39 @@ def _storage_location(path):
     return local_path, remote_id
 
 
-def _load(path, default):
-    local_path, file_id = _storage_location(path)
-    # Try Supabase first if configured
-    if supabase:
-        try:
-            response = supabase.table(SUPABASE_TABLE).select('data').eq('id', file_id).execute()
-            if response.data:
-                return response.data[0]['data']
-        except Exception as exc:
-            print(f"Supabase load failed for {path}: {exc}", flush=True)
+_json_store = JsonStore(
+    supabase_getter=lambda: supabase,
+    table_name=SUPABASE_TABLE,
+    storage_location=_storage_location,
+)
 
-    # Fallback to local file
-    if not os.path.exists(local_path):
-        return default
-    with open(local_path, 'r') as f:
-        return json.load(f)
+
+def _load(path, default):
+    return _json_store.load(path, default)
 
 
 def _load_local_json(path, default):
-    local_path, _file_id = _storage_location(path)
-    if not os.path.exists(local_path):
-        return default
-    try:
-        with open(local_path, 'r') as f:
-            return json.load(f)
-    except Exception:
-        return default
+    return _json_store.load_local(path, default)
 
 
 def _save(path, data):
-    _local_path, file_id = _storage_location(path)
-    # Save to Supabase first if configured
-    if supabase:
-        try:
-            supabase.table(SUPABASE_TABLE).upsert({
-                'id': file_id,
-                'data': data
-            }).execute()
-        except Exception as exc:
-            print(f"Supabase save failed for {path}: {exc}", flush=True)
-
-    # Always save to local file as well (as a cache/backup). Requests for a
-    # newly-created workspace arrive in parallel, so a direct write can expose
-    # a zero-length/partial JSON file to a sibling request.
-    _write_local_json_atomic(path, data)
+    # In production a configured Supabase row is authoritative. Do not report a
+    # successful mutation and then allow the next read to resurrect an older
+    # remote value. Tests may use deliberately incomplete Supabase doubles and
+    # therefore retain the historical local-fallback behavior.
+    _json_store.save(path, data, require_remote=not app.config.get('TESTING', False))
 
 
 def _write_local_json_atomic(path, data):
-    """Write JSON without exposing a half-written cache file to another request."""
-    path, _file_id = _storage_location(path)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp_path = f'{path}.tmp-{uuid.uuid4().hex}'
-    try:
-        with open(tmp_path, 'w') as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp_path, path)
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    _json_store.write_local_atomic(path, data)
 
 
 def _save_json_strict(path, data):
-    """Persist critical metadata or raise instead of silently falling back.
-
-    General document saves intentionally tolerate a transient Supabase failure
-    and retain a local cache. A completed PDF points at an object in a private
-    bucket, so acknowledging it without durable metadata would strand the
-    object after Render restarts. PDF create/delete flows use this strict path.
-    """
-    _local_path, file_id = _storage_location(path)
-    _write_local_json_atomic(path, data)
-    if supabase:
-        # Do the fallible remote operation last. Once it succeeds there are no
-        # remaining steps that can turn the write into a false success.
-        supabase.table(SUPABASE_TABLE).upsert({'id': file_id, 'data': data}).execute()
+    _json_store.save(path, data, require_remote=True)
 
 
 def _delete_json_blob(path, *, strict=False):
-    """Delete a JSON-storage row and its local cache copy.
-
-    Existing document deletion code historically removed only local files.
-    PDF deletion uses this helper so extracted text cannot remain orphaned in
-    Supabase. Callers can request strict error propagation when user-visible
-    deletion must not report a false success.
-    """
-    local_path, file_id = _storage_location(path)
-    remote_error = None
-    local_error = None
-    if supabase:
-        try:
-            supabase.table(SUPABASE_TABLE).delete().eq('id', file_id).execute()
-        except Exception as exc:
-            remote_error = exc
-            print(f'Supabase delete failed for {file_id}: {exc}', flush=True)
-    if remote_error is None or not strict:
-        try:
-            if os.path.exists(local_path):
-                os.remove(local_path)
-        except OSError as exc:
-            local_error = exc
-            print(f'Local JSON delete failed for {file_id}: {exc}', flush=True)
-            if strict:
-                raise
-    if remote_error is not None and strict:
-        raise remote_error
-    return remote_error is None and local_error is None
+    return _json_store.delete(path, strict=strict)
 
 
 def _board_file(item_id):
